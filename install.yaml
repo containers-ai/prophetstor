@@ -1,0 +1,111 @@
+---
+- hosts: localhost
+  tasks:
+    - name: Includ user vars
+      include_vars: "user_variable.yml"
+    - name: Includ default vars
+      include_vars: "default_variable.yml"
+    
+
+    # Get operator file list
+    - name: Get operator file list
+      uri:
+        url: "https://api.github.com/repos/containers-ai/federatorai-operator/contents/deploy/upstream?ref={{ federatorai_version }}"
+        method: GET
+        return_content: yes
+      register: operator_result
+    - set_fact:
+        operator_list: []
+    - name: Create operator yamls file list
+      set_fact:
+        operator_list: "{{ operator_list+ 
+               [
+                 item
+               ] 
+            }}"
+      loop: "{{ operator_result | community.general.json_query('json[*].name') }}"
+    - name: debug
+      debug: msg={{ operator_list }}
+    
+    # Create version folder
+    - name: ansible create directory example
+      file:
+        path: "{{ default_yaml_files_base_path }}/{{ federatorai_version }}"
+        state: directory
+    
+    # Download all files
+    - name: Download all yamls
+      get_url:
+        url: "https://raw.githubusercontent.com/containers-ai/federatorai-operator/{{ federatorai_version }}/deploy/upstream/{{ item }}"
+        dest: "{{ default_yaml_files_base_path }}/{{ federatorai_version }}/{{ item }}"
+        mode: 0755
+        force: yes
+      loop: "{{ operator_list }}"
+
+    # Replace info in 03 yaml
+    - name: Find 03 files
+      find:
+        paths: "{{ default_yaml_files_base_path }}/{{ federatorai_version }}"
+        patterns: "^03-.*.yaml$"
+        file_type: "file"
+        use_regex: yes
+      register: yaml_3_name
+    - name: Replace tag number in 03 yaml
+      replace: 
+        dest="{{ yaml_3_name.files[0].path }}" 
+        regexp=":latest$"
+        replace=":{{ federatorai_version }}"
+    - name: Replace repo info in 03 yaml 
+      replace: 
+        dest="{{ yaml_3_name.files[0].path }}" 
+        regexp="quay.io/prophetstor"
+        replace="{{ image_url_prefix }}"
+      when: (image_url_prefix is defined) and (image_url_prefix|length > 0)
+
+    # Replace namespace in 00 yaml
+    - name: Find 00 files
+      find:
+        paths: "{{ default_yaml_files_base_path }}/{{ federatorai_version }}"
+        patterns: "^00-.*.yaml$"
+        file_type: "file"
+        use_regex: yes
+      register: yaml_0_name
+    - name: Replace ns in 00 yaml
+      replace: 
+        path: "{{ yaml_0_name.files[0].path }}"
+        regexp: "name: federatorai" 
+        replace: "name: {{ installed_namespace }}"
+
+    # Replace namespace in other yaml
+    - name: Find other yaml files
+      find:
+        paths: "{{ default_yaml_files_base_path }}/{{ federatorai_version }}"
+        patterns: "^0[5-7]-.*.yaml$|^03-.*.yaml$|^01-.*.yaml$"
+        file_type: "file"
+        use_regex: yes
+      register: yaml_others_name
+    - name: Replace ns in other yamls
+      replace: 
+        path: "{{ item.path }}"
+        regexp: "namespace: federatorai" 
+        replace: "namespace: {{ installed_namespace }}"
+      loop: "{{ yaml_others_name.files }}"
+    
+
+    ## Need to handle upgrade (ex: kill federatorai-operator deployment )
+
+
+    # Apply yamls
+    # Replace namespace in other yaml
+    - name: Find all yaml files
+      find:
+        paths: "{{ default_yaml_files_base_path }}/{{ federatorai_version }}"
+        patterns: "^0[0-7]-.*.yaml$"
+        file_type: "file"
+        use_regex: yes
+      register: yaml_all_names
+    - name: Apply operator yamls
+      community.kubernetes.k8s:
+        state: present
+        src: "{{ item.path }}"
+      loop: "{{ yaml_all_names.files| sort(attribute='path') }}"

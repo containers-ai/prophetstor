@@ -1,0 +1,10 @@
+ansible-galaxy collection install community.general
+
+#ansible-galaxy collection install community.general
+Process install dependency map
+Starting collection install process
+Installing 'community.general:1.2.0' to '/Users/Hungo/.ansible/collections/ansible_collections/community/general'
+Installing 'google.cloud:1.0.1' to '/Users/Hungo/.ansible/collections/ansible_collections/google/cloud'
+Installing 'ansible.posix:1.1.1' to '/Users/Hungo/.ansible/collections/ansible_collections/ansible/posix'
+Installing 'ansible.netcommon:1.3.0' to '/Users/Hungo/.ansible/collections/ansible_collections/ansible/netcommon'
+Installing 'community.kubernetes:1.1.1' to '/Users/Hungo/.ansible/collections/ansible_collections/community/kubernetes'

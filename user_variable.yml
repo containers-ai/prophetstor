@@ -1,0 +1,6 @@
+federatorai_version: v4.4.1202
+installed_namespace: fedxx
+
+# Private repository URL
+# Comment out this variable if you don't need it.
+image_url_prefix: "repo.prophetservice.com/prophetstor"
