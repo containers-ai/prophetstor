@@ -100,3 +100,16 @@
     state: present
     src: "{{ item.path }}"
   loop: "{{ yaml_all_names.files| sort(attribute='path') }}"
+
+# Check Federator.ai operator
+- name: Wait for Federator.ai operator pod become created
+  shell: "kubectl get po --namespace={{ installed_namespace }} --output=jsonpath='{.items[*].metadata.name}'"
+  register: operator_pod_created
+  until: item in operator_pod_created.stdout
+  retries: 30
+  delay: 30
+  with_items:
+    - federatorai-operator
+
+- name: Wait for Federator.ai pod become ready
+  shell: "kubectl wait -n={{ installed_namespace }} --for=condition=Ready pods --all --timeout=900s"
