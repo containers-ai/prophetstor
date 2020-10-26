@@ -1,6 +1,25 @@
+###### Federator.ai env
 federatorai_version: v4.4.1202
 installed_namespace: fedxx
+# Choose "y" for OpenShift 3.11 or later
+openshift_env: "n"
+# Set up pod resource requirement (limits & requests)
+enable_resource_requirement: "y"
 
-# Private repository URL
-# Comment out this variable if you don't need it.
+###### Private repository URL
 image_url_prefix: "repo.prophetservice.com/prophetstor"
+
+
+###### ephemeral or persistent
+storage_type: ephemeral
+
+###### Below info will be used when storage_type is persistent
+###### 10 = 10GB
+log_storage_size: 10
+data_storage_size: 10
+influxdb_storage_size: 100
+storage_class_name: "scname"
+
+
+###### Below info will be used when Federator.ai is installed in Kubernetes env
+expose_dashboard_and_rest_api_services: "y"

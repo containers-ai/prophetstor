@@ -46,7 +46,7 @@
     dest="{{ yaml_3_name.files[0].path }}" 
     regexp=":latest$"
     replace=":{{ federatorai_version }}"
-- name: Replace repo info in 03 yaml 
+- name: Replace repo info in 03 yaml if necessary
   replace: 
     dest="{{ yaml_3_name.files[0].path }}" 
     regexp="quay.io/prophetstor"
@@ -87,7 +87,6 @@
 
 
 # Apply yamls
-# Replace namespace in other yaml
 - name: Find all yaml files
   find:
     paths: "{{ default_yaml_files_base_path }}/{{ federatorai_version }}"
@@ -101,7 +100,7 @@
     src: "{{ item.path }}"
   loop: "{{ yaml_all_names.files| sort(attribute='path') }}"
 
-# Check Federator.ai operator
+# Check if Federator.ai operator pod is created
 - name: Wait for Federator.ai operator pod become created
   shell: "kubectl get po --namespace={{ installed_namespace }} --output=jsonpath='{.items[*].metadata.name}'"
   register: operator_pod_created
@@ -111,5 +110,6 @@
   with_items:
     - federatorai-operator
 
+# Check operator pod status
 - name: Wait for Federator.ai pod become ready
   shell: "kubectl wait -n={{ installed_namespace }} --for=condition=Ready pods --all --timeout=900s"

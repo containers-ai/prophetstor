@@ -8,8 +8,8 @@
     # - name: Install operator
     #   include: install_operator.yaml
 
-    
-
+    - name: Install alamedaservice
+      include: install_alamedaservice.yaml
 
     # - name: Find all yaml files
     #   find:
