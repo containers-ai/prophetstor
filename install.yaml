@@ -3,46 +3,12 @@
   tasks:
     - name: Includ user vars
       include_vars: "user_variable.yml"
+
     - name: Includ default vars
       include_vars: "default_variable.yml"
-    # - name: Install operator
-    #   include: install_operator.yaml
+
+    - name: Install operator
+      include: install_operator.yaml
 
     - name: Install alamedaservice
       include: install_alamedaservice.yaml
-
-    # - name: Find all yaml files
-    #   find:
-    #     paths: "{{ default_yaml_files_base_path }}/{{ federatorai_version }}"
-    #     patterns: "^0[0-7]-.*.yaml$"
-    #     file_type: "file"
-    #     use_regex: yes
-    #   register: yaml_all_names
-    # - name: Apply operator yamls
-    #   community.kubernetes.k8s:
-    #     state: present
-    #     src: "{{ item.path }}"
-    #   loop: "{{ yaml_all_names.files| sort(attribute='path') }}"
-
-    # - name: Wait for all control-plane pods become created
-    #   shell: "kubectl get po --namespace={{ installed_namespace }} --output=jsonpath='{.items[*].metadata.name}'"
-    #   register: pods_created
-    #   until: item in pods_created.stdout
-    #   retries: 10
-    #   delay: 30
-    #   with_items:
-    #     - federatorai-dashboard-frontend
-    #     - alameda-influxdb
-    #     - alameda-datahub
-    #     - alameda-operator
-    #     - alameda-recommender
-    #     - alameda-analyzer
-    #     - alameda-ai-dispatcher
-    #     - alameda-notifier
-    #     - alameda-rabbitmq
-
-    # - name: Wait for control-plane pods become ready
-    #   shell: "kubectl wait -n={{ installed_namespace }} --for=condition=Ready pods --all --timeout=900s"
-    #   register: control_plane_pods_ready
-
-    # - debug: var=control_plane_pods_ready.stdout_lines

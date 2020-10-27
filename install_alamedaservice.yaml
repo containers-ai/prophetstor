@@ -228,3 +228,6 @@
 # Check pods status
 - name: Wait for Federator.ai pod become ready
   shell: "kubectl wait -n={{ installed_namespace }} --for=condition=Ready pods --all --timeout=900s"
+  register: all_pods_ready
+
+- debug: var=all_pods_ready.stdout_lines

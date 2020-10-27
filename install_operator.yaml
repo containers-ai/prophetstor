@@ -5,8 +5,10 @@
     method: GET
     return_content: yes
   register: operator_result
+
 - set_fact:
     operator_list: []
+
 - name: Create operator yamls file list
   set_fact:
     operator_list: "{{ operator_list+ 
@@ -15,6 +17,7 @@
             ] 
         }}"
   loop: "{{ operator_result | community.general.json_query('json[*].name') }}"
+
 - name: debug
   debug: msg={{ operator_list }}
 
@@ -41,6 +44,37 @@
     file_type: "file"
     use_regex: yes
   register: yaml_3_name
+
+- name: Add resource requirements info in 03 file if necessary
+  blockinfile:
+    dest: "{{ yaml_3_name.files[0].path }}"
+    marker: "## {mark} resource requirements for 03 init container"
+    insertafter: "name: upgrader"
+    block: |2
+                resources:
+                  limits:
+                    cpu: 4000m
+                    memory: 8000Mi
+                  requests:
+                    cpu: 100m
+                    memory: 100Mi
+  when: (enable_resource_requirement == "y")
+
+- name: Add resource requirements info in 03 file if necessary
+  blockinfile:
+    dest: "{{ yaml_3_name.files[0].path }}"
+    marker: "## {mark} resource requirements for 03 container"
+    insertafter: "name: federatorai-operator"
+    block: |2
+                resources:
+                  limits:
+                    cpu: 4000m
+                    memory: 8000Mi
+                  requests:
+                    cpu: 100m
+                    memory: 100Mi
+  when: (enable_resource_requirement == "y")
+
 - name: Replace tag number in 03 yaml
   replace: 
     dest="{{ yaml_3_name.files[0].path }}" 
@@ -113,3 +147,6 @@
 # Check operator pod status
 - name: Wait for Federator.ai pod become ready
   shell: "kubectl wait -n={{ installed_namespace }} --for=condition=Ready pods --all --timeout=900s"
+  register: operator_pods_ready
+
+- debug: var=operator_pods_ready.stdout_lines
