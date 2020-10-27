@@ -1,5 +1,5 @@
 ###### Federator.ai env
-federatorai_version: v4.4.1202
+federatorai_version: v4.4.1203
 installed_namespace: fedxx
 # Choose "y" for OpenShift 3.11 or later
 openshift_env: "n"

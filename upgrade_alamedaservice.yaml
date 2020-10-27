@@ -1,0 +1,21 @@
+# Check if previous Federator.ai installed
+- name: patch
+  community.kubernetes.k8s:
+    #merge_type: merge
+    #state: present
+    definition:
+      apiVersion: federatorai.containers.ai/v1alpha1
+      kind: AlamedaService
+      metadata:
+        name: "{{ previous_alamedaservice_name }}"
+        namespace: "{{ previous_alameda_namespace }}"
+      spec: 
+        version: v4.4.1203
+
+- name: Pause for 10 seconds.
+  pause:
+    seconds: 10
+
+- include: check_pods_status.yaml
+
+        

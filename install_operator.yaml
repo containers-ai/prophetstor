@@ -116,9 +116,21 @@
     replace: "namespace: {{ installed_namespace }}"
   loop: "{{ yaml_others_name.files }}"
 
+# For upgrade - delete old federatorai-operator deployment before apply new yaml(s)
+- name: Get federatorai-operator deployment
+  shell: "kubectl -n {{previous_alameda_namespace}} get deployment federatorai-operator"
+  register: get_old_deployment
+  ignore_errors: yes
+  when: (previous_alameda_namespace != "")
 
-## Need to handle upgrade (ex: kill federatorai-operator deployment )
+- debug:
+    var: get_old_deployment.rc
 
+- name: Delete old federatorai-operator deployment if necessary
+  shell: "kubectl -n {{previous_alameda_namespace}} delete deployment federatorai-operator"
+  register: delete_old_deployment
+  failed_when: delete_old_deployment.rc != 0
+  when: (previous_alameda_namespace != "") and (get_old_deployment.rc == 0)
 
 # Apply yamls
 - name: Find all yaml files
@@ -133,6 +145,10 @@
     state: present
     src: "{{ item.path }}"
   loop: "{{ yaml_all_names.files| sort(attribute='path') }}"
+
+- name: Pause for 10 seconds.
+  pause:
+    seconds: 10
 
 # Check if Federator.ai operator pod is created
 - name: Wait for Federator.ai operator pod become created

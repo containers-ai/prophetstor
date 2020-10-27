@@ -1,0 +1,38 @@
+# - name: Search for all Pods
+#   community.kubernetes.k8s_info:
+#     kind: Pod
+#     namespace: "{{ installed_namespace }}"
+#     # delay: 2
+#     # retries: 50
+#   register: output_info
+#     #until: output_info.resources | json_query('[*].status.conditions[?reason==`NewReplicaSetAvailable`][].status') | select ('match','True') | list | length == 1
+
+- debug:
+    var: output_info.resources | json_query('[*].status.conditions')
+- name: Wait for Federator.ai operator pod become created
+  shell: "kubectl get po --namespace={{ installed_namespace }} --output=jsonpath='{.items[*].metadata.name}'"
+  register: operator_pod_created
+  until: item in operator_pod_created.stdout
+  retries: 30
+  delay: 30
+  with_items:
+    - federatorai-operator
+    - alameda-ai-dispatcher
+    - alameda-analyzer
+    - alameda-influxdb
+    - alameda-datahub
+    - alameda-operator
+    - alameda-rabbitmq
+    - alameda-recommender
+    - federatorai-dashboard-backend
+    - federatorai-dashboard-frontend
+    - fedemeter-influxd
+    - fedemeter-api
+    - federatorai-rest
+
+# Check pods status
+- name: Wait for Federator.ai pod become ready
+  shell: "kubectl wait -n={{ installed_namespace }} --for=condition=Ready pods --all --timeout=900s"
+  register: all_pods_ready
+
+- debug: var=all_pods_ready.stdout_lines

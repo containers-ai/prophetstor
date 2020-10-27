@@ -1,0 +1,16 @@
+# Check if previous Federator.ai installed
+- name: Find previous installed Federator.ai namespace
+  shell: "kubectl get pods --all-namespaces |grep 'alameda-ai-'|awk '{print $1}'|head -1"
+  ignore_errors: yes
+  register: check_previous_ns
+
+- set_fact:
+    previous_alameda_namespace: "{% if check_previous_ns.stdout != '' %}{{ check_previous_ns.stdout }}{% else %}{{ '' }}{% endif %}"
+
+- name: Find previous installed Federator.ai alamedaservice name
+  shell: "kubectl get alamedaservice -n {{previous_alameda_namespace}} -o custom-columns=NAME:.metadata.name 2>/dev/null|grep -v NAME|head -1"
+  ignore_errors: yes
+  register: check_previous_alamedaservice
+
+- set_fact:
+    previous_alamedaservice_name: "{% if check_previous_alamedaservice.stdout != '' %}{{ check_previous_alamedaservice.stdout }}{% else %}{{ '' }}{% endif %}"
