@@ -23,3 +23,6 @@
 
     - name: Setup data adapter secret
       include_tasks: setup_data_adapter_secret.yaml
+
+    - name: Setup cluster alamedascaler
+      include_tasks: setup_cluster_alamedascaler.yaml

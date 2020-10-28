@@ -16,3 +16,5 @@ dashboard_frontend_node_port: "31012"
 
 data_adapter_secret_name: "federatorai-data-adapter-secret"
 data_adapter_deploy_name: "federatorai-data-adapter"
+
+default_cluster_alamedascaler_name: "clusterscaler"

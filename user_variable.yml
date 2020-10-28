@@ -28,3 +28,7 @@ expose_dashboard_and_rest_api_services: "y"
 need_update_secret: "y"
 datadog_api_key: "7c8475872d32sxc155b893a8328778c7"
 datadog_application_key: "a4c3f723fwb747800d3dcb7c325fcb08a0e55e3d"
+
+###### Add alamedascaler for monitoring cluster only (datadog)
+apply_cluster_alamedascaler: "y"
+dd_cluster_name: "cluster-17-135" # value of env DD_CLUSTER_NAME set in datadog cluster agent
