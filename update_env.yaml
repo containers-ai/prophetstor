@@ -47,12 +47,12 @@
     namespace: "{{ installed_namespace }}"
     replicas: 0
     wait_timeout: 120
-  when: (api_changed.changed == "true") or (app_changed.changed == "true")
+  when: (api_changed.changed == true) or (app_changed.changed == true)
 
 - name: Pause for 10 seconds.
   pause:
     seconds: 10
-  when: (api_changed.changed == "true") or (app_changed.changed == "true")
+  when: (api_changed.changed == true) or (app_changed.changed == true)
 
 - name: Scale up deployment
   community.kubernetes.k8s_scale:
@@ -62,7 +62,7 @@
     namespace: "{{ installed_namespace }}"
     replicas: 1
     wait_timeout: 120
-  when: (api_changed.changed == "true") or (app_changed.changed == "true")
+  when: (api_changed.changed == true) or (app_changed.changed == true)
 
 - include: check_pods_status.yaml
-  when: (api_changed.changed == "true") or (app_changed.changed == "true")
+  when: (api_changed.changed == true) or (app_changed.changed == true)
