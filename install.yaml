@@ -21,5 +21,5 @@
       include: install_alamedaservice.yaml
       when: (previous_alamedaservice_name == "")
 
-    - name: Update environment
-      include_tasks: update_env.yaml
+    - name: Setup data adapter secret
+      include_tasks: setup_data_adapter_secret.yaml
