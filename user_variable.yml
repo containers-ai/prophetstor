@@ -23,3 +23,8 @@ storage_class_name: "scname"
 
 ###### Below info will be used when Federator.ai is installed in Kubernetes env
 expose_dashboard_and_rest_api_services: "y"
+
+###### data adatper secret (datadog)
+need_update_secret: "y"
+datadog_api_key: "7c8475872d32sxc155b893a8328778c7"
+datadog_application_key: "a4c3f723fwb747800d3dcb7c325fcb08a0e55e3d"

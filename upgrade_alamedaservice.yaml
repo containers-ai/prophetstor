@@ -1,8 +1,7 @@
 # Check if previous Federator.ai installed
-- name: patch
+- name: Patch alamedaservice
   community.kubernetes.k8s:
-    #merge_type: merge
-    #state: present
+    merge_type: merge
     definition:
       apiVersion: federatorai.containers.ai/v1alpha1
       kind: AlamedaService

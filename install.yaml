@@ -7,7 +7,7 @@
     - name: Includ default vars
       include_vars: "default_variable.yml"
 
-    - name: Check env
+    - name: Check environment
       include_tasks: check_env.yaml
 
     - name: Install operator
@@ -20,3 +20,6 @@
     - name: Install alamedaservice
       include: install_alamedaservice.yaml
       when: (previous_alamedaservice_name == "")
+
+    - name: Update environment
+      include_tasks: update_env.yaml
