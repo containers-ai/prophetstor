@@ -1,4 +1,9 @@
 # Check if previous Federator.ai installed
+- name: Get Nodes (connection test)
+  community.kubernetes.k8s_info:
+    kind: Node
+  register: pod_list
+
 - name: Find previous installed Federator.ai namespace
   shell: "kubectl get pods --all-namespaces |grep 'alameda-ai-'|awk '{print $1}'|head -1"
   ignore_errors: yes
