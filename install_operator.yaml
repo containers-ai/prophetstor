@@ -85,7 +85,7 @@
     dest="{{ yaml_3_name.files[0].path }}" 
     regexp="quay.io/prophetstor"
     replace="{{ image_url_prefix }}"
-  when: (image_url_prefix is defined) and (image_url_prefix|length > 0)
+  when: (enable_private_repo == "y") and (image_url_prefix != "")
 
 # Replace namespace in 00 yaml
 - name: Find 00 files

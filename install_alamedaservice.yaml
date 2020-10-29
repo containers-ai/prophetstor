@@ -33,7 +33,7 @@
     path: "{{ default_yaml_files_base_path }}/{{ federatorai_version }}/{{ alamedaservice_sample_file }}" 
     line: "  imageLocation: {{ image_url_prefix }}"
     insertbefore: "version: latest"
-  when: (image_url_prefix is defined) and (image_url_prefix|length > 0)
+  when: (enable_private_repo == "y") and (image_url_prefix != "")
 
 # Replace version info in alamedaservice file
 - name: Replace version info in alamedaservice file
