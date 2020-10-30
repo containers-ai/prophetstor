@@ -1,35 +1,37 @@
 ###### Federator.ai env
-federatorai_version: v4.4.1203
-installed_namespace: fedxx
+federatorai_version: ""
+installed_namespace: "federatorai"
+
 # Choose "y" for OpenShift 3.11 or later
-openshift_env: "n"
+openshift_env: "" # y/n
+
 # Set up pod resource requirement (limits & requests)
-enable_resource_requirement: "y"
+enable_resource_requirement: "n" # y/n
 
 ###### Private repository URL
-enable_private_repo: "y"
-image_url_prefix: "repo.prophetservice.com/prophetstor"
+enable_private_repo: "n" # y/n
+image_url_prefix: ""
 
 
 ###### ephemeral or persistent
-storage_type: ephemeral
+storage_type: "" # ephemeral/persistent
 
 ###### Below info will be used when storage_type is persistent
 ###### 10 = 10GB
 log_storage_size: 10
 data_storage_size: 10
 influxdb_storage_size: 100
-storage_class_name: "scname"
+storage_class_name: ""
 
 
 ###### Below info will be used when Federator.ai is installed in Kubernetes env
-expose_dashboard_and_rest_api_services: "y"
+expose_dashboard_and_rest_api_services: "" # y/n
 
 ###### data adatper secret (datadog)
-need_update_secret: "y"
-datadog_api_key: "7c8475872d32sxc155b893a8328778c7"
-datadog_application_key: "a4c3f723fwb747800d3dcb7c325fcb08a0e55e3d"
+need_update_secret: "" # y/n
+datadog_api_key: ""
+datadog_application_key: ""
 
 ###### Add alamedascaler for monitoring cluster only (datadog)
-apply_cluster_alamedascaler: "y"
-dd_cluster_name: "cluster-17-135" # value of env DD_CLUSTER_NAME set in datadog cluster agent
+apply_cluster_alamedascaler: "" # y/n
+dd_cluster_name: "" # value of env DD_CLUSTER_NAME set in datadog cluster agent
