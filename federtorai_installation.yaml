@@ -7,12 +7,15 @@
     - name: Includ default vars
       include_vars: "default_variable.yaml"
 
+    - name: Check all variables
+      include: check_variables.yaml
+
     - name: Check environment
-      include_tasks: check_env.yaml
+      include: check_env.yaml
 
     - name: Install operator
       include: install_operator.yaml
-    
+
     - name: Print msg
       debug:
         msg: "Install Federator.ai operator {{ federatorai_version }} successfully!"
@@ -30,7 +33,7 @@
 
     - name: Setup cluster alamedascaler
       include_tasks: setup_cluster_alamedascaler.yaml
-    
+
     - name: Print msg
       debug:
         msg: "Install Federator.ai {{ federatorai_version }} successfully!"
