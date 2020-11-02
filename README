@@ -1,10 +1,30 @@
-ansible-galaxy collection install community.general
+###########################
+# For Ansible Control Node
+###########################
 
-#ansible-galaxy collection install community.general
-Process install dependency map
-Starting collection install process
-Installing 'community.general:1.2.0' to '/Users/Hungo/.ansible/collections/ansible_collections/community/general'
-Installing 'google.cloud:1.0.1' to '/Users/Hungo/.ansible/collections/ansible_collections/google/cloud'
-Installing 'ansible.posix:1.1.1' to '/Users/Hungo/.ansible/collections/ansible_collections/ansible/posix'
-Installing 'ansible.netcommon:1.3.0' to '/Users/Hungo/.ansible/collections/ansible_collections/ansible/netcommon'
-Installing 'community.kubernetes:1.1.1' to '/Users/Hungo/.ansible/collections/ansible_collections/community/kubernetes'
+Prerequisite
+1. Install Ansible
+https://docs.ansible.com/ansible/latest/installation_guide/intro_installation.html
+
+2. Install collection “community.kubernetes“
+root@node1740:~# ansible-galaxy collection install community.kubernetes
+
+3. Install python & pip
+https://www.python.org/downloads/
+
+4. Install OpenShift python client
+root@node1740:~# pip3 install openshift
+
+5. Download Ansible playbook for Federator.ai
+
+6. Modify user_variable.yml file for customizing needed info.
+
+###########################
+# Run Federator.ai playbook
+###########################
+
+1. Clone project
+2. Get into Ansible playbook folder
+root@node1740:~# cd ansible_for_federatorai
+3. Run Ansible playbook
+root@node1740:~/ansible_for_federatorai# ansible-playbook install.yaml
