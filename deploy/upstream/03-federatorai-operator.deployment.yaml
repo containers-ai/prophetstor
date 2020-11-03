@@ -1,0 +1,71 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: federatorai-operator
+  namespace: federatorai
+  labels:
+    name: federatorai-operator
+    app: Federator.ai
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      name: federatorai-operator
+  template:
+    metadata:
+      labels:
+        name: federatorai-operator
+        app: Federator.ai
+    spec:
+      serviceAccountName: federatorai-operator
+      initContainers:
+        - name: upgrader
+          image: quay.io/prophetstor/federatorai-operator-ubi:latest
+          command:
+          - federatorai-operator
+          args:
+          - "upgrade"
+          env:
+            - name: NAMESPACE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: FEDERATORAI_OPERATOR_INFLUXDB_ADDRESS
+              value: ""
+            - name: FEDERATORAI_OPERATOR_INFLUXDB_SERVICE_NAME
+              value: alameda-influxdb
+            - name: FEDERATORAI_OPERATOR_INFLUXDB_SERVICE_PORT
+              value: "8086"
+            - name: FEDERATORAI_OPERATOR_INFLUXDB_USERNAME
+              value: admin
+            - name: FEDERATORAI_OPERATOR_INFLUXDB_PASSWORD
+              value: adminpass
+          volumeMounts:
+          - mountPath: /var/log/alameda
+            name: log
+      containers:
+        - name: federatorai-operator
+          # Replace this with the built image name
+          image: quay.io/prophetstor/federatorai-operator-ubi:latest
+          imagePullPolicy: IfNotPresent
+          command:
+          - federatorai-operator
+          env:
+            - name: NAMESPACE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: OPERATOR_NAME
+              value: "federatorai-operator"
+            - name: DISABLE_OPERAND_RESOURCE_PROTECTION
+              value: "false"
+          volumeMounts:
+          - mountPath: /var/log/alameda
+            name: log
+      volumes:
+        - name: log
+          emptyDir: {}
