@@ -115,7 +115,12 @@ download_files()
         scriptarray=("${scriptarray[@]}" "federatorai-setup-for-datadog.sh")
     fi
 
-    # TODO: Need to refine this rule once 4.3.datadog (4.3.1 br) will replace 4.3.datadog (4.3 br)
+    branch_float="$(echo $branch|cut -d 'v' -f2)"
+
+    if (( $(echo "$branch_float >= 4.4" |bc -l) )); then
+        scriptarray=("${scriptarray[@]}" "cluster-property-setup.sh")
+    fi
+
     re='^[0-9]+$'
     # patch_num contains only number
     if [[ $patch_num =~ $re ]] ; then
@@ -133,14 +138,14 @@ download_files()
     echo -e "\n$(tput setaf 6)Downloading scripts ...$(tput sgr 0)"
     for file_name in "${scriptarray[@]}"
     do
-        if ! curl -sL --fail https://raw.githubusercontent.com/containers-ai/federatorai-operator/${tag_number}/deploy/${file_name} -O; then
+        if ! curl -sL --fail https://raw.githubusercontent.com/containers-ai/federator.ai/${tag_number}/deploy/${file_name} -O; then
             echo -e "\n$(tput setaf 1)Abort, download file $file_name failed!!!$(tput sgr 0)"
             echo "Please check tag name and network"
             exit 1
         fi
     done
     # Download launcher itself.
-    if ! curl -sL --fail https://raw.githubusercontent.com/containers-ai/federatorai-operator/master/deploy/federatorai-launcher.sh -O; then
+    if ! curl -sL --fail https://raw.githubusercontent.com/containers-ai/federator.ai/master/deploy/federatorai-launcher.sh -O; then
         echo -e "\n$(tput setaf 1)Abort, download federatorai-launcher.sh failed!!!$(tput sgr 0)"
         echo "Please check network"
         exit 1
@@ -156,7 +161,7 @@ download_files()
     mkdir -p $yamls_folder
     cd $yamls_folder
     echo -e "\n$(tput setaf 6)Downloading Federator.ai CR yamls ...$(tput sgr 0)"
-    if ! curl -sL --fail https://raw.githubusercontent.com/containers-ai/federatorai-operator/${tag_number}/example/${alamedaservice_example} -O; then
+    if ! curl -sL --fail https://raw.githubusercontent.com/containers-ai/federator.ai/${tag_number}/example/${alamedaservice_example} -O; then
         echo -e "\n$(tput setaf 1)Abort, download alamedaservice sample yaml file failed!!!$(tput sgr 0)"
         echo "Please check tag name and network"
         exit 2
@@ -164,21 +169,21 @@ download_files()
 
     for file_name in "${yamlarray[@]}"
     do
-        if ! curl -sL --fail https://raw.githubusercontent.com/containers-ai/alameda/${tag_number}/example/samples/nginx/${file_name} -O; then
+        if ! curl -sL --fail https://raw.githubusercontent.com/containers-ai/federator.ai/${tag_number}/example/${file_name} -O; then
             echo -e "\n$(tput setaf 1)Abort, download $file_name file failed!!!$(tput sgr 0)"
             echo "Please check tag name and network"
             exit 3
         fi
     done
 
-    if [ "$branch" = "v4.3" ] || [ "$branch" = "v4.5" ]; then
+    if [ "$branch" = "v4.3" ] || [ "$branch" = "v4.4" ]; then
         # Three kinds of alamedascaler
         alamedascaler_filename="alamedascaler.yaml"
         src_pool=( "kafka" "nginx" "redis" )
 
         for pool in "${src_pool[@]}"
         do
-            if ! curl -sL --fail https://raw.githubusercontent.com/containers-ai/alameda/${tag_number}/example/samples/${pool}/${alamedascaler_filename} -O; then
+            if ! curl -sL --fail https://raw.githubusercontent.com/containers-ai/federator.ai/${tag_number}/example/${pool}/${alamedascaler_filename} -O; then
                 echo -e "\n$(tput setaf 1)Abort, download $alamedascaler_filename sample file from $pool folder failed!!!$(tput sgr 0)"
                 exit 3
             fi
@@ -196,7 +201,7 @@ download_files()
     mkdir -p $operator_folder
     cd $operator_folder
     echo -e "\n$(tput setaf 6)Downloading Federator.ai operator yamls ...$(tput sgr 0)"
-    operator_lists=`curl --silent https://api.github.com/repos/containers-ai/federatorai-operator/contents/deploy/upstream?ref=${tag_number} 2>&1|grep "\"name\":"|cut -d ':' -f2|cut -d '"' -f2`
+    operator_lists=`curl --silent https://api.github.com/repos/containers-ai/federator.ai/contents/deploy/upstream?ref=${tag_number} 2>&1|grep "\"name\":"|cut -d ':' -f2|cut -d '"' -f2`
     if [ "$operator_lists" = "" ]; then
         echo -e "\n$(tput setaf 1)Abort, download Federator.ai operator yaml list failed!!!$(tput sgr 0)"
         echo "Please check tag name and network"
@@ -205,7 +210,7 @@ download_files()
 
     for file in `echo $operator_lists`
     do
-        if ! curl -sL --fail https://raw.githubusercontent.com/containers-ai/federatorai-operator/${tag_number}/deploy/upstream/${file} -O; then
+        if ! curl -sL --fail https://raw.githubusercontent.com/containers-ai/federator.ai/${tag_number}/deploy/upstream/${file} -O; then
             echo -e "\n$(tput setaf 1)Abort, download file failed!!!$(tput sgr 0)"
             echo "Please check tag name and network"
             exit 1
