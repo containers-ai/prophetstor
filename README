@@ -17,7 +17,7 @@ root@node1740:~# pip3 install openshift
 
 5. Download Ansible playbook for Federator.ai
 
-6. Modify user_variable.yml file for customizing needed info.
+6. Modify user_variable.yaml file for customizing needed info.
 
 ###########################
 # Run Federator.ai playbook
@@ -25,6 +25,8 @@ root@node1740:~# pip3 install openshift
 
 1. Clone project
 2. Get into Ansible playbook folder
-root@node1740:~# cd ansible_for_federatorai
-3. Run Ansible playbook
-root@node1740:~/ansible_for_federatorai# ansible-playbook install.yaml
+root@node1740:~# cd deploy/ansible_for_federatorai
+3. Export K8S_AUTH_KUBECONFIG to specify kubeconfig file path for Ansible collection (community.kubernetes) to use.
+root@node1740:~# export K8S_AUTH_KUBECONFIG=/root/.kube/config.135
+4. Run Ansible playbook
+root@node1740:~/ansible_for_federatorai# ansible-playbook federtorai_installation.yaml
