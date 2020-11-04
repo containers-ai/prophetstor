@@ -13,7 +13,7 @@
     kind: Pod
     namespace: "{{ installed_namespace }}"
   register: ready_list
-  until: ready_list |to_json | from_json| json_query("resources[?status.containerStatuses[0].ready].status.containerStatuses[0].ready")|length > pod_number
+  until: ready_list |to_json | from_json| json_query("resources[?status.containerStatuses[0].ready == `true`].status.containerStatuses[0].ready")|length > pod_number and ready_list |to_json | from_json| json_query("resources[?status.containerStatuses[0].ready == `false`].status.containerStatuses[0].ready")|length == 0
   retries: 90
   delay: 10
 
