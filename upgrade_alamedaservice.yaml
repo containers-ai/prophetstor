@@ -9,12 +9,11 @@
         name: "{{ previous_alamedaservice_name }}"
         namespace: "{{ previous_alameda_namespace }}"
       spec: 
-        version: v4.4.1203
+        version: "{{ federatorai_version }}"
 
-- name: Pause for 10 seconds.
-  pause:
-    seconds: 10
-
-- include: check_pods_status.yaml
+- name: Check Federator.ai operator pod become ready
+  vars:
+      pod_number: 16
+  include: check_pods_status.yaml
 
         

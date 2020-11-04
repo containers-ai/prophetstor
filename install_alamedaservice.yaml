@@ -203,8 +203,7 @@
     state: present
     src: "{{ default_yaml_files_base_path }}/{{ federatorai_version }}/{{ alamedaservice_sample_file }}" 
 
-- name: Pause for 10 seconds.
-  pause:
-    seconds: 10
-
-- include: check_pods_status.yaml
+- name: Check Federator.ai pods become ready
+  vars:
+      pod_number: 16
+  include: check_pods_status.yaml
