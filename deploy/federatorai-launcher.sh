@@ -26,7 +26,7 @@ get_build_tag()
     while [ "$pass" != "y" ]
     do
         read -r -p "$(tput setaf 2)Please input Federator.ai version tag (e.g., v4.2.755): $(tput sgr 0) " tag_number </dev/tty
-        if [[ $tag_number =~ ^[v][[:digit:]]+\.[[:digit:]]+\.[0-9a-z\-]+$ ]]; then
+        if [[ $tag_number =~ ^[v][[:digit:]]+\.[[:digit:]]+\.[0-9a-z\+\-]+$ ]]; then
             pass="y"
         fi
         if [ "$pass" != "y" ]; then
