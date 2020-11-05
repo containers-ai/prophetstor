@@ -119,6 +119,11 @@ download_files()
 
     if (( $(echo "$branch_float >= 4.4" |bc -l) )); then
         scriptarray=("${scriptarray[@]}" "cluster-property-setup.sh")
+    else
+        # branch less than v4.4
+        echo -e "\n$(tput setaf 1)Abort! Please use previous version of $0$(tput sgr 0)"
+        echo -e "\n$(tput setaf 6)curl https://raw.githubusercontent.com/containers-ai/federatorai-operator/master/deploy/federatorai-launcher.sh |bash $(tput sgr 0)"
+        exit 3
     fi
 
     re='^[0-9]+$'
