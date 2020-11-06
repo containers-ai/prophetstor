@@ -1,0 +1,21 @@
+- name: Get CRD list
+  community.kubernetes.k8s_info:
+    kind: CustomResourceDefinition
+  register: crd_list
+
+- name: Get CRD list related to Federator.ai
+  set_fact:
+    federatorai_crd_list: "{{ crd_list |to_json | from_json| json_query(\"resources[?contains(metadata.name, 'containers.ai')].metadata.name\") }}"
+
+- name: debug - federatorai_crd_list
+  debug:
+    var: federatorai_crd_list
+
+- name: Delete CRD
+  community.kubernetes.k8s:
+    state: absent
+    kind: CustomResourceDefinition
+    name: item
+  loop: "{{ federatorai_crd_list }}"
+
+

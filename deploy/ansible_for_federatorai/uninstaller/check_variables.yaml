@@ -1,0 +1,8 @@
+# Check all mandatory variables are not empty
+
+- name: Check all mandatory variables are not empty
+  fail: msg="Certain variable inside user_variable.yaml {{ item }} is empty"
+  when: item == ""
+  loop:
+  # default variables
+    - "{{ default_yaml_files_base_path }}"

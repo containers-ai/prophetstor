@@ -1,0 +1,28 @@
+---
+- hosts: localhost
+  tasks:
+    - name: Includ default vars
+      include_vars: "default_variable.yaml"
+
+    - name: Check all variables
+      include: check_variables.yaml
+
+    - name: Get previous environment info
+      include: get_previous_info.yaml
+
+    - name: Delete alameda-gc clusterrole 
+      include: remove_clusterrole.yaml
+    
+    - debug:
+        var: previous_alameda_namespace
+  
+    - name: Delete Federator.ai operator
+      include: remove_operator.yaml
+      when: previous_alameda_namespace != ""
+
+    - name: Delete CRD
+      include: remove_crd.yaml
+
+    - name: Print msg
+      debug:
+        msg: "Uninstall Federator.ai successfully!"
