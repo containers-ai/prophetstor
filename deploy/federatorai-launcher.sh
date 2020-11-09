@@ -23,14 +23,24 @@ leave_prog()
 
 get_build_tag()
 {
+    # read tag_number from ALAMEDASERVICE_FILE_PATH
+    if [ "${ALAMEDASERVICE_FILE_PATH}" != "" ]; then
+        tag_number=`grep "^[[:space:]]*version:[[:space:]]" $ALAMEDASERVICE_FILE_PATH|grep -v 'version: ""'|awk -F'[^ \t]' '{print length($1), $0}'|sort -k1 -n|head -1|awk '{print $3}'`
+        if [ "$tag_number" = "" ]; then
+            echo -e "\n$(tput setaf 1)Error! Can't parse the version info from alamedaservice file ($ALAMEDASERVICE_FILE_PATH).$(tput sgr 0)"
+            exit
+        fi
+    fi
     while [ "$pass" != "y" ]
     do
-        read -r -p "$(tput setaf 2)Please input Federator.ai version tag (e.g., v4.2.755): $(tput sgr 0) " tag_number </dev/tty
+        [ "${tag_number}" = "" ] && read -r -p "$(tput setaf 2)Please input Federator.ai version tag (e.g., v4.2.755): $(tput sgr 0) " tag_number </dev/tty
         if [[ $tag_number =~ ^[v][[:digit:]]+\.[[:digit:]]+\.[0-9a-z\-]+$ ]]; then
             pass="y"
         fi
         if [ "$pass" != "y" ]; then
-            echo -e "\n$(tput setaf 1)Error! The tag_number should follow the correct format (e.g., v4.2.755).$(tput sgr 0)"
+            echo -e "\n$(tput setaf 1)Error! The version tag should follow the correct format (e.g., v4.2.755).$(tput sgr 0)"
+            [ "${ALAMEDASERVICE_FILE_PATH}" != "" ] && exit 1
+            tag_number=""
         fi
     done
 
