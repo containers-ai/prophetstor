@@ -660,6 +660,9 @@ if [ "$ALAMEDASERVICE_FILE_PATH" != "" ]; then
         echo -e "\n$(tput setaf 1)Error! alamedaservice file ($ALAMEDASERVICE_FILE_PATH) is not readable.$(tput sgr 0)"
         exit
     fi
+    # read value for RELATED_IMAGE_URL_PREFIX
+    RELATED_IMAGE_URL_PREFIX="`grep '^  imageLocation: ' ${ALAMEDASERVICE_FILE_PATH} | awk '{print $2}'`"
+    [ "${RELATED_IMAGE_URL_PREFIX}" = "" ] && export ${RELATED_IMAGE_URL_PREFIX}
 fi
 
 kubectl version|grep -q "^Server"

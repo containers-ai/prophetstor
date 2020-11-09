@@ -251,8 +251,34 @@ wait_for_cluster_status_data_ready()
     echo "Duration wait_for_cluster_status_data_ready = $duration" >> $debug_log
 }
 
+refine_preloader_configmap()
+{
+    local _do_sed=0
+    [ "${PRELOADER_GRANUALARITY}" != "" ] && _do_sed=1 && sed_opt_1="s|granularity *=.*|granularity = ${PRELOADER_GRANUALARITY}|g"
+    [ "${PRELOADER_PRELOAD_COUNT}" != "" ] && _do_sed=1 && sed_opt_2="s| preload_count *=.*| preload_count = ${PRELOADER_PRELOAD_COUNT}|g"
+    if [ "${_do_sed}" = "1" ]; then
+        wait_until_pods_ready 600 30 $install_namespace 5
+        kubectl -n $install_namespace get cm federatorai-agent-preloader-config -o yaml \
+          | sed "
+${sed_opt_1}
+${sed_opt_2}
+" \
+          | kubectl -n $install_namespace apply -f -
+        if [ "${PIPESTATUS[0]}" != "0" -o "${PIPESTATUS[1]}" != "0" -o "${PIPESTATUS[2]}" != "0" ]; then
+            echo -e "\n$(tput setaf 1)Error! Failed in refining preloader configuration.$(tput sgr 0)"
+            exit 1
+        fi
+        # restart preloader pod
+        get_current_preloader_name
+        [ "${current_preloader_pod_name}" != "" ] && kubectl -n $install_namespace delete pod $current_preloader_pod_name  --wait=true
+    fi
+}
+
 run_preloader_command()
 {
+    # Refine configmap before running preloader
+    refine_preloader_configmap
+
     # check env is ready
     wait_for_cluster_status_data_ready
 
@@ -942,15 +968,21 @@ cleanup_influxdb_preloader_related_contents()
     
     measurement_list="`kubectl exec $influxdb_pod_name -n $install_namespace -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database alameda_metric -execute "show measurements" 2>&1 |tail -n+4`"
     echo "db=alameda_metric"
+    # prepare sql command
+    m_list=""
     for measurement in `echo $measurement_list`
     do
         if [ "$measurement" = "grafana_config" ]; then
             continue
         fi
-        echo "clean up measurement: $measurement"
-        kubectl exec $influxdb_pod_name -n $install_namespace -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database alameda_metric -execute "drop measurement $measurement"
+        m_list="${m_list} ${measurement}"
+        sql_cmd="${sql_cmd};drop measurement $measurement"
     done
-    
+    if [ "${m_list}" != "" ]; then
+        echo "cleaning up measurements: ${m_list}"
+        kubectl exec $influxdb_pod_name -n $install_namespace -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database alameda_metric -execute "${sql_cmd}" | grep -v "^$"
+    fi
+
     echo "Done."
     end=`date +%s`
     duration=$((end-start))
@@ -1023,7 +1055,7 @@ switch_alameda_executor_in_alamedaservice()
         leave_prog
         exit 8
     elif [ "$current_executor_pod_name" != "" ] && [ "$switch_option" = "off" ]; then
-        echo -e "\n$(tput setaf 1)ERROR! Executor pod still exists.$(tput sgr 0)"
+        echo -e "\n$(tput setaf 1)ERROR! Executor pod still exists as $current_executor_pod_name.$(tput sgr 0)"
         leave_prog
         exit 8
     fi
@@ -1148,17 +1180,6 @@ disable_preloader_in_alamedaservice()
     end=`date +%s`
     duration=$((end-start))
     echo "Duration disable_preloader_in_alamedaservice = $duration" >> $debug_log
-}
-
-get_cluster_name()
-{
-    cluster_name=`kubectl get cm cluster-info -n default -o yaml 2>/dev/null|grep uid|awk '{print $2}'`
-    if [ "$cluster_name" = "" ];then
-        cluster_name=`kubectl get cm cluster-info -n kube-public -o yaml 2>/dev/null|grep uid|awk '{print $2}'`
-        if [ "$cluster_name" = "" ];then
-            cluster_name=`kubectl get cm cluster-info -n kube-service-catalog’ -o yaml 2>/dev/null|grep uid|awk '{print $2}'`
-        fi
-    fi
 }
 
 clean_environment_operations()
