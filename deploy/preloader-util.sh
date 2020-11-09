@@ -415,23 +415,36 @@ patch_data_adapter_for_preloader()
     only_mode="$1"
     start=`date +%s`
     echo -e "\n$(tput setaf 6)Updating data adapter (collect metadata only mode to $only_mode) for preloader...$(tput sgr 0)"
-    kubectl -n $install_namespace get configmap federatorai-data-adapter-config -o yaml | grep -E -q "^[[:blank:]]+collect_metadata_only = $only_mode"
-    if [ "$?" != "0" ]; then
-        if [ "$only_mode" = "true" ]; then
-            # Set collect_metadata_only = true
-            kubectl -n $install_namespace get configmap federatorai-data-adapter-config -o yaml |sed "s/collect_metadata_only = false/collect_metadata_only = true/g" |kubectl apply -f -
-        else
-            # Set collect_metadata_only = false
-            kubectl -n $install_namespace get configmap federatorai-data-adapter-config -o yaml |sed "s/collect_metadata_only = true/collect_metadata_only = false/g" |kubectl apply -f -
-        fi
 
+    kubectl get alamedaservice $alamedaservice_name -n $install_namespace -o yaml|grep "\- name: COLLECT_METADATA_ONLY" -A1|grep -q $only_mode
+    if [ "$?" != "0" ]; then
+        kubectl patch alamedaservice $alamedaservice_name -n $install_namespace --type merge --patch "{\"spec\":{\"federatoraiDataAdapter\":{\"env\":[{\"name\": \"COLLECT_METADATA_ONLY\",\"value\": \"$only_mode\"}]}}}"
         if [ "$?" != "0" ]; then
             echo -e "\n$(tput setaf 1)Error in updating data adapter to collect_metadata_only = \"$only_mode\" mode.$(tput sgr 0)"
             leave_prog
             exit 8
         fi
+        echo ""
         wait_until_pods_ready 600 30 $install_namespace 5
     fi
+
+    # kubectl -n $install_namespace get configmap federatorai-data-adapter-config -o yaml | grep -E -q "^[[:blank:]]+collect_metadata_only = $only_mode"
+    # if [ "$?" != "0" ]; then
+    #     if [ "$only_mode" = "true" ]; then
+    #         # Set collect_metadata_only = true
+    #         kubectl -n $install_namespace get configmap federatorai-data-adapter-config -o yaml |sed "s/collect_metadata_only = false/collect_metadata_only = true/g" |kubectl apply -f -
+    #     else
+    #         # Set collect_metadata_only = false
+    #         kubectl -n $install_namespace get configmap federatorai-data-adapter-config -o yaml |sed "s/collect_metadata_only = true/collect_metadata_only = false/g" |kubectl apply -f -
+    #     fi
+
+    #     if [ "$?" != "0" ]; then
+    #         echo -e "\n$(tput setaf 1)Error in updating data adapter to collect_metadata_only = \"$only_mode\" mode.$(tput sgr 0)"
+    #         leave_prog
+    #         exit 8
+    #     fi
+    #     wait_until_pods_ready 600 30 $install_namespace 5
+    # fi
 
     echo "Done."
     end=`date +%s`
