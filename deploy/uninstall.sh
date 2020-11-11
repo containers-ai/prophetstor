@@ -51,12 +51,12 @@ parse_version(){
 
 download_operator_yaml_if_needed()
 {
-    operator_files=`curl --silent https://api.github.com/repos/containers-ai/federator.ai/contents/deploy/upstream?ref=${tag_number} 2>&1|grep "\"name\":"|cut -d ':' -f2|cut -d '"' -f2`
+    operator_files=`curl --silent https://api.github.com/repos/containers-ai/prophetstor/contents/deploy/upstream?ref=${tag_number} 2>&1|grep "\"name\":"|cut -d ':' -f2|cut -d '"' -f2`
 
     for file in `echo $operator_files`
     do
         echo "Downloading file $file ..."
-        if ! curl -sL --fail https://raw.githubusercontent.com/containers-ai/federator.ai/${tag_number}/deploy/upstream/${file} -O; then
+        if ! curl -sL --fail https://raw.githubusercontent.com/containers-ai/prophetstor/${tag_number}/deploy/upstream/${file} -O; then
             echo -e "\n$(tput setaf 1)Abort, download file failed!!!$(tput sgr 0)"
             echo "Please check tag name and network"
             exit 1
