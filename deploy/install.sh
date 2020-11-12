@@ -514,7 +514,7 @@ download_cr_files()
 
     for file_name in "${cr_files[@]}"
     do
-        if ! curl -sL --fail https://raw.githubusercontent.com/containers-ai/prophetstor/${tag_number}/example/${file_name} -O; then
+        if ! curl -sL --fail https://raw.githubusercontent.com/containers-ai/prophetstor/${tag_number}/deploy/example/${file_name} -O; then
             echo -e "\n$(tput setaf 1)Abort, download $file_name sample file failed!!!$(tput sgr 0)"
             exit 3
         fi
@@ -530,7 +530,7 @@ download_alamedascaler_files()
 
     for pool in "${src_pool[@]}"
     do
-        if ! curl -sL --fail https://raw.githubusercontent.com/containers-ai/prophetstor/${tag_number}/example/${pool}/${alamedascaler_filename} -O; then
+        if ! curl -sL --fail https://raw.githubusercontent.com/containers-ai/prophetstor/${tag_number}/deploy/example/${pool}/${alamedascaler_filename} -O; then
             echo -e "\n$(tput setaf 1)Abort, download $alamedascaler_filename sample file from $pool folder failed!!!$(tput sgr 0)"
             exit 3
         fi
@@ -897,7 +897,7 @@ if [ "$ALAMEDASERVICE_FILE_PATH" = "" ]; then
     alamedaservice_example="alamedaservice_sample.yaml"
     if [ "$offline_mode_enabled" != "y" ]; then
         echo -e "\nDownloading Federator.ai CR sample files ..."
-        if ! curl -sL --fail https://raw.githubusercontent.com/containers-ai/prophetstor/${tag_number}/example/${alamedaservice_example} -O; then
+        if ! curl -sL --fail https://raw.githubusercontent.com/containers-ai/prophetstor/${tag_number}/deploy/example/${alamedaservice_example} -O; then
             echo -e "\n$(tput setaf 1)Abort, download alamedaservice sample file failed!!!$(tput sgr 0)"
             exit 2
         fi
