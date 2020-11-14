@@ -1,7 +1,7 @@
 # Get operator file list
 - name: Get operator file list
   uri:
-    url: "https://api.github.com/repos/containers-ai/federatorai-operator/contents/deploy/upstream?ref={{ federatorai_version }}"
+    url: "https://api.github.com/repos/containers-ai/prophetstor/contents/deploy/upstream?ref={{ federatorai_version }}"
     method: GET
     return_content: yes
   register: operator_result
@@ -30,7 +30,7 @@
 # Download all files
 - name: Download all yamls
   get_url:
-    url: "https://raw.githubusercontent.com/containers-ai/federatorai-operator/{{ federatorai_version }}/deploy/upstream/{{ item }}"
+    url: "https://raw.githubusercontent.com/containers-ai/prophetstor/{{ federatorai_version }}/deploy/upstream/{{ item }}"
     dest: "{{ default_yaml_files_base_path }}/{{ federatorai_version }}/{{ item }}"
     mode: 0755
     force: yes

@@ -1,7 +1,7 @@
 # Download alamedaservice file
 - name: Download alamedaservice file
   get_url:
-    url: "https://raw.githubusercontent.com/containers-ai/federatorai-operator/{{ federatorai_version }}/example/{{ alamedaservice_sample_file }}"
+    url: "https://raw.githubusercontent.com/containers-ai/prophetstor/{{ federatorai_version }}/deploy/example/{{ alamedaservice_sample_file }}"
     dest: "{{ default_yaml_files_base_path }}/{{ federatorai_version }}/{{ alamedaservice_sample_file }}"
     mode: 0755
     force: yes
@@ -9,7 +9,7 @@
 # Download cr files
 - name: Download cr files
   get_url:
-    url: "https://raw.githubusercontent.com/containers-ai/alameda/{{ federatorai_version }}/example/samples/nginx/{{ item }}"
+    url: "https://raw.githubusercontent.com/containers-ai/prophetstor/{{ federatorai_version }}/deploy/example/{{ item }}"
     dest: "{{ default_yaml_files_base_path }}/{{ federatorai_version }}/{{ item }}"
     mode: 0755
     force: yes
@@ -18,7 +18,7 @@
 # Download cr files
 - name: Download alamedascaler files
   get_url:
-    url: "https://raw.githubusercontent.com/containers-ai/alameda/{{ federatorai_version }}/example/samples/{{ item.pool }}/{{ item.name }}"
+    url: "https://raw.githubusercontent.com/containers-ai/prophetstor/{{ federatorai_version }}/deploy/example/{{ item.pool }}/{{ item.name }}"
     dest: "{{ default_yaml_files_base_path }}/{{ federatorai_version }}/{{ item.dest }}"
     mode: 0755
     force: yes
