@@ -175,7 +175,7 @@ download_files()
     mkdir -p $yamls_folder
     cd $yamls_folder
     echo -e "\n$(tput setaf 6)Downloading Federator.ai CR yamls ...$(tput sgr 0)"
-    if ! curl -sL --fail https://raw.githubusercontent.com/containers-ai/prophetstor/${tag_number}/example/${alamedaservice_example} -O; then
+    if ! curl -sL --fail https://raw.githubusercontent.com/containers-ai/prophetstor/${tag_number}/deploy/example/${alamedaservice_example} -O; then
         echo -e "\n$(tput setaf 1)Abort, download alamedaservice sample yaml file failed!!!$(tput sgr 0)"
         echo "Please check tag name and network"
         exit 2
@@ -183,7 +183,7 @@ download_files()
 
     for file_name in "${yamlarray[@]}"
     do
-        if ! curl -sL --fail https://raw.githubusercontent.com/containers-ai/prophetstor/${tag_number}/example/${file_name} -O; then
+        if ! curl -sL --fail https://raw.githubusercontent.com/containers-ai/prophetstor/${tag_number}/deploy/example/${file_name} -O; then
             echo -e "\n$(tput setaf 1)Abort, download $file_name file failed!!!$(tput sgr 0)"
             echo "Please check tag name and network"
             exit 3
@@ -197,7 +197,7 @@ download_files()
 
         for pool in "${src_pool[@]}"
         do
-            if ! curl -sL --fail https://raw.githubusercontent.com/containers-ai/prophetstor/${tag_number}/example/${pool}/${alamedascaler_filename} -O; then
+            if ! curl -sL --fail https://raw.githubusercontent.com/containers-ai/prophetstor/${tag_number}/deploy/example/${pool}/${alamedascaler_filename} -O; then
                 echo -e "\n$(tput setaf 1)Abort, download $alamedascaler_filename sample file from $pool folder failed!!!$(tput sgr 0)"
                 exit 3
             fi
