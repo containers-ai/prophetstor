@@ -842,7 +842,6 @@ spec:
                 memory: "10Mi"
         ports:
         - containerPort: ${nginx_port}
-      serviceAccount: ${nginx_name}
       serviceAccountName: ${nginx_name}
 ---
 apiVersion: rbac.authorization.k8s.io/v1

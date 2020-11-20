@@ -27,7 +27,6 @@ spec:
       labels:
         app: nginx
     spec:
-      serviceAccount: nginx
       containers:
       - name: nginx
         image: nginx:latest        

@@ -42,7 +42,6 @@ spec:
       labels:
         app: redis
     spec:
-      serviceAccount: redis
       containers:
       - name: redis
         image: redis:latest        
