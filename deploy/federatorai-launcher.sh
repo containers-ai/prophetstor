@@ -164,6 +164,54 @@ download_files()
         echo "Please check network"
         exit 1
     fi
+
+    # Download Ansible folders.
+    ansible_folder_name="ansible_for_federatorai"
+    mkdir -p $ansible_folder_name
+
+    # Installer
+    ansible_install_file_lists=`curl --silent https://api.github.com/repos/containers-ai/prophetstor/contents/deploy/${ansible_folder_name}?ref=${tag_number} 2>&1|grep "\"name\":"|cut -d ':' -f2|cut -d '"' -f2|grep -v "uninstaller"`
+    if [ "$ansible_install_file_lists" = "" ]; then
+        echo -e "\n$(tput setaf 3)Warning, download Federator.ai ansible install files list failed!!!$(tput sgr 0)"
+    fi
+
+    for file in `echo $ansible_install_file_lists`
+    do
+        if ! curl -sL --fail https://raw.githubusercontent.com/containers-ai/prophetstor/${tag_number}/deploy/${ansible_folder_name}/${file} -o $ansible_folder_name/${file}; then
+            echo -e "\n$(tput setaf 3)Warning, download Federator.ai ansible install file \"${file}\" failed!!!$(tput sgr 0)"
+        fi
+    done
+
+    # Uninstaller
+    mkdir -p $ansible_folder_name/uninstaller
+    ansible_uninstall_file_lists=`curl --silent https://api.github.com/repos/containers-ai/prophetstor/contents/deploy/${ansible_folder_name}/uninstaller?ref=${tag_number} 2>&1|grep "\"name\":"|cut -d ':' -f2|cut -d '"' -f2`
+    if [ "$ansible_uninstall_file_lists" = "" ]; then
+        echo -e "\n$(tput setaf 3)Warning, download Federator.ai ansible uninstall files list failed!!!$(tput sgr 0)"
+    fi
+
+    for file in `echo $ansible_uninstall_file_lists`
+    do
+        if ! curl -sL --fail https://raw.githubusercontent.com/containers-ai/prophetstor/${tag_number}/deploy/${ansible_folder_name}/uninstaller/${file} -o $ansible_folder_name/uninstaller/${file}; then
+            echo -e "\n$(tput setaf 3)Warning, download Federator.ai ansible uninstall file \"${file}\" failed!!!$(tput sgr 0)"
+        fi
+    done
+
+    # Download preloader ab runnder folder
+    ab_folder_name="preloader_ab_runner"
+    mkdir -p $ab_folder_name
+
+    ab_file_lists=`curl --silent https://api.github.com/repos/containers-ai/prophetstor/contents/deploy/${ab_folder_name}?ref=${tag_number} 2>&1|grep "\"name\":"|cut -d ':' -f2|cut -d '"' -f2`
+    if [ "$ab_file_lists" = "" ]; then
+        echo -e "\n$(tput setaf 3)Warning, download Federator.ai preloader ab files list failed!!!$(tput sgr 0)"
+    fi
+
+    for file in `echo $ab_file_lists`
+    do
+        if ! curl -sL --fail https://raw.githubusercontent.com/containers-ai/prophetstor/${tag_number}/deploy/${ab_folder_name}/${file} -o $ab_folder_name/${file}; then
+            echo -e "\n$(tput setaf 3)Warning, download Federator.ai preloader ab file \"${file}\" failed!!!$(tput sgr 0)"
+        fi
+    done
+
     cd - > /dev/null
 
     alamedaservice_example="alamedaservice_sample.yaml"
