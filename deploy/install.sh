@@ -413,7 +413,7 @@ get_datadog_agent_info()
     dd_api_key="`kubectl get secret -n $dd_namespace $dd_api_secret_name -o jsonpath='{.data.api-key}'`"
     dd_app_key="`kubectl get secret -n $dd_namespace -o jsonpath='{range .items[*]}{.data.app-key}'`"
     dd_cluster_agent_deploy_name="$(kubectl get deploy -n $dd_namespace|grep -v NAME|awk '{print $1}'|grep "cluster-agent$")"
-    dd_cluster_name="$(kubectl get deploy $dd_cluster_agent_deploy_name -n $dd_namespace 2>/dev/null -o jsonpath='{range .spec.template.spec.containers[*]}{.env[?(@.name=="DD_CLUSTER_NAME")].value}')"
+    dd_cluster_name="$(kubectl get deploy $dd_cluster_agent_deploy_name -n $dd_namespace -o jsonpath='{range .spec.template.spec.containers[*]}{.env[?(@.name=="DD_CLUSTER_NAME")].value}' 2>/dev/null | awk '{print $1}')"
 }
 
 display_cluster_scaler_file_location()
@@ -890,8 +890,12 @@ for yaml_fn in `ls [0-9]*.yaml | sort -n`; do
     fi
 done
 
-wait_until_pods_ready $max_wait_pods_ready_time 30 $install_namespace 1
-echo -e "\n$(tput setaf 6)Install Federator.ai operator $tag_number successfully$(tput sgr 0)"
+if [ "$need_upgrade" != "y" ];then
+    # Skip pod checking due to federatorai-operator with advanced version may cause some pods keep crashing (Jira FA-597/Jira FA-698)
+    # So we delay pod checking until alamedaservice is patched.
+    wait_until_pods_ready $max_wait_pods_ready_time 30 $install_namespace 1
+    echo -e "\n$(tput setaf 6)Install Federator.ai operator $tag_number successfully$(tput sgr 0)"
+fi
 
 if [ "$ALAMEDASERVICE_FILE_PATH" = "" ]; then
     alamedaservice_example="alamedaservice_sample.yaml"
@@ -1184,12 +1188,14 @@ if [ "$webhook_exist" != "y" ];then
     webhook_reminder
 fi
 
-setup_data_adapter_secret
+###Configure data source from GUI
+#setup_data_adapter_secret
 get_grafana_route $install_namespace
 get_restapi_route $install_namespace
 echo -e "$(tput setaf 6)\nInstall Federator.ai $tag_number successfully$(tput sgr 0)"
 check_previous_alamedascaler
-setup_cluster_alamedascaler
+###Configure data source from GUI
+#setup_cluster_alamedascaler
 leave_prog
 exit 0
 
