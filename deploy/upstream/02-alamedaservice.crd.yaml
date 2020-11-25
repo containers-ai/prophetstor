@@ -2443,6 +2443,8 @@ spec:
               type: object
             autoPatchPrometheusRules:
               type: boolean
+            disableRecommendDispatcher:
+              type: boolean
             enableAgentApp:
               type: boolean
             enableExecution:

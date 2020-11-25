@@ -5,6 +5,8 @@
 #   This script is created for demo purpose.
 #   Usage:
 #       [-p] # Prepare environment
+#           Requirement:
+#                [-a cluster_name] # Specify cluster name
 #       [-c] # clean environment for preloader test
 #       [-e] # Enable preloader pod
 #       [-r] # Run preloader (normal mode: historical + current)
@@ -28,6 +30,8 @@ show_usage()
 
     Usage:
         [-p] # Prepare environment
+            Requirement:
+                [-a cluster_name] # Specify cluster name
         [-c] # clean environment for preloader test
         [-e] # Enable preloader pod
         [-r] # Run preloader (normal mode: historical + current)
@@ -913,10 +917,22 @@ get_datadog_agent_info()
     dd_cluster_name="$(kubectl get deploy $dd_cluster_agent_deploy_name -n $dd_namespace -o jsonpath='{range .spec.template.spec.containers[*]}{.env[?(@.name=="DD_CLUSTER_NAME")].value}' 2>/dev/null | awk '{print $1}')"
 }
 
+get_datasource_in_alamedaorganization()
+{
+    # ##Get cluster specific data source setting
+    # data_source_type="$(kubectl get alamedaorganization -o jsonpath="{range .items[*]}{.spec.clusters[?(@.name==\"$cluster_name\")].dataSource.type}")"
+    # if [ "$data_source_type" != "" ]; then
+    #     return
+    # fi
+
+    # Get global data source setting
+    data_source_type="$(kubectl get alamedaorganization -o jsonpath='{range .items[*]}{.spec.dataSource.type}')"
+}
+
 add_dd_tags_to_executor_env()
 {
     start=`date +%s`
-    kubectl patch alamedaservice $alamedaservice_name -n ${install_namespace} --type merge --patch "{\"spec\":{\"alamedaExecutor\":{\"env\":[{\"name\": \"ALAMEDA_EXECUTOR_CLUSTERNAME\",\"value\": \"$dd_cluster_name\"}]}}}"
+    kubectl patch alamedaservice $alamedaservice_name -n ${install_namespace} --type merge --patch "{\"spec\":{\"alamedaExecutor\":{\"env\":[{\"name\": \"ALAMEDA_EXECUTOR_CLUSTERNAME\",\"value\": \"$cluster_name\"}]}}}"
     if [ "$?" != "0" ]; then
         echo -e "\n$(tput setaf 1)Error! Failed to set ALAMEDA_EXECUTOR_CLUSTERNAME as alamedaExecutor env.$(tput sgr 0)"
         leave_prog
@@ -952,7 +968,7 @@ metadata:
     name: ${alamedascaler_name}
     namespace: ${install_namespace}
 spec:
-    clusterName: ${dd_cluster_name}
+    clusterName: ${cluster_name}
     controllers:
     - type: generic
       enableExecution: ${enable_execution}
@@ -1250,7 +1266,7 @@ if [ "$#" -eq "0" ]; then
     exit
 fi
 
-while getopts "f:n:t:x:cdehikprvo" o; do
+while getopts "f:n:t:x:cdehikprvos:a:" o; do
     case "${o}" in
         p)
             prepare_environment="y"
@@ -1285,6 +1301,10 @@ while getopts "f:n:t:x:cdehikprvo" o; do
             enable_execution_specified="y"
             s_arg=${OPTARG}
             ;;
+        a)
+            cluster_name_specified="y"
+            a_arg=${OPTARG}
+            ;;
         # x)
         #     autoscaling_specified="y"
         #     x_arg=${OPTARG}
@@ -1308,6 +1328,50 @@ while getopts "f:n:t:x:cdehikprvo" o; do
             ;;
     esac
 done
+
+if [ "$prepare_environment" = "y" ] && [ "$cluster_name_specified" != "y" ]; then
+    echo -e "\n$(tput setaf 1)Error! You need to specify '-a your_cluster_name'.$(tput sgr 0)"
+    show_usage
+    exit 3
+elif [ "$prepare_environment" = "y" ] && [ "$cluster_name_specified" = "y" ]; then
+    cluster_name="$a_arg"
+
+    if [ "$cluster_name" = "" ]; then
+        echo -e "\n$(tput setaf 1)Error! Cluster name can't be empty.$(tput sgr 0)"
+        show_usage
+        exit 3
+    fi
+
+    # check data source
+    get_datasource_in_alamedaorganization
+    if [ "$data_source_type" = "" ]; then
+        echo -e "\n$(tput setaf 1)Error! Failed to find global data source setting in alamedaorganization CR.$(tput sgr 0)"
+        echo -e "$(tput setaf 1)Remember to set up alamedaorganization before running preloader.$(tput sgr 0)"
+        exit 3
+    elif [ "$data_source_type" = "datadog" ]; then
+        # No double check for prometheus or sysdig for now.
+        # Do DD_CLUSTER_NAME check
+        get_datadog_agent_info
+        if [ "$dd_cluster_name" = "" ]; then
+            echo -e "\n$(tput setaf 1)Error! Failed to auto-discover DD_CLUSTER_NAME value in Datadog cluster agent env variable.$(tput sgr 0)"
+            echo -e "\n$(tput setaf 1)Please help to set up cluster name accordingly.$(tput sgr 0)"
+            exit 7
+        else
+            if [ "$cluster_name" != "$dd_cluster_name" ]; then
+                echo -e "\n$(tput setaf 1)Error! Cluster name ($cluster_name) specified through (-a) option doesn not match the DD_CLUSTER_NAME ($dd_cluster_name) value in Datadog cluster agent env variable.$(tput sgr 0)"
+                exit 5
+            fi
+        fi
+    fi
+
+    # check cluster-only alamedascaler exist
+    kubectl get alamedascaler -n federatorai -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.spec.clusterName}{"\n"}'|grep -q "^${cluster_name} ${cluster_name}"
+    if [ "$?" != "0" ];then
+        echo -e "\n$(tput setaf 1)Error! Failed to find cluster-only alamedascaler with cluster name ($cluster_name).$(tput sgr 0)"
+        echo -e "\n$(tput setaf 1)Please use Federator.ai GUI to configure cluster first.$(tput sgr 0)"
+        exit 7
+    fi
+fi
 
 if [ "$future_mode_enabled" = "y" ]; then
     future_mode_length=$f_arg
@@ -1424,18 +1488,6 @@ fi
 
 cd $file_folder
 echo "Receiving command '$0 $@'" >> $debug_log
-
-## With standalone install/remove nginx action, we do not need get_datadog_agent_info
-if [ "$install_nginx" != "y" -a "$remove_nginx" != "y" ]; then
-    get_datadog_agent_info
-    if [ "$dd_cluster_name" = "" ]; then
-        echo -e "\n$(tput setaf 1)Error! Failed to auto-discover DD_CLUSTER_NAME value in Datadog cluster agent env variable.$(tput sgr 0)"
-        echo -e "\n$(tput setaf 1)Please help to set up cluster name accordingly.$(tput sgr 0)"
-        exit
-    else
-        echo -e "$(tput setaf 3)Use \"$dd_cluster_name\" as the cluster name.$(tput sgr 0)"
-    fi
-fi
 
 if [ "$prepare_environment" = "y" ]; then
     delete_all_alamedascaler
