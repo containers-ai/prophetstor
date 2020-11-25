@@ -207,10 +207,15 @@ delete_all_alamedascaler()
 {
     start=`date +%s`
     echo -e "\n$(tput setaf 6)Deleting old alamedascaler if necessary...$(tput sgr 0)"
-    while read scaler_name scaler_ns
+    while read scaler_name cluster_name scaler_ns
     do
-        if [ "$scaler_name" = "" ] || [ "$scaler_ns" = "" ]; then
+        if [ "$scaler_name" = "" ] || [ "$cluster_name" = "" ] || [ "$scaler_ns" = "" ]; then
            continue
+        fi
+
+        if [ "$scaler_name" = "$cluster_name" ]; then
+            # Ignore cluster-only alamedascaler
+            continue
         fi
 
         kubectl delete alamedascaler $scaler_name -n $scaler_ns
@@ -219,7 +224,7 @@ delete_all_alamedascaler()
             leave_prog
             exit 8
         fi
-    done <<< "$(kubectl get alamedascaler --all-namespaces --output jsonpath='{range .items[*]}{"\n"}{.metadata.name}{"\t"}{.metadata.namespace}' 2>/dev/null)"
+    done <<< "$(kubectl get alamedascaler --all-namespaces --output jsonpath='{range .items[*]}{.metadata.name}{" "}{.spec.clusterName}{" "}{.metadata.namespace}{"\n"}' 2>/dev/null)"
     echo "Done"
     end=`date +%s`
     duration=$((end-start))
