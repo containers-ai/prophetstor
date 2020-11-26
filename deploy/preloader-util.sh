@@ -412,7 +412,7 @@ scale_down_pods()
     kubectl patch deployment federatorai-operator -n $install_namespace -p '{"spec":{"replicas": 0}}'
     kubectl patch deployment alameda-ai -n $install_namespace -p '{"spec":{"replicas": 0}}'
     kubectl patch deployment alameda-ai-dispatcher -n $install_namespace -p '{"spec":{"replicas": 0}}'
-    kubectl patch deployment alameda-recommender -n $install_namespace -p '{"spec":{"replicas": 0}}'
+    kubectl patch deployment $restart_recommender_deploy -n $install_namespace -p '{"spec":{"replicas": 0}}'
     echo "Done"
 }
 
@@ -433,8 +433,8 @@ scale_up_pods()
         do_something="y"
     fi
 
-    if [ "`kubectl get deploy alameda-recommender -n $install_namespace -o jsonpath='{.spec.replicas}'`" -eq "0" ]; then
-        kubectl patch deployment alameda-recommender -n $install_namespace -p '{"spec":{"replicas": 1}}'
+    if [ "`kubectl get deploy $restart_recommender_deploy -n $install_namespace -o jsonpath='{.spec.replicas}'`" -eq "0" ]; then
+        kubectl patch deployment $restart_recommender_deploy -n $install_namespace -p '{"spec":{"replicas": 1}}'
         do_something="y"
     fi
 
@@ -1242,6 +1242,18 @@ __EOF__
     fi
 }
 
+check_recommendation_pod_type()
+{
+    kubectl -n $install_namespace get deploy alameda-recommend-dispatcher >/dev/null 2>&1
+    if [ "$?" = "0" ]; then
+        # alameda-recommend-worker and alameda-recommend-dispatcher
+        restart_recommender_deploy="alameda-recommend-dispatcher"
+    else
+        # alameda-recommender
+        restart_recommender_deploy="alameda-recommender"
+    fi
+}
+
 disable_preloader_in_alamedaservice()
 {
     start=`date +%s`
@@ -1493,6 +1505,8 @@ if [ "$alamedaservice_name" = "" ]; then
     leave_prog
     exit 8
 fi
+
+check_recommendation_pod_type
 
 file_folder="/tmp/preloader"
 nginx_ns="nginx-preloader-sample"
