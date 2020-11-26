@@ -9,7 +9,6 @@ spec:
   selfDriving: false             ## to enable resource self-orchestration of the deployed Alameda components
                                  ## it is recommended NOT to use ephemeral data storage for Alameda influxdb component when self-Driving is enabled
   enableExecution: false
-  enableGui: false
   version: latest               ## for Alameda components. (exclude grafana and influxdb)
   storages:                     ## see following details for where it is used in each component
     - usage: log                ## storage setting for log

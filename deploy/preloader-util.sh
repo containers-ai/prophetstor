@@ -19,6 +19,8 @@
 #   Standalone options:
 #       [-i] # Install Nginx
 #       [-k] # Remove Nginx
+#       [-b] # Retrigger ab test from preload pod
+#       [-g ab_traffic_ratio] # ab test traffic ratio (default:4000) [e.g., -g 4000]
 #       [-t replica number] # Nginx default replica number (default:10) [e.g., -t 5]
 #       [-s enable execution] # Enable(default) or disable execution [e.g., -s false]
 #
@@ -44,6 +46,8 @@ show_usage()
     Standalone options:
         [-i] # Install Nginx
         [-k] # Remove Nginx
+        [-b] # Retrigger ab test from preload pod
+        [-g ab_traffic_ratio] # ab test traffic ratio (default:4000) [e.g., -g 4000]
         [-t replica number] # Nginx default replica number (default:10) [e.g., -t 5]
         [-s enable execution] # Enable(default) or disable execution [e.g., -s false]
 
@@ -289,19 +293,27 @@ run_ab_test()
 {
     echo -e "\n$(tput setaf 6)Running ab test in preloader...$(tput sgr 0)"
 
+    get_current_preloader_name
+    if [ "$current_preloader_pod_name" = "" ]; then
+        echo -e "\n$(tput setaf 1)ERROR! Can't find installed preloader pod.$(tput sgr 0)"
+        leave_prog
+        exit 8
+    fi
+
     # Modify parameters
     nginx_ip=$(kubectl -n $nginx_ns get svc|grep "${nginx_name}"|awk '{print $3}')
     [ "$nginx_ip" = "" ] && echo -e "$(tput setaf 1)Error! Can't get svc ip of namespace $nginx_ns$(tput sgr 0)" && return
 
     sed -i "s/SVC_IP=.*/SVC_IP=${nginx_ip}/g" ./$preloader_folder/generate_loads.sh
     sed -i "s/SVC_PORT=.*/SVC_PORT=${nginx_port}/g" ./$preloader_folder/generate_loads.sh
+    sed -i "s/traffic_ratio.*/traffic_ratio = ${traffic_ratio}/g" ./$preloader_folder/define.py
 
     for ab_file in "${ab_files_list[@]}"
     do
         kubectl cp -n $install_namespace $preloader_folder/$ab_file ${current_preloader_pod_name}:/opt/alameda/federatorai-agent/
     done
     # New traffic folder
-    kubectl -n $install_namespace exec $current_preloader_pod_name -- mkdir /opt/alameda/federatorai-agent/traffic
+    kubectl -n $install_namespace exec $current_preloader_pod_name -- mkdir -p /opt/alameda/federatorai-agent/traffic
     # trigger ab test
     kubectl -n $install_namespace exec $current_preloader_pod_name -- bash -c "/opt/alameda/federatorai-agent/generate_loads.sh >run_output 2>run_output &"
     if [ "$?" != "0" ]; then
@@ -1271,7 +1283,7 @@ if [ "$#" -eq "0" ]; then
     exit
 fi
 
-while getopts "f:n:t:x:cdehikprvos:a:" o; do
+while getopts "f:n:t:x:g:cdehikprvobs:a:" o; do
     case "${o}" in
         p)
             prepare_environment="y"
@@ -1287,6 +1299,9 @@ while getopts "f:n:t:x:cdehikprvos:a:" o; do
             ;;
         e)
             enable_preloader="y"
+            ;;
+        b)
+            run_ab_from_preloader="y"
             ;;
         r)
             run_preloader_with_normal_mode="y"
@@ -1314,6 +1329,10 @@ while getopts "f:n:t:x:cdehikprvos:a:" o; do
         #     autoscaling_specified="y"
         #     x_arg=${OPTARG}
         #     ;;
+        g)
+            traffic_ratio_specified="y"
+            g_arg=${OPTARG}
+            ;;
         n)
             nginx_name_specified="y"
             n_arg=${OPTARG}
@@ -1386,8 +1405,28 @@ if [ "$future_mode_enabled" = "y" ]; then
     esac
 fi
 
+if [ "$traffic_ratio_specified" = "y" ]; then
+    traffic_ratio=$g_arg
+    case $traffic_ratio in
+        ''|*[!0-9]*) echo -e "\n$(tput setaf 1)ab test traffic ratio needs to be an integer.$(tput sgr 0)" && show_usage ;;
+        *) ;;
+    esac
+else
+    traffic_ratio="4000"
+fi
+
 if [ "$run_preloader_with_normal_mode" = "y" ] && [ "$run_preloader_with_historical_only" = "y" ]; then
-    echo -e "\n$(tput setaf 1)Error! You can specify either the '-r' or the '-o' parameter, but not both." && show_usage
+    echo -e "\n$(tput setaf 1)Error! You can specify either the '-r' or the '-o' parameter, but not both.$(tput sgr 0)" && show_usage
+    exit 3
+fi
+
+if [ "$run_preloader_with_normal_mode" = "y" ] && [ "$run_ab_from_preloader" = "y" ]; then
+    echo -e "\n$(tput setaf 1)Error! You can specify either the '-r' or the '-b' parameter, but not both.$(tput sgr 0)" && show_usage
+    exit 3
+fi
+
+if [ "$run_preloader_with_historical_only" = "y" ] && [ "$run_ab_from_preloader" = "y" ]; then
+    echo -e "\n$(tput setaf 1)Error! You can specify either the '-o' or the '-b' parameter, but not both.$(tput sgr 0)" && show_usage
     exit 3
 fi
 
@@ -1473,7 +1512,7 @@ mkdir -p $file_folder
 current_location=`pwd`
 # copy preloader ab files if run historical only mode enabled
 preloader_folder="preloader_ab_runner"
-if [ "$run_preloader_with_historical_only" = "y" ]; then
+if [ "$run_preloader_with_historical_only" = "y" ] || [ "$run_ab_from_preloader" = "y" ]; then
     # Check folder exists
     [ ! -d "$preloader_folder" ] && echo -e "$(tput setaf 1)Error! Can't locate $preloader_folder folder.$(tput sgr 0)" && exit 3
 
@@ -1515,6 +1554,10 @@ if [ "$enable_preloader" = "y" ]; then
         switch_alameda_executor_in_alamedaservice "on"
     fi
     enable_preloader_in_alamedaservice
+fi
+
+if [ "$run_ab_from_preloader" = "y" ]; then
+    run_ab_test
 fi
 
 if [ "$run_preloader_with_normal_mode" = "y" ] || [ "$run_preloader_with_historical_only" = "y" ]; then

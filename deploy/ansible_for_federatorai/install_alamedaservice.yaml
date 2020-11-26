@@ -81,7 +81,6 @@
     marker: "## {mark} gpu/vga"
     block: |2
         enableGPU: false
-        enableVPA: false
 
 # Add service exposures
 - name: Add service exposures info in alamedaservice file if necessary

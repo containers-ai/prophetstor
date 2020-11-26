@@ -1044,10 +1044,8 @@ __EOF__
         fi
 
         # enableGPU: false
-        # enableVPA: false
         cat >> ${alamedaservice_example} << __EOF__
   enableGPU: false
-  enableVPA: false
 __EOF__
 
         if [ "$openshift_minor_version" = "" ]; then #k8s
