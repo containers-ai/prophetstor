@@ -1021,12 +1021,19 @@ cleanup_influxdb_prediction_related_contents()
     for database in `echo "alameda_prediction alameda_recommendation alameda_planning"`
     do
         echo "database=$database"
+        # prepare sql command
+        m_list=""
+        sql_cmd=""
         measurement_list="`kubectl exec $influxdb_pod_name -n $install_namespace -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database $database -execute "show measurements" 2>&1 |tail -n+4`"
         for measurement in `echo $measurement_list`
         do
-            echo "clean up measurement: $measurement"
-            kubectl exec $influxdb_pod_name -n $install_namespace -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database $database -execute "drop measurement $measurement"
+            m_list="${m_list} ${measurement}"
+            sql_cmd="${sql_cmd}drop measurement $measurement;"
         done
+        if [ "${m_list}" != "" ]; then
+            echo "cleaning up measurements: ${m_list}"
+            kubectl exec $influxdb_pod_name -n $install_namespace -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database $database -execute "${sql_cmd}" | grep -v "^$"
+        fi
     done
     echo "Done."
     end=`date +%s`
@@ -1056,7 +1063,7 @@ cleanup_influxdb_preloader_related_contents()
     influxdb_pod_name="`kubectl get pods -n $install_namespace |grep "alameda-influxdb-"|awk '{print $1}'|head -1`"
     
     measurement_list="`kubectl exec $influxdb_pod_name -n $install_namespace -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database alameda_metric -execute "show measurements" 2>&1 |tail -n+4`"
-    echo "db=alameda_metric"
+    echo "database=alameda_metric"
     # prepare sql command
     m_list=""
     for measurement in `echo $measurement_list`
@@ -1065,7 +1072,7 @@ cleanup_influxdb_preloader_related_contents()
             continue
         fi
         m_list="${m_list} ${measurement}"
-        sql_cmd="${sql_cmd};drop measurement $measurement"
+        sql_cmd="${sql_cmd}drop measurement $measurement;"
     done
     if [ "${m_list}" != "" ]; then
         echo "cleaning up measurements: ${m_list}"
