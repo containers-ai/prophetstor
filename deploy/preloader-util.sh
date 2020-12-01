@@ -10,7 +10,7 @@
 #       [-c] # clean environment for preloader test
 #       [-e] # Enable preloader pod
 #       [-r] # Run preloader (normal mode: historical + current)
-#       [-o] # Run preloader (historical only)
+#       [-o] # Run preloader (historical + ab test)
 #       [-f future data point (hour)] # Run preloader future mode
 #       [-d] # Disable & Remove preloader
 #       [-v] # Revert environment to normal mode
@@ -22,7 +22,6 @@
 #       [-b] # Retrigger ab test from preload pod
 #       [-g ab_traffic_ratio] # ab test traffic ratio (default:4000) [e.g., -g 4000]
 #       [-t replica number] # Nginx default replica number (default:10) [e.g., -t 5]
-#       [-s enable execution] # Enable(default) or disable execution [e.g., -s false]
 #
 #################################################################################################################
 
@@ -37,7 +36,7 @@ show_usage()
         [-c] # clean environment for preloader test
         [-e] # Enable preloader pod
         [-r] # Run preloader (normal mode: historical + current)
-        [-o] # Run preloader (historical only)
+        [-o] # Run preloader (historical + ab test)
         [-f future data point (hour)] # Run preloader future mode
         [-d] # Disable & Remove preloader
         [-v] # Revert environment to normal mode
@@ -49,7 +48,6 @@ show_usage()
         [-b] # Retrigger ab test from preload pod
         [-g ab_traffic_ratio] # ab test traffic ratio (default:4000) [e.g., -g 4000]
         [-t replica number] # Nginx default replica number (default:10) [e.g., -t 5]
-        [-s enable execution] # Enable(default) or disable execution [e.g., -s false]
 
 __EOF__
     exit 1
@@ -944,11 +942,22 @@ get_datasource_in_alamedaorganization()
 
     # Get global data source setting
     data_source_type="$(kubectl get alamedaorganization -o jsonpath='{range .items[*]}{.spec.dataSource.type}')"
+    if [ "$data_source_type" = "" ]; then
+        echo -e "\n$(tput setaf 1)Error! Failed to find global data source setting in alamedaorganization CR.$(tput sgr 0)"
+        echo -e "$(tput setaf 1)Remember to set up alamedaorganization before running preloader.$(tput sgr 0)"
+        exit 3
+    fi
 }
 
 add_dd_tags_to_executor_env()
 {
     start=`date +%s`
+    echo -e "\n$(tput setaf 6)Adding dd tags to executor env...$(tput sgr 0)"
+    if [ "$cluster_name" = "" ]; then
+        echo -e "\n$(tput setaf 1)Error! Cluster name can't be empty. Use option '-a' to specify cluster name$(tput sgr 0)"
+        show_usage
+        exit 3
+    fi
     kubectl patch alamedaservice $alamedaservice_name -n ${install_namespace} --type merge --patch "{\"spec\":{\"alamedaExecutor\":{\"env\":[{\"name\": \"ALAMEDA_EXECUTOR_CLUSTERNAME\",\"value\": \"$cluster_name\"}]}}}"
     if [ "$?" != "0" ]; then
         echo -e "\n$(tput setaf 1)Error! Failed to set ALAMEDA_EXECUTOR_CLUSTERNAME as alamedaExecutor env.$(tput sgr 0)"
@@ -966,6 +975,11 @@ add_alamedascaler_for_nginx()
 {
     start=`date +%s`
     echo -e "\n$(tput setaf 6)Adding NGINX alamedascaler ...$(tput sgr 0)"
+    if [ "$cluster_name" = "" ]; then
+        echo -e "\n$(tput setaf 1)Error! Cluster name can't be empty. Use option '-a' to specify cluster name$(tput sgr 0)"
+        show_usage
+        exit 3
+    fi
     nginx_alamedascaler_file="nginx_alamedascaler_file"
 
     if [ "$openshift_minor_version" = "" ]; then
@@ -1112,6 +1126,30 @@ check_prediction_status()
     echo "Duration check_prediction_status() = $duration" >> $debug_log
 }
 
+check_deployment_status()
+{
+    period="$1"
+    interval="$2"
+    deploy_name="$3"
+    deploy_status_expected="$4"
+
+    for ((i=0; i<$period; i+=$interval)); do
+        kubectl -n $install_namespace get deploy $deploy_name >/dev/null 2>&1
+        if [ "$?" = "0" ] && [ "$deploy_status_expected" = "on" ]; then
+            echo -e "Depolyment $deploy_name exists."
+            return 0
+        elif [ "$?" != "0" ] && [ "$deploy_status_expected" = "off" ]; then
+            echo -e "Depolyment $deploy_name is gone."
+            return 0
+        fi
+        echo "Waiting for deployment $deploy_name become expected status ($deploy_status_expected)..."
+        sleep "$interval"
+    done
+    echo -e "\n$(tput setaf 1)Error!! Waited for $period seconds, but deployment $deploy_name status is not ($deploy_status_expected).$(tput sgr 0)"
+    leave_prog
+    exit 7
+}
+
 switch_alameda_executor_in_alamedaservice()
 {
     start=`date +%s`
@@ -1128,6 +1166,7 @@ switch_alameda_executor_in_alamedaservice()
             exit 8
         fi
         modified="y"
+        check_deployment_status 180 10 "alameda-executor" "on"
     elif [ "$current_executor_pod_name" != "" ] && [ "$switch_option" = "off" ]; then
         # Turn off
         echo -e "\n$(tput setaf 6)Disable executor in alamedaservice...$(tput sgr 0)"
@@ -1138,6 +1177,7 @@ switch_alameda_executor_in_alamedaservice()
             exit 8
         fi
         modified="y"
+        check_deployment_status 180 10 "alameda-executor" "off"
     fi
 
     if [ "$modified" = "y" ]; then
@@ -1185,6 +1225,7 @@ enable_preloader_in_alamedaservice()
         fi
     fi
     # Check if preloader is ready
+    check_deployment_status 180 10 "federatorai-agent-preloader" "on"
     echo ""
     wait_until_pods_ready 600 30 $install_namespace 5
     get_current_preloader_name
@@ -1275,6 +1316,7 @@ disable_preloader_in_alamedaservice()
         fi
 
         # Check if preloader is removed and other pods are ready
+        check_deployment_status 180 10 "federatorai-agent-preloader" "off"
         echo ""
         wait_until_pods_ready 600 30 $install_namespace 5
         get_current_preloader_name
@@ -1295,14 +1337,14 @@ clean_environment_operations()
     cleanup_influxdb_preloader_related_contents
     cleanup_influxdb_prediction_related_contents
     cleanup_alamedaai_models
-}   
+}
 
 if [ "$#" -eq "0" ]; then
     show_usage
     exit
 fi
 
-while getopts "f:n:t:x:g:cdehikprvobs:a:" o; do
+while getopts "f:n:t:x:g:cdehikprvoba:" o; do
     case "${o}" in
         p)
             prepare_environment="y"
@@ -1336,10 +1378,10 @@ while getopts "f:n:t:x:g:cdehikprvobs:a:" o; do
             replica_num_specified="y"
             t_arg=${OPTARG}
             ;;
-        s)
-            enable_execution_specified="y"
-            s_arg=${OPTARG}
-            ;;
+        # s)
+        #     enable_execution_specified="y"
+        #     s_arg=${OPTARG}
+        #     ;;
         a)
             cluster_name_specified="y"
             a_arg=${OPTARG}
@@ -1376,7 +1418,9 @@ if [ "$prepare_environment" = "y" ] && [ "$cluster_name_specified" != "y" ]; the
     echo -e "\n$(tput setaf 1)Error! You need to specify '-a your_cluster_name'.$(tput sgr 0)"
     show_usage
     exit 3
-elif [ "$prepare_environment" = "y" ] && [ "$cluster_name_specified" = "y" ]; then
+fi
+
+if [ "$cluster_name_specified" = "y" ]; then
     cluster_name="$a_arg"
 
     if [ "$cluster_name" = "" ]; then
@@ -1387,11 +1431,7 @@ elif [ "$prepare_environment" = "y" ] && [ "$cluster_name_specified" = "y" ]; th
 
     # check data source
     get_datasource_in_alamedaorganization
-    if [ "$data_source_type" = "" ]; then
-        echo -e "\n$(tput setaf 1)Error! Failed to find global data source setting in alamedaorganization CR.$(tput sgr 0)"
-        echo -e "$(tput setaf 1)Remember to set up alamedaorganization before running preloader.$(tput sgr 0)"
-        exit 3
-    elif [ "$data_source_type" = "datadog" ]; then
+    if [ "$data_source_type" = "datadog" ]; then
         # No double check for prometheus or sysdig for now.
         # Do DD_CLUSTER_NAME check
         get_datadog_agent_info
@@ -1458,15 +1498,6 @@ if [ "$replica_num_specified" = "y" ]; then
 else
     # default replica
     replica_number="5"
-fi
-
-if [ "$enable_execution_specified" = "y" ]; then
-    enable_execution=$s_arg
-    if [ "$enable_execution" != "true" ] && [ "$enable_execution" != "false" ]; then
-        echo -e "\n$(tput setaf 1) Enable execution value needs to be \"true\" or \"false\".$(tput sgr 0)" && show_usage
-    fi
-else
-    enable_execution="true"
 fi
 
 # if [ "$autoscaling_specified" = "y" ]; then
@@ -1562,8 +1593,6 @@ if [ "$prepare_environment" = "y" ]; then
     patch_grafana_for_preloader
     patch_data_adapter_for_preloader "true"
     check_influxdb_retention
-    add_alamedascaler_for_nginx
-    add_dd_tags_to_executor_env
 fi
 
 if [ "$clean_environment" = "y" ]; then
@@ -1571,9 +1600,6 @@ if [ "$clean_environment" = "y" ]; then
 fi
 
 if [ "$enable_preloader" = "y" ]; then
-    if [ "$enable_execution" = "true" ]; then
-        switch_alameda_executor_in_alamedaservice "on"
-    fi
     enable_preloader_in_alamedaservice
 fi
 
@@ -1585,9 +1611,29 @@ if [ "$run_preloader_with_normal_mode" = "y" ] || [ "$run_preloader_with_histori
     # Move scale_down_pods into run_preloader_command method
     #scale_down_pods
     if [ "$run_preloader_with_normal_mode" = "y" ]; then
+        enable_execution="true"
+        add_alamedascaler_for_nginx
+        switch_alameda_executor_in_alamedaservice "on"
+        add_dd_tags_to_executor_env
         run_preloader_command "normal"
     else
         # run_preloader_with_historical_only = "y"
+        enable_execution="false"
+        add_alamedascaler_for_nginx
+        get_datasource_in_alamedaorganization
+        if [ "$data_source_type" = "datadog" ]; then
+            enable_execution="false"
+            add_alamedascaler_for_nginx
+        elif [ "$data_source_type" = "prometheus" ]; then
+            enable_execution="true"
+            add_alamedascaler_for_nginx
+            switch_alameda_executor_in_alamedaservice "on"
+            add_dd_tags_to_executor_env
+        elif [ "$data_source_type" = "sysdig" ]; then
+            # Not sure for now
+            enable_execution="false"
+            add_alamedascaler_for_nginx
+        fi
         run_preloader_command "historical_only"
     fi
     verify_metrics_exist
