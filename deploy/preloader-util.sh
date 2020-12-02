@@ -264,26 +264,43 @@ wait_for_cluster_status_data_ready()
     echo "Duration wait_for_cluster_status_data_ready = $duration" >> $debug_log
 }
 
-refine_preloader_configmap()
+refine_preloader_variables_with_alamedaservice()
 {
-    local _do_sed=0
-    [ "${PRELOADER_GRANUALARITY}" != "" ] && _do_sed=1 && sed_opt_1="s|granularity *=.*|granularity = ${PRELOADER_GRANUALARITY}|g"
-    [ "${PRELOADER_PRELOAD_COUNT}" != "" ] && _do_sed=1 && sed_opt_2="s| preload_count *=.*| preload_count = ${PRELOADER_PRELOAD_COUNT}|g"
-    if [ "${_do_sed}" = "1" ]; then
-        wait_until_pods_ready 600 30 $install_namespace 5
-        kubectl -n $install_namespace get cm federatorai-agent-preloader-config -o yaml \
-          | sed "
-${sed_opt_1}
-${sed_opt_2}
-" \
-          | kubectl -n $install_namespace apply -f -
-        if [ "${PIPESTATUS[0]}" != "0" -o "${PIPESTATUS[1]}" != "0" -o "${PIPESTATUS[2]}" != "0" ]; then
-            echo -e "\n$(tput setaf 1)Error! Failed in refining preloader configuration.$(tput sgr 0)"
+    ## Assign preloader environment variables
+    local _env_list=""
+    if [ "${PRELOADER_GRANUALARITY}" != "" ]; then
+        _env_list="${_env_list}
+    - name: PRELOADER_GRANULARITY
+      value: \"${PRELOADER_GRANUALARITY}\"  # unit is sec, history preloaded data granularity
+"
+    fi
+    if [ "${PRELOADER_PRELOAD_COUNT}" != "" ]; then
+        _env_list="${_env_list}
+    - name: PRELOADER_PRELOADER_PRELOAD_COUNT
+      value: \"${PRELOADER_PRELOAD_COUNT}\"
+"
+    fi
+    if [ "${PRELOADER_PRELOAD_UNIT}" != "" ]; then
+        _env_list="${_env_list}
+    - name: PRELOADER_PRELOADER_PRELOAD_UNIT
+      value: \"${PRELOADER_PRELOAD_UNIT}\"    # "month"/"day"/"hour"/"minute"
+"
+    fi
+    if [ "${_env_list}" != "" ]; then
+        patch_data="
+spec:
+  federatoraiAgentPreloader:
+    env:${_env_list}
+"
+        echo -e "\nPatching alamedaservice for enabling environment variables of preloader ..."
+        kubectl patch alamedaservice ${alamedaservice_name} -n ${install_namespace} --type merge --patch "${patch_data}"
+        if [ "$?" != "0" ]; then
+            echo -e "\n$(tput setaf 1)Error! Failed in patching AlamedaService.$(tput sgr 0)"
             exit 1
         fi
         # restart preloader pod
         get_current_preloader_name
-        [ "${current_preloader_pod_name}" != "" ] && kubectl -n $install_namespace delete pod $current_preloader_pod_name  --wait=true
+        [ "${current_preloader_pod_name}" != "" ] && kubectl -n $install_namespace delete pod $current_preloader_pod_name --wait=true
     fi
 }
 
@@ -313,7 +330,7 @@ run_ab_test()
     # New traffic folder
     kubectl -n $install_namespace exec $current_preloader_pod_name -- mkdir -p /opt/alameda/federatorai-agent/traffic
     # trigger ab test
-    kubectl -n $install_namespace exec $current_preloader_pod_name -- bash -c "/opt/alameda/federatorai-agent/generate_loads.sh >run_output 2>run_output &"
+    kubectl -n $install_namespace exec $current_preloader_pod_name -- bash -c "bash /opt/alameda/federatorai-agent/generate_loads.sh >run_output 2>run_output &"
     if [ "$?" != "0" ]; then
         echo -e "\n$(tput setaf 1)Error! Failed to trigger ab test inside preloader.$(tput sgr 0)"
     fi
@@ -326,12 +343,12 @@ run_preloader_command()
     if [ "$running_mode" = "historical_only" ]; then
         # Need to change data adapter to collect metrics
         patch_data_adapter_for_preloader "false"
+    elif [ "$running_mode" = "normal" ]; then
+        # collect meta data only
+        patch_data_adapter_for_preloader "true"
     fi
     # Move scale_down inside run_preloader_command, just in case we need to patch data adapter (historical_only mode)
     scale_down_pods
-
-    # Refine configmap before running preloader
-    refine_preloader_configmap
 
     # check env is ready
     wait_for_cluster_status_data_ready
@@ -949,37 +966,45 @@ get_datasource_in_alamedaorganization()
     fi
 }
 
-add_dd_tags_to_executor_env()
+# 4.4 will handle local cluster automatically
+# add_dd_tags_to_executor_env()
+# {
+#     start=`date +%s`
+#     echo -e "\n$(tput setaf 6)Adding dd tags to executor env...$(tput sgr 0)"
+#     if [ "$cluster_name" = "" ]; then
+#         echo -e "\n$(tput setaf 1)Error! Cluster name can't be empty. Use option '-a' to specify cluster name$(tput sgr 0)"
+#         show_usage
+#         exit 3
+#     fi
+#     kubectl patch alamedaservice $alamedaservice_name -n ${install_namespace} --type merge --patch "{\"spec\":{\"alamedaExecutor\":{\"env\":[{\"name\": \"ALAMEDA_EXECUTOR_CLUSTERNAME\",\"value\": \"$cluster_name\"}]}}}"
+#     if [ "$?" != "0" ]; then
+#         echo -e "\n$(tput setaf 1)Error! Failed to set ALAMEDA_EXECUTOR_CLUSTERNAME as alamedaExecutor env.$(tput sgr 0)"
+#         leave_prog
+#         exit 8
+#     fi
+
+#     echo "Done"
+#     end=`date +%s`
+#     duration=$((end-start))
+#     echo "Duration add_dd_tags_to_executor_env = $duration" >> $debug_log
+# }
+
+check_cluster_name_not_empty()
 {
-    start=`date +%s`
-    echo -e "\n$(tput setaf 6)Adding dd tags to executor env...$(tput sgr 0)"
     if [ "$cluster_name" = "" ]; then
         echo -e "\n$(tput setaf 1)Error! Cluster name can't be empty. Use option '-a' to specify cluster name$(tput sgr 0)"
+        echo -e "\n$(tput setaf 1)You can look up cluster name info by following command: $(tput sgr 0)"
+        echo -e "\n$(tput setaf 1)kubectl -n ${install_namespace} get alamedascaler\n$(tput sgr 0)"
         show_usage
         exit 3
     fi
-    kubectl patch alamedaservice $alamedaservice_name -n ${install_namespace} --type merge --patch "{\"spec\":{\"alamedaExecutor\":{\"env\":[{\"name\": \"ALAMEDA_EXECUTOR_CLUSTERNAME\",\"value\": \"$cluster_name\"}]}}}"
-    if [ "$?" != "0" ]; then
-        echo -e "\n$(tput setaf 1)Error! Failed to set ALAMEDA_EXECUTOR_CLUSTERNAME as alamedaExecutor env.$(tput sgr 0)"
-        leave_prog
-        exit 8
-    fi
-
-    echo "Done"
-    end=`date +%s`
-    duration=$((end-start))
-    echo "Duration add_dd_tags_to_executor_env = $duration" >> $debug_log
 }
 
 add_alamedascaler_for_nginx()
 {
     start=`date +%s`
     echo -e "\n$(tput setaf 6)Adding NGINX alamedascaler ...$(tput sgr 0)"
-    if [ "$cluster_name" = "" ]; then
-        echo -e "\n$(tput setaf 1)Error! Cluster name can't be empty. Use option '-a' to specify cluster name$(tput sgr 0)"
-        show_usage
-        exit 3
-    fi
+    check_cluster_name_not_empty
     nginx_alamedascaler_file="nginx_alamedascaler_file"
 
     if [ "$openshift_minor_version" = "" ]; then
@@ -1205,6 +1230,10 @@ switch_alameda_executor_in_alamedaservice()
 enable_preloader_in_alamedaservice()
 {
     start=`date +%s`
+
+    # Refine variables before running preloader
+    refine_preloader_variables_with_alamedaservice
+
     get_current_preloader_name
     if [ "$current_preloader_pod_name" != "" ]; then
         echo -e "\n$(tput setaf 6)Skip preloader installation due to preloader pod exists.$(tput sgr 0)"
@@ -1292,13 +1321,15 @@ __EOF__
 
 check_recommendation_pod_type()
 {
-    kubectl -n $install_namespace get deploy alameda-recommend-dispatcher >/dev/null 2>&1
+    dispatcher_type_deploy_name="federatorai-recommend-dispatcher"
+    non_dispatcher_type_deploy_name="alameda-recommender"
+    kubectl -n $install_namespace get deploy $dispatcher_type_deploy_name >/dev/null 2>&1
     if [ "$?" = "0" ]; then
         # alameda-recommend-worker and alameda-recommend-dispatcher
-        restart_recommender_deploy="alameda-recommend-dispatcher"
+        restart_recommender_deploy=$dispatcher_type_deploy_name
     else
         # alameda-recommender
-        restart_recommender_deploy="alameda-recommender"
+        restart_recommender_deploy=$non_dispatcher_type_deploy_name
     fi
 }
 
@@ -1422,12 +1453,7 @@ fi
 
 if [ "$cluster_name_specified" = "y" ]; then
     cluster_name="$a_arg"
-
-    if [ "$cluster_name" = "" ]; then
-        echo -e "\n$(tput setaf 1)Error! Cluster name can't be empty.$(tput sgr 0)"
-        show_usage
-        exit 3
-    fi
+    check_cluster_name_not_empty
 
     # check data source
     get_datasource_in_alamedaorganization
@@ -1614,12 +1640,10 @@ if [ "$run_preloader_with_normal_mode" = "y" ] || [ "$run_preloader_with_histori
         enable_execution="true"
         add_alamedascaler_for_nginx
         switch_alameda_executor_in_alamedaservice "on"
-        add_dd_tags_to_executor_env
+        #add_dd_tags_to_executor_env
         run_preloader_command "normal"
     else
-        # run_preloader_with_historical_only = "y"
-        enable_execution="false"
-        add_alamedascaler_for_nginx
+        # historical mode
         get_datasource_in_alamedaorganization
         if [ "$data_source_type" = "datadog" ]; then
             enable_execution="false"
@@ -1628,7 +1652,7 @@ if [ "$run_preloader_with_normal_mode" = "y" ] || [ "$run_preloader_with_histori
             enable_execution="true"
             add_alamedascaler_for_nginx
             switch_alameda_executor_in_alamedaservice "on"
-            add_dd_tags_to_executor_env
+            #add_dd_tags_to_executor_env
         elif [ "$data_source_type" = "sysdig" ]; then
             # Not sure for now
             enable_execution="false"
@@ -1667,6 +1691,7 @@ fi
 if [ "$install_nginx" = "y" ]; then
     new_nginx_example
     add_svc_for_nginx
+    add_alamedascaler_for_nginx
 fi
 
 if [ "$remove_nginx" = "y" ]; then
