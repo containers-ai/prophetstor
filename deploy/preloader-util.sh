@@ -993,8 +993,8 @@ check_cluster_name_not_empty()
 {
     if [ "$cluster_name" = "" ]; then
         echo -e "\n$(tput setaf 1)Error! Cluster name can't be empty. Use option '-a' to specify cluster name$(tput sgr 0)"
-        echo -e "\n$(tput setaf 1)You can look up cluster name info by following command: $(tput sgr 0)"
-        echo -e "\n$(tput setaf 1)kubectl -n ${install_namespace} get alamedascaler\n$(tput sgr 0)"
+        echo -e "$(tput setaf 1)You can look up cluster name info by following command: $(tput sgr 0)"
+        echo -e "$(tput setaf 1)kubectl -n <Federator.ai namespace> get alamedascaler$(tput sgr 0)"
         show_usage
         exit 3
     fi
@@ -1175,57 +1175,57 @@ check_deployment_status()
     exit 7
 }
 
-switch_alameda_executor_in_alamedaservice()
-{
-    start=`date +%s`
-    switch_option="$1"
-    get_current_executor_name
-    modified="n"
-    if [ "$current_executor_pod_name" = "" ] && [ "$switch_option" = "on" ]; then
-        # Turn on
-        echo -e "\n$(tput setaf 6)Enabling executor in alamedaservice...$(tput sgr 0)"
-        kubectl patch alamedaservice $alamedaservice_name -n $install_namespace --type merge --patch '{"spec":{"enableExecution": true}}'
-        if [ "$?" != "0" ]; then
-            echo -e "\n$(tput setaf 1)Error in enabling executor pod.$(tput sgr 0)"
-            leave_prog
-            exit 8
-        fi
-        modified="y"
-        check_deployment_status 180 10 "alameda-executor" "on"
-    elif [ "$current_executor_pod_name" != "" ] && [ "$switch_option" = "off" ]; then
-        # Turn off
-        echo -e "\n$(tput setaf 6)Disable executor in alamedaservice...$(tput sgr 0)"
-        kubectl patch alamedaservice $alamedaservice_name -n $install_namespace --type merge --patch '{"spec":{"enableExecution": false}}'
-        if [ "$?" != "0" ]; then
-            echo -e "\n$(tput setaf 1)Error in deleting preloader pod.$(tput sgr 0)"
-            leave_prog
-            exit 8
-        fi
-        modified="y"
-        check_deployment_status 180 10 "alameda-executor" "off"
-    fi
+# switch_alameda_executor_in_alamedaservice()
+# {
+#     start=`date +%s`
+#     switch_option="$1"
+#     get_current_executor_name
+#     modified="n"
+#     if [ "$current_executor_pod_name" = "" ] && [ "$switch_option" = "on" ]; then
+#         # Turn on
+#         echo -e "\n$(tput setaf 6)Enabling executor in alamedaservice...$(tput sgr 0)"
+#         kubectl patch alamedaservice $alamedaservice_name -n $install_namespace --type merge --patch '{"spec":{"enableExecution": true}}'
+#         if [ "$?" != "0" ]; then
+#             echo -e "\n$(tput setaf 1)Error in enabling executor pod.$(tput sgr 0)"
+#             leave_prog
+#             exit 8
+#         fi
+#         modified="y"
+#         check_deployment_status 180 10 "alameda-executor" "on"
+#     elif [ "$current_executor_pod_name" != "" ] && [ "$switch_option" = "off" ]; then
+#         # Turn off
+#         echo -e "\n$(tput setaf 6)Disable executor in alamedaservice...$(tput sgr 0)"
+#         kubectl patch alamedaservice $alamedaservice_name -n $install_namespace --type merge --patch '{"spec":{"enableExecution": false}}'
+#         if [ "$?" != "0" ]; then
+#             echo -e "\n$(tput setaf 1)Error in deleting preloader pod.$(tput sgr 0)"
+#             leave_prog
+#             exit 8
+#         fi
+#         modified="y"
+#         check_deployment_status 180 10 "alameda-executor" "off"
+#     fi
 
-    if [ "$modified" = "y" ]; then
-        echo ""
-        wait_until_pods_ready 600 30 $install_namespace 5
-    fi
+#     if [ "$modified" = "y" ]; then
+#         echo ""
+#         wait_until_pods_ready 600 30 $install_namespace 5
+#     fi
 
-    get_current_executor_name
-    if [ "$current_executor_pod_name" = "" ] && [ "$switch_option" = "on" ]; then
-        echo -e "\n$(tput setaf 1)ERROR! Can't find executor pod.$(tput sgr 0)"
-        leave_prog
-        exit 8
-    elif [ "$current_executor_pod_name" != "" ] && [ "$switch_option" = "off" ]; then
-        echo -e "\n$(tput setaf 1)ERROR! Executor pod still exists as $current_executor_pod_name.$(tput sgr 0)"
-        leave_prog
-        exit 8
-    fi
+#     get_current_executor_name
+#     if [ "$current_executor_pod_name" = "" ] && [ "$switch_option" = "on" ]; then
+#         echo -e "\n$(tput setaf 1)ERROR! Can't find executor pod.$(tput sgr 0)"
+#         leave_prog
+#         exit 8
+#     elif [ "$current_executor_pod_name" != "" ] && [ "$switch_option" = "off" ]; then
+#         echo -e "\n$(tput setaf 1)ERROR! Executor pod still exists as $current_executor_pod_name.$(tput sgr 0)"
+#         leave_prog
+#         exit 8
+#     fi
 
-    echo "Done"
-    end=`date +%s`
-    duration=$((end-start))
-    echo "Duration switch_alameda_executor_in_alamedaservice = $duration" >> $debug_log
-}
+#     echo "Done"
+#     end=`date +%s`
+#     duration=$((end-start))
+#     echo "Duration switch_alameda_executor_in_alamedaservice = $duration" >> $debug_log
+# }
 
 enable_preloader_in_alamedaservice()
 {
@@ -1445,10 +1445,8 @@ while getopts "f:n:t:x:g:cdehikprvoba:" o; do
     esac
 done
 
-if [ "$prepare_environment" = "y" ] && [ "$cluster_name_specified" != "y" ]; then
-    echo -e "\n$(tput setaf 1)Error! You need to specify '-a your_cluster_name'.$(tput sgr 0)"
-    show_usage
-    exit 3
+if [[( "$prepare_environment" = "y" && "$cluster_name_specified" != "y" ) || ( "$install_nginx" = "y" && "$cluster_name_specified" != "y" )]]; then
+    check_cluster_name_not_empty
 fi
 
 if [ "$cluster_name_specified" = "y" ]; then
@@ -1588,6 +1586,7 @@ debug_log="debug.log"
 rm -rf $file_folder
 mkdir -p $file_folder
 current_location=`pwd`
+enable_execution="true"
 # copy preloader ab files if run historical only mode enabled
 preloader_folder="preloader_ab_runner"
 if [ "$run_preloader_with_historical_only" = "y" ] || [ "$run_ab_from_preloader" = "y" ]; then
@@ -1637,27 +1636,20 @@ if [ "$run_preloader_with_normal_mode" = "y" ] || [ "$run_preloader_with_histori
     # Move scale_down_pods into run_preloader_command method
     #scale_down_pods
     if [ "$run_preloader_with_normal_mode" = "y" ]; then
-        enable_execution="true"
         add_alamedascaler_for_nginx
-        switch_alameda_executor_in_alamedaservice "on"
-        #add_dd_tags_to_executor_env
         run_preloader_command "normal"
     else
         # historical mode
         get_datasource_in_alamedaorganization
         if [ "$data_source_type" = "datadog" ]; then
             enable_execution="false"
-            add_alamedascaler_for_nginx
         elif [ "$data_source_type" = "prometheus" ]; then
-            enable_execution="true"
-            add_alamedascaler_for_nginx
-            switch_alameda_executor_in_alamedaservice "on"
-            #add_dd_tags_to_executor_env
+            echo ""
         elif [ "$data_source_type" = "sysdig" ]; then
             # Not sure for now
             enable_execution="false"
-            add_alamedascaler_for_nginx
         fi
+        add_alamedascaler_for_nginx
         run_preloader_command "historical_only"
     fi
     verify_metrics_exist
@@ -1673,7 +1665,7 @@ fi
 if [ "$disable_preloader" = "y" ]; then
     # scale up if any failure encounter previously or program abort
     scale_up_pods
-    switch_alameda_executor_in_alamedaservice "off"
+    #switch_alameda_executor_in_alamedaservice "off"
     disable_preloader_in_alamedaservice
 fi
 
