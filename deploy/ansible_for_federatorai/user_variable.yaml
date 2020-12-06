@@ -26,12 +26,3 @@ storage_class_name: ""
 
 ###### Below info will be used when Federator.ai is installed in Kubernetes env
 expose_dashboard_and_rest_api_services: "" # y/n
-
-###### data adatper secret (datadog)
-need_update_secret: "" # y/n
-datadog_api_key: ""
-datadog_application_key: ""
-
-###### Add alamedascaler for monitoring cluster only (datadog)
-apply_cluster_alamedascaler: "" # y/n
-dd_cluster_name: "" # value of env DD_CLUSTER_NAME set in datadog cluster agent

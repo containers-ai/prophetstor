@@ -144,3 +144,4 @@
   vars:
       pod_number: 0
   include: check_pods_status.yaml
+  when: (previous_alamedaservice_name == "")

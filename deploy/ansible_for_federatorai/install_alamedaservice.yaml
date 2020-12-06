@@ -67,18 +67,22 @@
             type: pvc
             size: {{ log_storage_size }}Gi
             class: {{ storage_class_name }}
+            accessModes:
+              - ReadWriteOnce
           - usage: data
             type: pvc
             size: {{ data_storage_size }}Gi
             class: {{ storage_class_name }}
+            accessModes:
+              - ReadWriteOnce
   when: storage_type == "persistent"
 
 # Add content in alamedaservice file
-- name: Add GPU/VGA info in alamedaservice file
+- name: Add GPU/VPA info in alamedaservice file
   blockinfile: 
     dest: "{{ default_yaml_files_base_path }}/{{ federatorai_version }}/{{ alamedaservice_sample_file }}" 
     insertafter: EOF
-    marker: "## {mark} gpu/vga"
+    marker: "## {mark} gpu/vpa"
     block: |2
         enableGPU: false
 
@@ -165,8 +169,10 @@
           storages:
           - usage: data
             type: pvc
-            size: {{influxdb_storage_size}}Gi
-            class: {{storage_class_name}}
+            size: {{ influxdb_storage_size }}Gi
+            class: {{ storage_class_name }}
+            accessModes:
+              - ReadWriteOnce
   when: (enable_resource_requirement == "y") and (storage_type == "persistent")
 
 # Influxdb related
@@ -192,8 +198,10 @@
           storages:
           - usage: data
             type: pvc
-            size: ${influxdb_storage_size}Gi
-            class: ${storage_class_name}
+            size: {{ influxdb_storage_size }}Gi
+            class: {{ storage_class_name }}
+            accessModes:
+              - ReadWriteOnce
   when: (enable_resource_requirement != "y") and (storage_type == "persistent")
 
 # Apply yamls

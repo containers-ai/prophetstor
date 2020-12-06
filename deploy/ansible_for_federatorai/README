@@ -6,7 +6,7 @@ Prerequisite
 1. Install Ansible
 https://docs.ansible.com/ansible/latest/installation_guide/intro_installation.html
 
-2. Install collection “community.kubernetes“
+2. Install collection "community.kubernetes"
 root@node1740:~# ansible-galaxy collection install community.kubernetes
 
 3. Install python & pip

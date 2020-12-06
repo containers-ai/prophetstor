@@ -63,9 +63,26 @@ spec:
               value: "federatorai-operator"
             - name: DISABLE_OPERAND_RESOURCE_PROTECTION
               value: "false"
+          readinessProbe:
+            failureThreshold: 20
+            httpGet:
+              path: /validate-federatorai-containers-ai-v1alpha1-alamedaservice
+              port: 50443
+              scheme: HTTPS
+            initialDelaySeconds: 5
+            periodSeconds: 60
+            successThreshold: 1
+            timeoutSeconds: 5
           volumeMounts:
           - mountPath: /var/log/alameda
             name: log
+          - mountPath: /tmp/k8s-webhook-server/serving-certs
+            name: cert
+            readOnly: true
       volumes:
         - name: log
           emptyDir: {}
+        - name: cert
+          secret:
+            defaultMode: 420
+            secretName: federatorai-operator-admission
