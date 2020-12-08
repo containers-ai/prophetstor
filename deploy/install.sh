@@ -152,23 +152,52 @@ check_version()
     fi
 }
 
-check_alameda_datahub_tag()
+check_if_pod_match_expected_version()
 {
-    period="$1"
-    interval="$2"
-    namespace="$3"
+    pod_name="$1"
+    period="$2"
+    interval="$3"
+    namespace="$4"
 
     for ((i=0; i<$period; i+=$interval)); do
-         current_tag="`kubectl get pod -n $namespace -o custom-columns=NAME:.metadata.name,IMAGE:.spec.containers[*].image | grep datahub | head -1 |awk -F'/' '{print $NF}'|cut -d ':' -f2`"
+        current_tag="$(kubectl get pod -n $namespace -o custom-columns=NAME:.metadata.name,IMAGE:.spec.containers[*].image | grep "$pod_name" | head -1 |awk -F'/' '{print $NF}'|cut -d ':' -f2)"
         if [ "$current_tag" = "$tag_number" ]; then
-            echo -e "\ndatahub pod is running.\n"
+            echo -e "\n$pod_name pod is present.\n"
             return 0
         fi
-        # echo "Waiting for datahub pod with current tag number shows up as $tag_number ..."
-        echo "Waiting for datahub($tag_number) pod to be ready ..."
+        echo "Waiting for $pod_name($tag_number) pod to appear ..."
         sleep "$interval"
     done
-    echo -e "\n$(tput setaf 1)Warning!! Waited for $period seconds, but datahub pod doesn't show up. Please check $namespace namespace$(tput sgr 0)"
+    echo -e "\n$(tput setaf 1)Warning!! Waited for $period seconds, but $pod_name pod doesn't show up. Please check $namespace namespace$(tput sgr 0)"
+    leave_prog
+    exit 7
+}
+
+wait_until_single_pod_become_ready()
+{
+    pod_name="$1"
+    period="$2"
+    interval="$3"
+    namespace="$4"
+
+    for ((i=0; i<$period; i+=$interval)); do
+        while read _name _status _phase _version _reason _junk; do
+            if [ "$_status" != "True" ]; then
+                msg="Waiting for pod $_name in namespace $namespace to be ready ..."
+                [ "$_phase" != "" ] && msg="$msg phase: [$_phase]"
+                [ "$_reason" != "" ] && msg="$msg reason: [$_reason]"
+                echo "$msg"
+            else
+                echo -e "\n$pod_name pod is ready."
+                return 0
+            fi
+        done <<< "$(kubectl get pod -n $namespace \
+        -o=jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.conditions[?(@.type=="Ready")].status}{"\t"}{.status.phase}{"\t"}{.spec.containers[*].image}{"\t"}{.status.reason}{"\n"}{end}' \
+        | grep "$pod_name" |grep "$tag_number")"
+
+        sleep "$interval"
+    done
+    echo -e "\n$(tput setaf 1)Warning!! Waited for $period seconds, but $pod_name pod still isn't ready. Please check $namespace namespace$(tput sgr 0)"
     leave_prog
     exit 7
 }
@@ -245,7 +274,7 @@ wait_until_pods_ready()
     else
         # check if pods running
         if pods_ready $namespace; then
-            echo -e "\nAll $namespace pods are ready."
+            echo -e "\nAll pods under namespace($namespace) are ready."
             return 0
         fi
         echo "Waiting for pods in namespace $namespace to be ready..."
@@ -891,10 +920,12 @@ for yaml_fn in `ls [0-9]*.yaml | sort -n`; do
 done
 
 if [ "$need_upgrade" != "y" ];then
-    # Skip pod checking due to federatorai-operator with advanced version may cause some pods keep crashing (Jira FA-597/Jira FA-698)
-    # So we delay pod checking until alamedaservice is patched.
     wait_until_pods_ready $max_wait_pods_ready_time 30 $install_namespace 1
     echo -e "\n$(tput setaf 6)Install Federator.ai operator $tag_number successfully$(tput sgr 0)"
+else
+    # Upgrade
+    check_if_pod_match_expected_version "federatorai-operator" $max_wait_pods_ready_time 30 $install_namespace
+    wait_until_single_pod_become_ready "federatorai-operator" $max_wait_pods_ready_time 30 $install_namespace
 fi
 
 if [ "$ALAMEDASERVICE_FILE_PATH" = "" ]; then
@@ -1186,7 +1217,7 @@ else
 fi
 
 echo "Processing..."
-check_alameda_datahub_tag $max_wait_pods_ready_time 60 $install_namespace
+check_if_pod_match_expected_version "datahub" $max_wait_pods_ready_time 60 $install_namespace
 wait_until_pods_ready $max_wait_pods_ready_time 60 $install_namespace 5
 
 webhook_exist_checker

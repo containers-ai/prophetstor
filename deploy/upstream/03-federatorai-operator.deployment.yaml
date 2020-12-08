@@ -65,10 +65,8 @@ spec:
               value: "false"
           readinessProbe:
             failureThreshold: 20
-            httpGet:
-              path: /validate-federatorai-containers-ai-v1alpha1-alamedaservice
+            tcpSocket:
               port: 50443
-              scheme: HTTPS
             initialDelaySeconds: 5
             periodSeconds: 60
             successThreshold: 1
