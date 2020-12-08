@@ -140,11 +140,6 @@ download_files()
     if [ "$tag_first_digit" -ge "4" ] && [ "$tag_middle_digit" -ge "4" ]; then
         # >= 4.4
         scriptarray=("${scriptarray[@]}" "cluster-property-setup.sh")
-    elif [ "$tag_first_digit" -eq "4" ] && [ "$tag_middle_digit" -eq "3" ]; then
-        if [ "$tag_last_digit" -gt "1006" ] || [ "$tag_last_digit" = "datadog" ]; then
-            # (= 4.3 and > 1006) or (= 4.3 and = datadog)
-            scriptarray=("${scriptarray[@]}" "cluster-property-setup.sh")
-        fi
     fi
 
     mkdir -p $scripts_folder
@@ -216,9 +211,9 @@ download_files()
 
     alamedaservice_example="alamedaservice_sample.yaml"
     yamlarray=( "alamedadetection.yaml" "alamedanotificationchannel.yaml" "alamedanotificationtopic.yaml" )
-    if [ "$tag_first_digit" -eq "4" ] && [ "$tag_middle_digit" -eq "2" ]; then
-        yamlarray=("${yamlarray[@]}" "alamedascaler.yaml")
-    fi
+    # if [ "$tag_first_digit" -eq "4" ] && [ "$tag_middle_digit" -eq "2" ]; then
+    #     yamlarray=("${yamlarray[@]}" "alamedascaler.yaml")
+    # fi
 
     mkdir -p $yamls_folder
     cd $yamls_folder
@@ -303,21 +298,12 @@ go_interactive()
     if [ "$enable_private_repo" = "y" ]; then
         ask_push_image
         if [ "$push_image" = "y" ]; then
-            old_build="n"
-            if [ "$tag_first_digit" -eq "4" ] && [ "$tag_middle_digit" -eq "2" ] && [ "$tag_last_digit" -lt "759" ]; then
-                # < 4.2.759
-                old_build="y"
+            if [ "$source_repo_url" != "" ]; then
+                bash $scripts_folder/prepare-private-repository.sh --pull --tag $tag_number --push --repo-url $repo_url --source-repo-url $source_repo_url
+            else
+                bash $scripts_folder/prepare-private-repository.sh --pull --tag $tag_number --push --repo-url $repo_url
             fi
 
-            if [ "$old_build" = "n" ]; then
-                if [ "$source_repo_url" != "" ]; then
-                    bash $scripts_folder/prepare-private-repository.sh --pull --tag $tag_number --push --repo-url $repo_url --source-repo-url $source_repo_url
-                else
-                    bash $scripts_folder/prepare-private-repository.sh --pull --tag $tag_number --push --repo-url $repo_url
-                fi
-            else
-                bash $scripts_folder/prepare-private-repository.sh $tag_number $repo_url
-            fi
             if [ "$?" != "0" ];then
                 echo -e "\n$(tput setaf 1)Abort, prepare-private-repository.sh ran with errors.$(tput sgr 0)"
                 exit 3
@@ -346,12 +332,6 @@ prepare_media()
 
     mkdir -p $image_folder
     cd $image_folder
-
-    if [ "$tag_first_digit" -eq "4" ] && [ "$tag_middle_digit" -eq "2" ] && [ "$tag_last_digit" -lt "759" ]; then
-        # < 4.2.759
-        echo -e "\n$(tput setaf 1)Abort, --prepare_media only support build version greater than v4.2.758$(tput sgr 0)"
-        exit 3
-    fi
 
     if [ "$source_repo_url" != "" ]; then
         bash ../$scripts_folder/prepare-private-repository.sh --pull --tag $tag_number --source-repo-url $source_repo_url
