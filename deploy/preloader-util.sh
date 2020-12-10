@@ -268,19 +268,22 @@ refine_preloader_variables_with_alamedaservice()
 {
     ## Assign preloader environment variables
     local _env_list=""
-    if [ "${PRELOADER_GRANUALARITY}" != "" ]; then
+    if [ "${PRELOADER_GRANULARITY}" != "" ]; then
+        echo -e "\nSetting variable PRELOADER_GRANULARITY='${PRELOADER_GRANULARITY}'"
         _env_list="${_env_list}
-    - name: PRELOADER_GRANULARITY
-      value: \"${PRELOADER_GRANUALARITY}\"  # unit is sec, history preloaded data granularity
+    - name: PRELOADER_PRELOADER_GRANULARITY
+      value: \"${PRELOADER_GRANULARITY}\"  # unit is sec, history preloaded data granularity
 "
     fi
     if [ "${PRELOADER_PRELOAD_COUNT}" != "" ]; then
+        echo -e "Setting variable PRELOADER_PRELOAD_COUNT='${PRELOADER_PRELOAD_COUNT}'"
         _env_list="${_env_list}
     - name: PRELOADER_PRELOADER_PRELOAD_COUNT
       value: \"${PRELOADER_PRELOAD_COUNT}\"
 "
     fi
     if [ "${PRELOADER_PRELOAD_UNIT}" != "" ]; then
+        echo -e "Setting variable PRELOADER_PRELOAD_UNIT='${PRELOADER_PRELOAD_UNIT}'"
         _env_list="${_env_list}
     - name: PRELOADER_PRELOADER_PRELOAD_UNIT
       value: \"${PRELOADER_PRELOAD_UNIT}\"    # "month"/"day"/"hour"/"minute"
