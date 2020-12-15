@@ -888,7 +888,7 @@ fi
 
 # for namespace
 sed -i "s/name: federatorai/name: ${install_namespace}/g" 00*.yaml
-sed -i "s/namespace: federatorai/namespace: ${install_namespace}/g" 01*.yaml 03*.yaml 05*.yaml 06*.yaml 07*.yaml
+sed -i "s|\bnamespace:.*|namespace: ${install_namespace}|g" *.yaml
 
 if [ "${ENABLE_RESOURCE_REQUIREMENT}" = "y" ]; then
     sed -i -e "/image: /a\          resources:\n            limits:\n              cpu: 4000m\n              memory: 8000Mi\n            requests:\n              cpu: 100m\n              memory: 100Mi" `ls 03*.yaml`
@@ -1186,7 +1186,7 @@ __EOF__
 
         kubectl apply -f $alamedaservice_example >/dev/null
         if [ "$?" != "0" ]; then
-            echo -e "\n$(tput setaf 1)Error! Failed to update alamedaservice yaml (${file_folder}/${$alamedaservice_example}).$(tput sgr 0)"
+            echo -e "\n$(tput setaf 1)Error! Failed to update alamedaservice yaml (${file_folder}/${alamedaservice_example}).$(tput sgr 0)"
             exit 1
         fi
     else
