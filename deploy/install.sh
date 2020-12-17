@@ -860,14 +860,14 @@ if [ "$offline_mode_enabled" != "y" ]; then
     done
 else
     # Offline Mode
-    # Copy Federator.ai operator 00-07 yamls
+    # Copy Federator.ai operator 00-11 yamls
     echo "Copying Federator.ai operator yamls ..."
-    if [[ "`ls ${script_located_path}/../operator/[0][0-7]*.yaml 2>/dev/null|wc -l`" -lt "8" ]]; then
+    if [[ "`ls ${script_located_path}/../operator/[0-9]*yaml 2>/dev/null|wc -l`" -lt "12" ]]; then
         echo -e "\n$(tput setaf 1)Error! Failed to locate all Federator.ai operator yaml files$(tput sgr 0)"
         echo "Please make sure you extract the offline install package and execute install.sh under scripts folder  "
         exit 1
     fi
-    cp ${script_located_path}/../operator/[0][0-7]*.yaml .
+    cp ${script_located_path}/../operator/[0-9]*yaml .
     echo "Done"
 fi
 

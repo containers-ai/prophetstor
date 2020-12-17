@@ -1032,6 +1032,7 @@ spec:
     - type: generic
       enableExecution: ${enable_execution}
       scaling: ${autoscaling_method}
+      evictable: true
       generic:
         target:
           namespace: ${nginx_ns}

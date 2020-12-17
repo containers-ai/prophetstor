@@ -52,6 +52,11 @@ parse_version(){
 download_operator_yaml_if_needed()
 {
     operator_files=`curl --silent https://api.github.com/repos/containers-ai/prophetstor/contents/deploy/upstream?ref=${tag_number} 2>&1|grep "\"name\":"|cut -d ':' -f2|cut -d '"' -f2`
+    if [ "$operator_files" = "" ]; then
+        echo -e "\n$(tput setaf 1)Abort, download operator file list failed!!!$(tput sgr 0)"
+        echo "Please check tag name and network"
+        exit 1
+    fi
 
     for file in `echo $operator_files`
     do
@@ -65,7 +70,7 @@ download_operator_yaml_if_needed()
 
     # for namespace
     sed -i "s/name:.*/name: ${installed_namespace}/g" 00*.yaml
-    sed -i "s/namespace:.*/namespace: ${installed_namespace}/g" 01*.yaml 03*.yaml 05*.yaml 06*.yaml 07*.yaml
+    sed -i "s|\bnamespace:.*|namespace: ${installed_namespace}|g" *.yaml
 
 }
 
@@ -160,7 +165,7 @@ if [ "$offline_mode" = "y" ]; then
 
     cd ../$operator_folder
     sed -i "s/name: federatorai/name: ${installed_namespace}/g" 00*.yaml
-    sed -i "s/namespace: federatorai/namespace: ${installed_namespace}/g" 01*.yaml 03*.yaml 05*.yaml 06*.yaml 07*.yaml
+    sed -i "s|\bnamespace:.*|namespace: ${installed_namespace}|g" *.yaml
 
     for yaml_file in `ls ../$operator_folder/[0-9]*yaml|sort -n -r`
     do

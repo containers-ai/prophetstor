@@ -101,20 +101,20 @@
     regexp: "name: federatorai" 
     replace: "name: {{ installed_namespace }}"
 
-# Replace namespace in other yaml
-- name: Find other yaml files
+# Replace namespace in all yamls
+- name: Find all yaml files
   find:
     paths: "{{ default_yaml_files_base_path }}/{{ federatorai_version }}"
-    patterns: "^0[5-7]-.*.yaml$|^03-.*.yaml$|^01-.*.yaml$"
+    patterns: ".*.yaml$"
     file_type: "file"
     use_regex: yes
-  register: yaml_others_name
-- name: Replace ns in other yamls
+  register: yaml_all_names
+- name: Replace ns in all yamls
   replace: 
     path: "{{ item.path }}"
     regexp: "namespace: federatorai" 
     replace: "namespace: {{ installed_namespace }}"
-  loop: "{{ yaml_others_name.files }}"
+  loop: "{{ yaml_all_names.files }}"
 
 # For upgrade - delete previous federatorai-operator deployment before apply new yaml(s)
 - name: Delete previous Federator.ai operator deployment
@@ -127,13 +127,6 @@
   when: (previous_alameda_namespace != "")
 
 # Apply yamls
-- name: Find all yaml files
-  find:
-    paths: "{{ default_yaml_files_base_path }}/{{ federatorai_version }}"
-    patterns: "^0[0-7]-.*.yaml$"
-    file_type: "file"
-    use_regex: yes
-  register: yaml_all_names
 - name: Apply operator yamls
   community.kubernetes.k8s:
     state: present

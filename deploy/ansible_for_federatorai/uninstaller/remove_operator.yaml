@@ -51,29 +51,22 @@
     regexp: "name: federatorai" 
     replace: "name: {{ previous_alameda_namespace }}"
 
-# Replace namespace in other yaml (01*.yaml 03*.yaml 05*.yaml 06*.yaml 07*.yaml)
-- name: Find other yaml files
+# Replace namespace in all yamls
+- name: Find all yaml files
   find:
     paths: "{{ default_yaml_files_base_path }}/{{ federatorai_version }}"
-    patterns: "^0[5-7]-.*.yaml$|^03-.*.yaml$|^01-.*.yaml$"
+    patterns: ".*.yaml$"
     file_type: "file"
     use_regex: yes
-  register: yaml_others_name
-- name: Replace ns in other yamls
+  register: yaml_all_names
+- name: Replace ns in all yamls
   replace: 
     path: "{{ item.path }}"
     regexp: "namespace: federatorai" 
     replace: "namespace: {{ previous_alameda_namespace }}"
-  loop: "{{ yaml_others_name.files }}"
+  loop: "{{ yaml_all_names.files }}"
 
 # Delete yamls
-- name: Find all yaml files
-  find:
-    paths: "{{ default_yaml_files_base_path }}/{{ federatorai_version }}"
-    patterns: "^0[0-7]-.*.yaml$"  
-    file_type: "file"
-    use_regex: yes
-  register: yaml_all_names
 
 - name: Delete operator yamls
   community.kubernetes.k8s:
