@@ -1449,6 +1449,19 @@ while getopts "f:n:t:x:g:cdehikprvoba:" o; do
     esac
 done
 
+kubectl version|grep -q "^Server"
+if [ "$?" != "0" ];then
+    echo -e "\nPlease login to Kubernetes first."
+    exit
+fi
+
+install_namespace="`kubectl get pods --all-namespaces |grep "alameda-datahub-"|awk '{print $1}'|head -1`"
+
+if [ "$install_namespace" = "" ];then
+    echo -e "\n$(tput setaf 1)Error! Please Install Federatorai before running this script.$(tput sgr 0)"
+    exit 3
+fi
+
 if [[( "$prepare_environment" = "y" && "$cluster_name_specified" != "y" ) || ( "$install_nginx" = "y" && "$cluster_name_specified" != "y" )]]; then
     check_cluster_name_not_empty
 fi
@@ -1476,7 +1489,7 @@ if [ "$cluster_name_specified" = "y" ]; then
     fi
 
     # check cluster-only alamedascaler exist
-    kubectl get alamedascaler -n federatorai -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.spec.clusterName}{"\n"}'|grep -q "^${cluster_name} ${cluster_name}"
+    kubectl get alamedascaler -n $install_namespace -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.spec.clusterName}{"\n"}'|grep -q "^${cluster_name} ${cluster_name}"
     if [ "$?" != "0" ];then
         echo -e "\n$(tput setaf 1)Error! Failed to find cluster-only alamedascaler with cluster name ($cluster_name).$(tput sgr 0)"
         echo -e "\n$(tput setaf 1)Please use Federator.ai GUI to configure cluster first.$(tput sgr 0)"
@@ -1548,22 +1561,9 @@ else
     nginx_name="nginx-prepared"
 fi
 
-kubectl version|grep -q "^Server"
-if [ "$?" != "0" ];then
-    echo -e "\nPlease login to Kubernetes first."
-    exit
-fi
-
 echo "Checking environment version..."
 check_version
 echo "...Passed"
-
-install_namespace="`kubectl get pods --all-namespaces |grep "alameda-datahub-"|awk '{print $1}'|head -1`"
-
-if [ "$install_namespace" = "" ];then
-    echo -e "\n$(tput setaf 1)Error! Please Install Federatorai before running this script.$(tput sgr 0)"
-    exit 3
-fi
 
 alamedaservice_name="`kubectl get alamedaservice -n $install_namespace -o jsonpath='{range .items[*]}{.metadata.name}'`"
 if [ "$alamedaservice_name" = "" ]; then
