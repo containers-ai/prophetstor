@@ -1325,11 +1325,11 @@ __EOF__
 
 check_recommendation_pod_type()
 {
-    dispatcher_type_deploy_name="federatorai-recommend-dispatcher"
+    dispatcher_type_deploy_name="federatorai-recommender-dispatcher"
     non_dispatcher_type_deploy_name="alameda-recommender"
     kubectl -n $install_namespace get deploy $dispatcher_type_deploy_name >/dev/null 2>&1
     if [ "$?" = "0" ]; then
-        # alameda-recommend-worker and alameda-recommend-dispatcher
+        # federatorai-recommender-worker and federatorai-recommender-dispatcher
         restart_recommender_deploy=$dispatcher_type_deploy_name
     else
         # alameda-recommender
