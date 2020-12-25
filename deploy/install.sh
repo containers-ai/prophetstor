@@ -19,7 +19,7 @@
 #   -n followed by install_namespace
 #   -s followed by storage_type
 #   -l followed by log_size
-#   -d followed by data_size
+#   -d followed by aiengine_size
 #   -i followed by influxdb_size
 #   -c followed by storage_class
 #   -x followed by expose_service (y or n)
@@ -674,7 +674,7 @@ done
 [ "${s_arg}" != "" ] && storage_type="${s_arg}"
 [ "${l_arg}" != "" ] && log_size="${l_arg}"
 [ "${i_arg}" != "" ] && influxdb_size="${i_arg}"
-[ "${d_arg}" != "" ] && data_size="${d_arg}"
+[ "${d_arg}" != "" ] && aiengine_size="${d_arg}"
 [ "${c_arg}" != "" ] && storage_class="${c_arg}"
 [ "${x_arg}" != "" ] && expose_service="${x_arg}"
 [ "$expose_service" = "" ] && expose_service="y" # Will expose service by default if not specified
@@ -810,7 +810,7 @@ if [ "$ALAMEDASERVICE_FILE_PATH" = "" ]; then
         echo "storage_type=$storage_type"
         echo "log_size=$log_size"
         echo "influxdb_size=$influxdb_size"
-        echo "data_size=$data_size"
+        echo "aiengine_size=$aiengine_size"
         echo "storage_class=$storage_class"
         if [ "$openshift_minor_version" = "" ]; then
             #k8s
@@ -974,7 +974,7 @@ if [ "$ALAMEDASERVICE_FILE_PATH" = "" ]; then
             #prometheus_address=""
             storage_type=""
             log_size=""
-            data_size=""
+            aiengine_size=""
             influxdb_size=""
             storage_class=""
             expose_service=""
@@ -1000,8 +1000,8 @@ if [ "$ALAMEDASERVICE_FILE_PATH" = "" ]; then
                 read -r -p "$(tput setaf 127)Specify log storage size [e.g., 10 for 10GB, default: 10]: $(tput sgr 0)" log_size </dev/tty
                 log_size=${log_size:-$default}
                 default="10"
-                read -r -p "$(tput setaf 127)Specify data storage size [e.g., 10 for 10GB, default: 10]: $(tput sgr 0)" data_size </dev/tty
-                data_size=${data_size:-$default}
+                read -r -p "$(tput setaf 127)Specify AI engine storage size [e.g., 10 for 10GB, default: 10]: $(tput sgr 0)" aiengine_size </dev/tty
+                aiengine_size=${aiengine_size:-$default}
                 default="100"
                 read -r -p "$(tput setaf 127)Specify InfluxDB storage size [e.g., 100 for 100GB, default: 100]: $(tput sgr 0)" influxdb_size </dev/tty
                 influxdb_size=${influxdb_size:-$default}
@@ -1028,7 +1028,7 @@ if [ "$ALAMEDASERVICE_FILE_PATH" = "" ]; then
             echo "storage_type = $storage_type"
             if [[ "$storage_type" == "persistent" ]]; then
                 echo "log storage size = $log_size GB"
-                echo "data storage size = $data_size GB"
+                echo "AI engine storage size = $aiengine_size GB"
                 echo "InfluxDB storage size = $influxdb_size GB"
                 echo "storage class name = $storage_class"
             fi
@@ -1068,12 +1068,14 @@ if [ "$ALAMEDASERVICE_FILE_PATH" = "" ]; then
       class: ${storage_class}
       accessModes:
         - ReadWriteOnce
-    - usage: data
-      type: pvc
-      size: ${data_size}Gi
-      class: ${storage_class}
-      accessModes:
-        - ReadWriteOnce
+
+__EOF__
+            # FEDERATORAI_MAXIMUM_LOG_SIZE
+            log_allowance=$((log_size*1024*1024*1024*90/100)) #byte
+            cat >> ${alamedaservice_example} << __EOF__
+  env:
+  - name: FEDERATORAI_MAXIMUM_LOG_SIZE
+    value: "${log_allowance}"
 
 __EOF__
         fi
@@ -1113,14 +1115,6 @@ __EOF__
     requests:
       cpu: 100m
       memory: 100Mi
-  alamedaAi:
-    resources:
-      limits:
-        cpu: 8000m
-        memory: 8000Mi
-      requests:
-        cpu: 2000m
-        memory: 500Mi
   alamedaDatahub:
     resources:
       requests:
@@ -1150,6 +1144,21 @@ __EOF__
         fi
         if [ "${ENABLE_RESOURCE_REQUIREMENT}" = "y" ] && [ "$storage_type" = "persistent" ]; then
             cat >> ${alamedaservice_example} << __EOF__
+  alamedaAi:
+    resources:
+      limits:
+        cpu: 8000m
+        memory: 8000Mi
+      requests:
+        cpu: 2000m
+        memory: 500Mi
+    storages:
+    - usage: data
+      type: pvc
+      size: ${aiengine_size}Gi
+      class: ${storage_class}
+      accessModes:
+        - ReadWriteOnce
   alamedaInfluxdb:
     resources:
       requests:
@@ -1162,10 +1171,35 @@ __EOF__
       class: ${storage_class}
       accessModes:
         - ReadWriteOnce
+  fedemeterInfluxdb:
+    resources:
+      requests:
+        cpu: 500m
+        memory: 500Mi
+    storages:
+    - usage: data
+      type: pvc
+      size: 10Gi
+      class: ${storage_class}
+      accessModes:
+        - ReadWriteOnce
 __EOF__
         elif [ "${ENABLE_RESOURCE_REQUIREMENT}" = "y" ] && [ "$storage_type" = "ephemeral" ]; then
             cat >> ${alamedaservice_example} << __EOF__
+  alamedaAi:
+    resources:
+      limits:
+        cpu: 8000m
+        memory: 8000Mi
+      requests:
+        cpu: 2000m
+        memory: 500Mi
   alamedaInfluxdb:
+    resources:
+      requests:
+        cpu: 500m
+        memory: 500Mi
+  fedemeterInfluxdb:
     resources:
       requests:
         cpu: 500m
@@ -1173,11 +1207,27 @@ __EOF__
 __EOF__
         elif [ "${ENABLE_RESOURCE_REQUIREMENT}" != "y" ] && [ "$storage_type" = "persistent" ]; then
             cat >> ${alamedaservice_example} << __EOF__
+  alamedaAi:
+    storages:
+    - usage: data
+      type: pvc
+      size: ${aiengine_size}Gi
+      class: ${storage_class}
+      accessModes:
+        - ReadWriteOnce
   alamedaInfluxdb:
     storages:
     - usage: data
       type: pvc
       size: ${influxdb_size}Gi
+      class: ${storage_class}
+      accessModes:
+        - ReadWriteOnce
+  fedemeterInfluxdb:
+    storages:
+    - usage: data
+      type: pvc
+      size: 10Gi
       class: ${storage_class}
       accessModes:
         - ReadWriteOnce
@@ -1198,6 +1248,26 @@ __EOF__
             kubectl patch alamedaservice $previous_alamedaservice -n $install_namespace --type merge --patch "{\"spec\":{\"imageLocation\": \"${RELATED_IMAGE_URL_PREFIX}\"}}"
         fi
 
+        # Check if FEDERATORAI_MAXIMUM_LOG_SIZE needed to be added.
+        current_max_log="$(kubectl -n $install_namespace get alamedaservice $previous_alamedaservice -o 'jsonpath={.spec.env[?(@.name=="FEDERATORAI_MAXIMUM_LOG_SIZE")]}')"
+        if [ "$current_max_log" == "" ]; then
+            # Check storage type
+            type="$(kubectl -n $install_namespace get alamedaservice $previous_alamedaservice -o 'jsonpath={.spec.storages[?(@.usage=="log")].type}')"
+            if [ "$type" == "pvc" ]; then
+                # Get current pvc log size
+                size="$(kubectl -n $install_namespace get alamedaservice $previous_alamedaservice -o 'jsonpath={.spec.storages[?(@.usage=="log")].size}'|sed 's/..$//')"
+                if [ "$size" != "" ]; then
+                    log_allowance=$((size*1024*1024*1024*90/100)) #byte
+                else
+                    log_allowance=$((10*1024*1024*1024*90/100)) #byte
+                fi
+            else
+                # ephemeral
+                log_allowance=$((10*1024*1024*1024*90/100)) #byte
+            fi
+            # patch size
+            kubectl patch alamedaservice $previous_alamedaservice -n $install_namespace --type json --patch "[ { \"op\" : \"add\" , \"path\" : \"/spec/env/-\" , \"value\" : { \"name\" : \"FEDERATORAI_MAXIMUM_LOG_SIZE\", \"value\" : \"$log_allowance\" } } ]"
+        fi
         # Restart operator after patching alamedaservice
         kubectl scale deployment federatorai-operator -n $install_namespace --replicas=0
         kubectl scale deployment federatorai-operator -n $install_namespace --replicas=1

@@ -14,8 +14,8 @@
     namespace: "{{ installed_namespace }}"
   register: ready_list
   until: ready_list |to_json | from_json| json_query("resources[?status.containerStatuses[0].ready == `true`].status.containerStatuses[0].ready")|length > pod_number and ready_list |to_json | from_json| json_query("resources[?status.containerStatuses[0].ready == `false`].status.containerStatuses[0].ready")|length == 0
-  retries: 180
-  delay: 10
+  retries: 60
+  delay: 30
 
 - debug:
     var: "ready_list |to_json | from_json| json_query('{\"pod_name\": resources[*].metadata.name, \"ready\": resources[*].status.containerStatuses[0].ready}')"
