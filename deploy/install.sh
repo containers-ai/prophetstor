@@ -1265,8 +1265,14 @@ __EOF__
                 # ephemeral
                 log_allowance=$((10*1024*1024*1024*90/100)) #byte
             fi
-            # patch size
-            kubectl patch alamedaservice $previous_alamedaservice -n $install_namespace --type json --patch "[ { \"op\" : \"add\" , \"path\" : \"/spec/env/-\" , \"value\" : { \"name\" : \"FEDERATORAI_MAXIMUM_LOG_SIZE\", \"value\" : \"$log_allowance\" } } ]"
+            current_env_exist="$(kubectl -n $install_namespace get alamedaservice $previous_alamedaservice -o 'jsonpath={.spec.env}'|wc -c)"
+            if [ "$current_env_exist" == 0 ]; then
+                # env section empty
+                kubectl patch alamedaservice $previous_alamedaservice -n $install_namespace --type merge --patch "{\"spec\":{\"env\":[{\"name\": \"FEDERATORAI_MAXIMUM_LOG_SIZE\",\"value\": \"$log_allowance\"}]}}"
+            else
+                # env section exist
+                kubectl patch alamedaservice $previous_alamedaservice -n $install_namespace --type json --patch "[ { \"op\" : \"add\" , \"path\" : \"/spec/env/-\" , \"value\" : { \"name\" : \"FEDERATORAI_MAXIMUM_LOG_SIZE\", \"value\" : \"$log_allowance\" } } ]"
+            fi
         fi
         # Restart operator after patching alamedaservice
         kubectl scale deployment federatorai-operator -n $install_namespace --replicas=0
