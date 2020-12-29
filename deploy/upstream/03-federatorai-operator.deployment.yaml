@@ -43,6 +43,9 @@ spec:
           volumeMounts:
           - mountPath: /var/log/alameda
             name: log
+          - mountPath: /tmp/k8s-webhook-server/serving-certs
+            name: cert
+            readOnly: true
       containers:
         - name: federatorai-operator
           # Replace this with the built image name

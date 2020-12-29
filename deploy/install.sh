@@ -289,6 +289,27 @@ wait_until_pods_ready()
   exit 4
 }
 
+wait_until_cr_ready()
+{
+  local period="$1"
+  local interval="$2"
+  local namespace="$3"
+
+  for ((i=0; i<$period; i+=$interval)); do
+    # check if cr created
+    if [ "`kubectl get alamedaorganization default --no-headers -o custom-columns=Name:.metadata.name -n $namespace 2>/dev/null`" = "default" ]; then
+        echo -e "\nThe default alamedaorganization under namespace $namespace is ready."
+        return 0
+    else
+        echo "Waiting for default alamedaorganization in namespace $namespace to be created..."
+    fi
+    sleep "$interval"
+  done
+  echo -e "\n$(tput setaf 1)Warning!! Waited for $period seconds, but default alamedaorganization is not ready yet. Please check $namespace namespace$(tput sgr 0)"
+  leave_prog
+  exit 4
+}
+
 get_grafana_route()
 {
     if [ "$openshift_minor_version" != "" ] ; then
@@ -1295,6 +1316,7 @@ fi
 echo "Processing..."
 check_if_pod_match_expected_version "datahub" $max_wait_pods_ready_time 60 $install_namespace
 wait_until_pods_ready $max_wait_pods_ready_time 60 $install_namespace 5
+wait_until_cr_ready $max_wait_pods_ready_time 60 $install_namespace
 
 webhook_exist_checker
 if [ "$webhook_exist" != "y" ];then
