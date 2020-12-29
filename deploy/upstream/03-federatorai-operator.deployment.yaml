@@ -65,8 +65,9 @@ spec:
               value: "false"
           readinessProbe:
             failureThreshold: 20
-            tcpSocket:
-              port: 50443
+            httpGet:
+              path: /readyz
+              port: 8083
             initialDelaySeconds: 5
             periodSeconds: 60
             successThreshold: 1
