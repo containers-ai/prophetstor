@@ -445,6 +445,19 @@ check_previous_alamedascaler()
     done <<< "$(kubectl get alamedascaler --all-namespaces --output jsonpath='{range .items[*]}{"\n"}{.apiVersion}{"\t"}{.metadata.name}{"\t"}{.metadata.namespace}' 2>/dev/null)"
 }
 
+check_alamedaservice()
+{
+    local _images=""
+    _images="`kubectl -n ${install_namespace} get alamedaservice -o yaml | grep ' image:' | tr -d '\"' | sed 's/image://g' | xargs`"
+    if [ "${_images}" != "" ]; then
+        /bin/echo -e "\n$(tput setaf 1)Warning!! The following container image is currently using inside alamedaservice.$(tput sgr 0)"
+        for i in ${_images}; do
+            /bin/echo -e "\t$(tput setaf 1)${i}$(tput sgr 0)"
+        done
+    fi
+    return 0
+}
+
 get_datadog_agent_info()
 {
     while read a b c
@@ -1331,6 +1344,7 @@ echo -e "$(tput setaf 6)\nInstall Federator.ai $tag_number successfully$(tput sg
 check_previous_alamedascaler
 ###Configure data source from GUI
 #setup_cluster_alamedascaler
+check_alamedaservice
 leave_prog
 exit 0
 

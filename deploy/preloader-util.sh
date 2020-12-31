@@ -1061,7 +1061,7 @@ cleanup_influxdb_prediction_related_contents()
     start=`date +%s`
     echo -e "\n$(tput setaf 6)Cleaning old influxdb prediction/recommendation/planning records ...$(tput sgr 0)"
     influxdb_pod_name="`kubectl get pods -n $install_namespace |grep "alameda-influxdb-"|awk '{print $1}'|head -1`"
-    for database in `echo "alameda_prediction alameda_recommendation alameda_planning"`
+    for database in alameda_prediction alameda_recommendation alameda_planning alameda_fedemeter
     do
         echo "database=$database"
         # prepare sql command
