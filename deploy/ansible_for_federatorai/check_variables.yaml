@@ -38,7 +38,7 @@
   when: storage_type == "persistent" and item == ""
   loop:
     - "{{ log_storage_size }}"
-    - "{{ data_storage_size }}"
+    - "{{ ai_engine_size }}"
     - "{{ influxdb_storage_size }}"
     - "{{ storage_class_name }}"
 

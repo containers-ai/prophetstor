@@ -56,6 +56,11 @@
     warn: no
   when: storage_type == "persistent"
 
+# Calculate log allowance
+- name: Get log_allowance
+  set_fact:
+     log_allowance: "{{ (log_storage_size *1024*1024*1024*90/100)|int|abs }}"
+
 # Add content in alamedaservice file
 - name: Add pvc storgae info in alamedaservice file if necessary
   blockinfile: 
@@ -69,12 +74,9 @@
             class: {{ storage_class_name }}
             accessModes:
               - ReadWriteOnce
-          - usage: data
-            type: pvc
-            size: {{ data_storage_size }}Gi
-            class: {{ storage_class_name }}
-            accessModes:
-              - ReadWriteOnce
+        env:
+        - name: FEDERATORAI_MAXIMUM_LOG_SIZE
+          value: "{{ log_allowance }}"
   when: storage_type == "persistent"
 
 # Add content in alamedaservice file
@@ -120,14 +122,6 @@
           requests:
             cpu: 100m
             memory: 100Mi
-        alamedaAi:
-          resources:
-            limits:
-              cpu: 8000m
-              memory: 8000Mi
-            requests:
-              cpu: 2000m
-              memory: 500Mi
         alamedaDatahub:
           resources:
             requests:
@@ -155,8 +149,7 @@
               memory: 100Mi
   when: (enable_resource_requirement == "y")
 
-# Influxdb related
-- name: Add influxdb resource requirements info in alamedaservice file if necessary
+- name: Add influxdb and alamedaAi resource requirements info in alamedaservice file if necessary
   blockinfile: 
     dest: "{{ default_yaml_files_base_path }}/{{ federatorai_version }}/{{ alamedaservice_sample_file }}" 
     marker: "## {mark} influxdb (persistent) resource requirements info"
@@ -173,10 +166,36 @@
             class: {{ storage_class_name }}
             accessModes:
               - ReadWriteOnce
+        alamedaAi:
+          resources:
+            limits:
+              cpu: 8000m
+              memory: 8000Mi
+            requests:
+              cpu: 2000m
+              memory: 500Mi
+          storages:
+          - usage: data
+            type: pvc
+            size: {{ ai_engine_size }}Gi
+            class: {{ storage_class_name }}
+            accessModes:
+              - ReadWriteOnce
+        fedemeterInfluxdb:
+          resources:
+            requests:
+              cpu: 500m
+              memory: 500Mi
+          storages:
+          - usage: data
+            type: pvc
+            size: 10Gi
+            class: {{ storage_class_name }}
+            accessModes:
+              - ReadWriteOnce
   when: (enable_resource_requirement == "y") and (storage_type == "persistent")
 
-# Influxdb related
-- name: Add influxdb resource requirements info in alamedaservice file if necessary
+- name: Add influxdb and alamedaAi resource requirements info in alamedaservice file if necessary
   blockinfile: 
     dest: "{{ default_yaml_files_base_path }}/{{ federatorai_version }}/{{ alamedaservice_sample_file }}" 
     marker: "## {mark} influxdb (ephemeral) resource requirements info"
@@ -186,10 +205,22 @@
             requests:
               cpu: 500m
               memory: 500Mi
+        alamedaAi:
+          resources:
+            limits:
+              cpu: 8000m
+              memory: 8000Mi
+            requests:
+              cpu: 2000m
+              memory: 500Mi
+        fedemeterInfluxdb:
+          resources:
+            requests:
+              cpu: 500m
+              memory: 500Mi
   when: (enable_resource_requirement == "y") and (storage_type == "ephemeral")
 
-# Influxdb related
-- name: Add influxdb info in alamedaservice file if necessary
+- name: Add influxdb and alamedaAi resource requirements info in alamedaservice file if necessary
   blockinfile: 
     dest: "{{ default_yaml_files_base_path }}/{{ federatorai_version }}/{{ alamedaservice_sample_file }}" 
     marker: "## {mark} influxdb info"
@@ -199,6 +230,22 @@
           - usage: data
             type: pvc
             size: {{ influxdb_storage_size }}Gi
+            class: {{ storage_class_name }}
+            accessModes:
+              - ReadWriteOnce
+        alamedaAi:
+          storages:
+          - usage: data
+            type: pvc
+            size: {{ ai_engine_size }}Gi
+            class: {{ storage_class_name }}
+            accessModes:
+              - ReadWriteOnce
+        fedemeterInfluxdb:
+          storages:
+          - usage: data
+            type: pvc
+            size: 10Gi
             class: {{ storage_class_name }}
             accessModes:
               - ReadWriteOnce

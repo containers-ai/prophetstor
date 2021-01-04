@@ -19,7 +19,7 @@ storage_type: "" # ephemeral/persistent
 ###### Below info will be used when storage_type is persistent
 ###### 10 = 10GB
 log_storage_size: 10
-data_storage_size: 10
+ai_engine_size: 10
 influxdb_storage_size: 100
 storage_class_name: ""
 
