@@ -4821,7 +4821,6 @@ spec:
                   type: string
                 signatureData:
                   description: SignatureData provides user to apply signature data
-                    which is download from ProphetStor to Federator.ai
                   type: string
               required:
               - codeNumber
@@ -4975,8 +4974,8 @@ spec:
                     when Federatorai-Operator handled keycode
                   type: string
                 registrationData:
-                  description: RegistrationData contains data that user need to send
-                    to ProphetStor to activate keycode
+                  description: RegistrationData contains data needs to be sent for
+                    activating keycode
                   type: string
                 state:
                   description: State represents the state of keycode processing
