@@ -10,6 +10,7 @@ spec:
                                  ## it is recommended NOT to use ephemeral data storage for Alameda influxdb component when self-Driving is enabled
   enableExecution: true
   version: latest               ## for Alameda components. (exclude grafana and influxdb)
+  imageLocation: quay.io/prophetstor
   storages:                     ## see following details for where it is used in each component
     - usage: log                ## storage setting for log
       type: ephemeral           ## ephemeral means emptyDir{}

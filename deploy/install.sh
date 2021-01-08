@@ -990,7 +990,7 @@ if [ "$ALAMEDASERVICE_FILE_PATH" = "" ]; then
 
     # Specified alternative container image location
     if [ "${RELATED_IMAGE_URL_PREFIX}" != "" ]; then
-        sed -i -e "/version: latest/i\  imageLocation: ${RELATED_IMAGE_URL_PREFIX}" ${alamedaservice_example}
+        sed -i "s|imageLocation:.*|imageLocation: ${RELATED_IMAGE_URL_PREFIX}|g" ${alamedaservice_example}
     fi
     # Specified version tag
     sed -i "s/version: latest/version: ${tag_number}/g" ${alamedaservice_example}
