@@ -146,8 +146,19 @@
     src: "{{ item.path }}"
   loop: "{{ yaml_all_names.files| sort(attribute='path') }}"
 
-- name: Check Federator.ai operator pod become ready
+# Fresh install
+- name: Check Federator.ai operator pod become ready (Fresh install)
   vars:
       pod_number: 0
   include: check_pods_status.yaml
   when: (previous_alamedaservice_name == "")
+
+# Upgrade
+- name: Get federatorai operator new name
+  include: get_operator_new_name.yaml
+  when: (previous_alamedaservice_name != "")
+
+# Upgrade
+- name: Check Federator.ai operator pod become ready (Upgrade stage)
+  include: check_operator_pod_status.yaml
+  when: (previous_alamedaservice_name != "")

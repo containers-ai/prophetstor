@@ -11,6 +11,11 @@
       spec: 
         version: "{{ federatorai_version }}"
 
+- name: Sleep for 60 seconds after patch version
+  wait_for:
+    timeout: 60
+  delegate_to: localhost
+
 - name: Check Federator.ai operator pod become ready
   vars:
       pod_number: 16

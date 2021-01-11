@@ -1,0 +1,12 @@
+- name: Waiting for federatorai pod become ready
+  community.kubernetes.k8s_info:
+    kind: Pod
+    name: "{{ previous_operator_pod }}"
+    namespace: "{{ installed_namespace }}"
+  register: ready_list
+  until: ready_list |to_json | from_json| json_query("resources[?status.containerStatuses[0].ready == `true`].status.containerStatuses[0].ready")|length == 1 and ready_list |to_json | from_json| json_query("resources[?status.containerStatuses[0].ready == `false`].status.containerStatuses[0].ready")|length == 0
+  retries: 60
+  delay: 30
+
+- debug:
+    var: "ready_list |to_json | from_json| json_query('{\"pod_name\": resources[*].metadata.name, \"ready\": resources[*].status.containerStatuses[0].ready}')"
