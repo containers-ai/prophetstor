@@ -139,7 +139,7 @@ download_files()
 
     if [ "$tag_first_digit" -ge "4" ] && [ "$tag_middle_digit" -ge "4" ]; then
         # >= 4.4
-        scriptarray=("${scriptarray[@]}" "cluster-property-setup.sh")
+        scriptarray=("${scriptarray[@]}" "cluster-property-setup.sh" "backup-config.sh")
     fi
 
     mkdir -p $scripts_folder
@@ -148,9 +148,16 @@ download_files()
     for file_name in "${scriptarray[@]}"
     do
         if ! curl -sL --fail https://raw.githubusercontent.com/containers-ai/prophetstor/${tag_number}/deploy/${file_name} -O; then
-            echo -e "\n$(tput setaf 1)Abort, download file $file_name failed!!!$(tput sgr 0)"
+            echo -e "\n$(tput setaf 1)Error, download file $file_name failed!!!$(tput sgr 0)"
             echo "Please check tag name and network"
-            exit 1
+            # To avoid backup-config.sh download failure case
+            default="n"
+            read -r -p "$(tput setaf 2)Do you want to ignore this error and continue? [default: $default]: $(tput sgr 0)" continue_download </dev/tty
+            continue_download=${continue_download:-$default}
+            continue_download=$(echo "$continue_download" | tr '[:upper:]' '[:lower:]')
+            if [ "$continue_download" = "n" ]; then
+                exit 1
+            fi
         fi
     done
     # Download launcher itself.
