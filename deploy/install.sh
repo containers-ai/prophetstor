@@ -607,6 +607,46 @@ download_alamedascaler_files()
     done
 }
 
+backup_configuration()
+{
+    script_name="backup-config.sh"
+    backup_folder="/tmp/configuration_backup"
+    default="y"
+    read -r -p "$(tput setaf 2)Do you want to backup your configuration before upgrading Federator.ai? [default: $default]: $(tput sgr 0)" do_backup </dev/tty
+    do_backup=${do_backup:-$default}
+    do_backup=$(echo "$do_backup" | tr '[:upper:]' '[:lower:]')
+    if [ "$do_backup" = "y" ]; then
+        if [ ! -f "$script_located_path/$script_name" ]; then
+            echo -e "\n$(tput setaf 1)Error! Failed to locate script $script_located_path/$script_name$(tput sgr 0)"
+            default="n"
+            read -r -p "$(tput setaf 2)Do you want to skip backup configuration process? [default: $default]: $(tput sgr 0)" skip_backup </dev/tty
+            skip_backup=${skip_backup:-$default}
+            skip_backup=$(echo "$skip_backup" | tr '[:upper:]' '[:lower:]')
+            if [ "$skip_backup" = "y" ]; then
+                return
+            else
+                # skip_backup = 'n'
+                echo "Please make sure script $script_name and install.sh are in the same folder."
+                echo -e "$(tput setaf 1)Abort installation.$(tput sgr 0)"
+                exit 3
+            fi
+        fi
+
+        default="$backup_folder"
+        read -r -p "$(tput setaf 2)Please input path for storing backup configuration: [default: $default] $(tput sgr 0)" backup_path </dev/tty
+        backup_path=${backup_path:-$default}
+        backup_path=$(echo "$backup_path" | tr '[:upper:]' '[:lower:]')
+        backup_folder=$backup_path
+        mkdir -p $backup_folder
+        echo "Backup configuration..."
+        bash $script_located_path/$script_name $backup_path
+        echo "Done."
+    else
+        # do_backup = 'n'
+        return
+    fi
+}
+
 # get_recommended_prometheus_url()
 # {
 #     if [[ "$openshift_minor_version" == "11" ]] || [[ "$openshift_minor_version" == "12" ]]; then
@@ -873,6 +913,27 @@ mkdir -p $file_folder
 current_location=`pwd`
 script_located_path=$(dirname $(readlink -f "$0"))
 cd $file_folder
+
+if [ "$need_upgrade" = "y" ];then
+    source_full_tag=$(echo "$previous_tag"|cut -d '-' -f1)
+    source_tag_first_digit=${source_full_tag%%.*}
+    source_tag_last_digit=${source_full_tag##*.}
+    source_tag_middle_digit=${source_full_tag##$source_tag_first_digit.}
+    source_tag_middle_digit=${source_tag_middle_digit%%.$source_tag_last_digit}
+    source_tag_first_digit=$(echo $source_tag_first_digit|cut -d 'v' -f2)
+
+    target_full_tag=$(echo "$tag_number"|cut -d '-' -f1)
+    target_tag_first_digit=${target_full_tag%%.*}
+    target_tag_last_digit=${target_full_tag##*.}
+    target_tag_middle_digit=${target_full_tag##$target_tag_first_digit.}
+    target_tag_middle_digit=${target_tag_middle_digit%%.$target_tag_last_digit}
+    target_tag_first_digit=$(echo $target_tag_first_digit|cut -d 'v' -f2)
+
+    # Only do backup when major or middle digit bigger than previous build
+    if [ "$target_tag_first_digit" -gt "$source_tag_first_digit" ] || [ "$target_tag_middle_digit" -gt "$source_tag_middle_digit" ]; then
+        backup_configuration
+    fi
+fi
 
 if [ "$offline_mode_enabled" != "y" ]; then
     operator_files=`curl --silent https://api.github.com/repos/containers-ai/prophetstor/contents/deploy/upstream?ref=${tag_number} 2>&1|grep "\"name\":"|cut -d ':' -f2|cut -d '"' -f2`
