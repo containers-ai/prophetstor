@@ -143,10 +143,37 @@ while getopts "h-:" o; do
     esac
 done
 
-installed_namespace="`kubectl get pods --all-namespaces |egrep "alameda-ai-|federatorai-operator-"|awk '{print $1}'|head -1`"
+installed_namespace="`kubectl get pods --all-namespaces |egrep "alameda-datahub-|federatorai-operator-"|awk '{print $1}'|head -1`"
 if [ "$installed_namespace" = "" ]; then
     echo -e "\nInstalled_namespace is empty. Federator.ai build doesn't exist in system."
     exit
+fi
+
+all_fed_pv="$(kubectl get pv --output jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.claimRef.namespace}{"\n"}'|grep "$installed_namespace")"
+if [ "$all_fed_pv" != "" ]; then
+    default="y"
+    read -r -p "$(tput setaf 2)Do you want to preserve your Federator.ai persistent volumes? [default: $default]: $(tput sgr 0)" do_preserve </dev/tty
+    do_preserve=${do_preserve:-$default}
+    do_preserve=$(echo "$do_preserve" | tr '[:upper:]' '[:lower:]')
+
+    if [ "$do_preserve" = "y" ]; then
+        policy="Retain"
+    elif [ "$do_preserve" = "n" ]; then
+        policy="Delete"
+    else
+        echo -e "$(tput setaf 1)Abort, wrong answer.$(tput sgr 0)"
+        exit 3
+    fi
+
+    while read pv_name _junk; do
+        echo "Patching pv ${pv_name} ..."
+        kubectl patch pv ${pv_name} -p "{\"spec\":{\"persistentVolumeReclaimPolicy\":\"$policy\"}}"
+        if [ "$?" != "0" ]; then
+            echo -e "$(tput setaf 1)Error in patching pv ${pv_name}$(tput sgr 0)"
+            exit 3
+        fi
+        echo "Done."
+    done <<< "$(echo "$all_fed_pv")"
 fi
 
 echo -e "$(tput setaf 3)\n----------------------------------------"

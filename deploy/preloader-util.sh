@@ -1379,7 +1379,7 @@ if [ "$#" -eq "0" ]; then
     exit
 fi
 
-while getopts "f:n:t:x:g:cdehikprvoba:" o; do
+while getopts "f:n:t:s:x:g:cdehikprvoba:" o; do
     case "${o}" in
         p)
             prepare_environment="y"
@@ -1413,10 +1413,10 @@ while getopts "f:n:t:x:g:cdehikprvoba:" o; do
             replica_num_specified="y"
             t_arg=${OPTARG}
             ;;
-        # s)
-        #     enable_execution_specified="y"
-        #     s_arg=${OPTARG}
-        #     ;;
+        s)
+            enable_execution_specified="y"
+            s_arg=${OPTARG}
+            ;;
         a)
             cluster_name_specified="y"
             a_arg=${OPTARG}
@@ -1590,7 +1590,11 @@ debug_log="debug.log"
 rm -rf $file_folder
 mkdir -p $file_folder
 current_location=`pwd`
-enable_execution="true"
+if [ "$enable_execution_specified" = "y" ]; then
+    enable_execution="$s_arg"
+else
+    enable_execution="true"
+fi
 # copy preloader ab files if run historical only mode enabled
 preloader_folder="$(dirname $0)/preloader_ab_runner"
 if [ "$run_preloader_with_historical_only" = "y" ] || [ "$run_ab_from_preloader" = "y" ]; then
@@ -1618,8 +1622,8 @@ if [ "$prepare_environment" = "y" ]; then
     delete_all_alamedascaler
     new_nginx_example
     add_svc_for_nginx
-    patch_datahub_for_preloader
-    patch_grafana_for_preloader
+    #patch_datahub_for_preloader
+    #patch_grafana_for_preloader
     patch_data_adapter_for_preloader "true"
     check_influxdb_retention
 fi
@@ -1646,12 +1650,20 @@ if [ "$run_preloader_with_normal_mode" = "y" ] || [ "$run_preloader_with_histori
         # historical mode
         get_datasource_in_alamedaorganization
         if [ "$data_source_type" = "datadog" ]; then
-            enable_execution="false"
+            if [ "$enable_execution_specified" = "y" ]; then
+                enable_execution="$s_arg"
+            else
+                enable_execution="false"
+            fi
         elif [ "$data_source_type" = "prometheus" ]; then
             echo ""
         elif [ "$data_source_type" = "sysdig" ]; then
             # Not sure for now
-            enable_execution="false"
+            if [ "$enable_execution_specified" = "y" ]; then
+                enable_execution="$s_arg"
+            else
+                enable_execution="false"
+            fi
         fi
         add_alamedascaler_for_nginx
         run_preloader_command "historical_only"
@@ -1678,8 +1690,8 @@ if [ "$revert_environment" = "y" ]; then
     scale_up_pods
     delete_all_alamedascaler
     delete_nginx_example
-    patch_datahub_back_to_normal
-    patch_grafana_back_to_normal
+    #patch_datahub_back_to_normal
+    #patch_grafana_back_to_normal
     patch_data_adapter_for_preloader "false"
     clean_environment_operations
 fi
