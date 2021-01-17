@@ -6,3 +6,11 @@
   loop:
   # default variables
     - "{{ default_yaml_files_base_path }}"
+    - "{{ storage_type }}"
+
+# Check if storage_type == "persistent"
+- name: Check persistent variables
+  fail: msg="persistent variable inside user_variable.yaml is empty"
+  when: storage_type == "persistent" and item == ""
+  loop:
+    - "{{ preserve_pv }}"

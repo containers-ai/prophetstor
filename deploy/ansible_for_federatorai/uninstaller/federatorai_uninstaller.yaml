@@ -4,11 +4,18 @@
     - name: Includ default vars
       include_vars: "default_variable.yaml"
 
+    - name: Includ user vars
+      include_vars: "user_variable.yaml"
+
     - name: Check all variables
       include: check_variables.yaml
 
     - name: Get previous environment info
       include: get_previous_info.yaml
+
+    - name: Patch PV policy
+      include: patch_pv.yaml
+      when: storage_type == "persistent"
 
     - name: Delete alameda-gc clusterrole 
       include: remove_clusterrole.yaml

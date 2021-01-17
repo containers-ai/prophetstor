@@ -27,12 +27,12 @@
     - { pool: 'nginx', name: 'alamedascaler.yaml', dest: 'alamedascaler_nginx.yaml' }
     - { pool: 'redis', name: 'alamedascaler.yaml', dest: 'alamedascaler_generic.yaml' }
 
-# Insert imagelocation info in alamedaservice file
-- name: Insert image location in alamedaservice file if necessary
-  lineinfile: 
-    path: "{{ default_yaml_files_base_path }}/{{ federatorai_version }}/{{ alamedaservice_sample_file }}" 
-    line: "  imageLocation: {{ image_url_prefix }}"
-    insertbefore: "version: latest"
+# Replace imagelocation info in alamedaservice file
+- name: Replace image location in alamedaservice file
+  replace:
+    dest: "{{ default_yaml_files_base_path }}/{{ federatorai_version }}/{{ alamedaservice_sample_file }}"
+    regexp: "imageLocation: .*"
+    replace: "imageLocation: {{ image_url_prefix }}"
   when: (enable_private_repo == "y") and (image_url_prefix != "")
 
 # Replace version info in alamedaservice file
