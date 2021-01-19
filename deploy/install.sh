@@ -609,7 +609,7 @@ download_alamedascaler_files()
 
 backup_configuration()
 {
-    script_name="backup-config.sh"
+    script_name="backup-restore.sh"
     backup_folder="/tmp/configuration_backup"
     default="y"
     read -r -p "$(tput setaf 2)Do you want to backup your configuration before upgrading Federator.ai? [default: $default]: $(tput sgr 0)" do_backup </dev/tty
@@ -639,7 +639,7 @@ backup_configuration()
         backup_folder=$backup_path
         mkdir -p $backup_folder
         echo "Backup configuration..."
-        bash $script_located_path/$script_name $backup_path
+        bash $script_located_path/$script_name -b -d $backup_path -t $tag_number
         echo "Done."
     else
         # do_backup = 'n'
@@ -1335,6 +1335,9 @@ __EOF__
             exit 1
         fi
     else
+        if [ "$target_tag_first_digit" -gt "$source_tag_first_digit" ] || [ "$target_tag_middle_digit" -gt "$source_tag_middle_digit" ]; then
+            kubectl patch alamedaservice $previous_alamedaservice -n $install_namespace --type merge --patch "{\"spec\":{\"enableExecution\": true}}"
+        fi
         # Upgrade case, patch version to alamedaservice only
         kubectl patch alamedaservice $previous_alamedaservice -n $install_namespace --type merge --patch "{\"spec\":{\"version\": \"$tag_number\"}}"
 
