@@ -24,7 +24,6 @@ spec:
     listKind: AlamedaServiceList
     plural: alamedaservices
     singular: alamedaservice
-  preserveUnknownFields: false
   scope: Namespaced
   subresources: {}
   validation:
