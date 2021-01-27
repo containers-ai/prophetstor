@@ -37,6 +37,8 @@ get_build_tag()
         if [[ $tag_number =~ ^[v][[:digit:]]+\.[[:digit:]]+\.[0-9a-z\-]+$ ]]; then
             pass="y"
         fi
+        # Purposely ignore error of unofficial tag_number for development build
+        if [ "${SKIP_TAG_NUMBER_CHECK}" = "1" ]; then pass="y"; fi
         if [ "$pass" != "y" ]; then
             echo -e "\n$(tput setaf 1)Error! The version tag should follow the correct format (e.g., v4.2.755).$(tput sgr 0)"
             [ "${ALAMEDASERVICE_FILE_PATH}" != "" ] && exit 1
@@ -50,6 +52,8 @@ get_build_tag()
     tag_middle_digit=${full_tag##$tag_first_digit.}         # Delete first number and dot.
     tag_middle_digit=${tag_middle_digit%%.$tag_last_digit}  # Delete dot and last number.
     tag_first_digit=$(echo $tag_first_digit|cut -d 'v' -f2) # Delete v
+    # Purposely ignore error of unofficial tag_number for development build, start from v4.4
+    if [ "${SKIP_TAG_NUMBER_CHECK}" = "1" ]; then tag_first_digit="4"; tag_middle_digit="4"; fi
 
     if [ "$tag_first_digit" -le "4" ] && [ "$tag_middle_digit" -le "3" ]; then
         # <= 4.3
