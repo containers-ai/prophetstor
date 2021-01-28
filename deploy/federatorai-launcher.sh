@@ -37,6 +37,8 @@ get_build_tag()
         if [[ $tag_number =~ ^[v][[:digit:]]+\.[[:digit:]]+\.[0-9a-z\-]+$ ]]; then
             pass="y"
         fi
+        # Enable SKIP_TAG_NUMBER_CHECK=1 if tag_number prefix is 'dev-' for development build
+        if [[ $tag_number =~ ^dev- ]]; then SKIP_TAG_NUMBER_CHECK=1; fi
         # Purposely ignore error of unofficial tag_number for development build
         if [ "${SKIP_TAG_NUMBER_CHECK}" = "1" ]; then pass="y"; fi
         if [ "$pass" != "y" ]; then
