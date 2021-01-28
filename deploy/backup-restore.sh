@@ -71,12 +71,12 @@ function download::github::assets() {
 }
 
 function get::installed::ns() {
-  if ! kubectl get sts -A | grep -q "alameda-influxdb\|fedemeter-influxdb"; then
+  if ! kubectl get sts --all-namespaces | grep -q "alameda-influxdb\|fedemeter-influxdb"; then
     echo "cannot find installed namespace" >&2
     return 1
   fi
 
-  local retns=$(kubectl get sts -A | grep "alameda-influxdb\|fedemeter-influxdb" | head -1 | awk '{print $1}')
+  local retns=$(kubectl get sts --all-namespaces | grep "alameda-influxdb\|fedemeter-influxdb" | head -1 | awk '{print $1}')
   echo $retns
   return 0
 }
