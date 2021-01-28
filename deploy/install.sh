@@ -640,6 +640,10 @@ backup_configuration()
         mkdir -p $backup_folder
         echo "Backup configuration..."
         bash $script_located_path/$script_name -b -d $backup_path -t $tag_number
+        if [ "$?" != "0" ]; then
+            echo -e "\n$(tput setaf 1)Error! Failed to do configuration backup.$(tput sgr 0)"
+            exit 8
+        fi
         echo "Done."
     else
         # do_backup = 'n'
