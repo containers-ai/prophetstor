@@ -4,8 +4,10 @@ metadata:
   creationTimestamp: null
   name: federatorai-operator-servicesmutation
 webhooks:
-- clientConfig:
-    caBundle: Cg==
+- admissionReviewVersions:
+  - v1beta1
+  - v1
+  clientConfig:
     service:
       name: federatorai-operator
       namespace: federatorai
@@ -22,3 +24,4 @@ webhooks:
     - UPDATE
     resources:
     - alamedaservices
+  sideEffects: None

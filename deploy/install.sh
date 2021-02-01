@@ -1335,50 +1335,11 @@ __EOF__
             exit 1
         fi
     else
-        # Upgrade case
-        _count=10
-        _sleep=30
-        while [ "$_count" -gt "0" ]
-        do
-            echo -e "Update alamedaservice..."
-            if [ "$target_tag_first_digit" -gt "$source_tag_first_digit" ] || [ "$target_tag_middle_digit" -gt "$source_tag_middle_digit" ]; then
-                # Upgrade from older version, patch version and enableExecution
-                kubectl patch alamedaservice $previous_alamedaservice -n $install_namespace --type merge --patch "{\"spec\":{\"enableExecution\": true,\"version\": \"$tag_number\"}}"
-            else
-                # Patch version only
-                kubectl patch alamedaservice $previous_alamedaservice -n $install_namespace --type merge --patch "{\"spec\":{\"version\": \"$tag_number\"}}"
-            fi
-
-            if [ "$?" = "0" ]; then
-                # Double check version info in alamedaservice
-                version_inside=$(kubectl get alamedaservice $previous_alamedaservice -n $install_namespace -o jsonpath='{.spec.version}')
-                if [ "$version_inside" == "$tag_number" ]; then
-                    echo -e "$(tput setaf 3)Done.$(tput sgr 0)"
-                    patch_done="y"
-                    break
-                fi
-            fi
-            # Patch failure
-            echo -e "$(tput setaf 3)Warning! Update alamedaservice failure. Sleep $_sleep seconds and retry...$(tput sgr 0)"
-            _count=$(($_count-1))
-            sleep $_sleep
-        done
-
-        if [ "$patch_done" != "y" ]; then
-            echo -e "\n$(tput setaf 1)Error! Failed to update alamedaservice.(tput sgr 0)"
-            exit 7
+        if [ "$target_tag_first_digit" -gt "$source_tag_first_digit" ] || [ "$target_tag_middle_digit" -gt "$source_tag_middle_digit" ]; then
+            kubectl patch alamedaservice $previous_alamedaservice -n $install_namespace --type merge --patch "{\"spec\":{\"enableExecution\": true}}"
         fi
-
-        # Add sysdig entry inside secret if needed
-        sysdig_info=$(kubectl get secret federatorai-data-adapter-secret -n $install_namespace -o jsonpath='{.data.sysdig_api_token}')
-        if [ "$sysdig_info" == "" ]; then
-            sysdig_token=$(echo -n "dummy" | base64 )
-            kubectl patch secret federatorai-data-adapter-secret -n $install_namespace --type merge --patch "{\"data\":{\"sysdig_api_token\": \"$sysdig_token\"}}"
-            if [ "$?" != "0" ]; then
-                echo -e "\n$(tput setaf 1)Error! Failed to update sysdig dummy token in data adapter secret.$(tput sgr 0)"
-                exit 1
-            fi
-        fi
+        # Upgrade case, patch version to alamedaservice only
+        kubectl patch alamedaservice $previous_alamedaservice -n $install_namespace --type merge --patch "{\"spec\":{\"version\": \"$tag_number\"}}"
 
         # Specified alternative container imageLocation
         if [ "${RELATED_IMAGE_URL_PREFIX}" != "" ]; then
@@ -1412,8 +1373,8 @@ __EOF__
             fi
         fi
         # Restart operator after patching alamedaservice
-        #kubectl scale deployment federatorai-operator -n $install_namespace --replicas=0
-        #kubectl scale deployment federatorai-operator -n $install_namespace --replicas=1
+        kubectl scale deployment federatorai-operator -n $install_namespace --replicas=0
+        kubectl scale deployment federatorai-operator -n $install_namespace --replicas=1
     fi
 else
     echo -e "\nDownloading Federator.ai CR sample files ..."
