@@ -937,6 +937,13 @@ if [ "$need_upgrade" = "y" ];then
     if [ "$target_tag_first_digit" -gt "$source_tag_first_digit" ] || [ "$target_tag_middle_digit" -gt "$source_tag_middle_digit" ]; then
         backup_configuration
     fi
+
+    # Drop fedemeter measurements during upgrade (4.2, 4.3, 4.3.1 upgrade to 4.4 or later)
+    if [ "$target_tag_first_digit" -ge "4" ] && [ "$target_tag_middle_digit" -ge "4" ] && [ "$source_tag_first_digit" -eq "4" ] && [ "$source_tag_middle_digit" -lt "4" ]; then
+        influxdb_name="alameda-influxdb-0"
+        database_name="alameda_fedemeter"
+        kubectl exec $influxdb_name -n $install_namespace -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database $database_name -execute "drop measurement calculation_price_instance;drop measurement calculation_price_storage;drop measurement recommendation_jeri;"
+    fi
 fi
 
 if [ "$offline_mode_enabled" != "y" ]; then
