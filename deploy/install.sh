@@ -69,7 +69,7 @@ webhook_reminder()
 {
     if [ "$openshift_minor_version" != "" ]; then
         echo -e "\n========================================"
-        echo -e "$(tput setaf 9)Note!$(tput setaf 10) The following $(tput setaf 9)two admission plugins $(tput setaf 10)need to be enabled on $(tput setaf 9)each master node $(tput setaf 10)to make Email Notification work properly."
+        echo -e "$(tput setaf 9)Note!$(tput setaf 10) The following $(tput setaf 9)two admission plugins $(tput setaf 10)need to be enabled on $(tput setaf 9)each master node $(tput setaf 10)to make Federator.ai work properly."
         echo -e "$(tput setaf 6)1. ValidatingAdmissionWebhook 2. MutatingAdmissionWebhook$(tput sgr 0)"
         echo -e "Steps: (On every master nodes)"
         echo -e "A. Edit /etc/origin/master/master-config.yaml"
