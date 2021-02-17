@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+#
+# Need bash to run this script
+if [ "${BASH_VERSION}" = "" ]; then
+    /bin/echo -e "\n$(tput setaf 1)Error! You need to use bash to run this script.$(tput sgr 0)\n"
+    exit 1
+fi
 
 show_usage()
 {
@@ -293,6 +299,11 @@ download_files()
 
 go_interactive()
 {
+    # ECR_URL, EKS_CLUSTER, AWS_REGION all are empty or all have values
+    if [ "$ECR_URL" != "" ] && [ "$EKS_CLUSTER" != "" ] && [ "$AWS_REGION" != "" ]; then
+        aws_mode="y"
+    fi
+
     get_build_tag
     download_files
 
@@ -334,7 +345,11 @@ go_interactive()
 
     if [ "$run_installation" = "y" ]; then
         echo -e "\n$(tput setaf 6)Executing install.sh ...$(tput sgr 0)"
-        bash $scripts_folder/install.sh -t $tag_number
+        if [ "$aws_mode" = "y" ]; then
+            bash $scripts_folder/install.sh -t $tag_number --image-path $ECR_URL --cluster $EKS_CLUSTER --region $AWS_REGION
+        else
+            bash $scripts_folder/install.sh -t $tag_number
+        fi
     fi
 }
 
