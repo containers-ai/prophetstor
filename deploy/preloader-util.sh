@@ -504,7 +504,7 @@ patch_data_adapter_for_preloader()
     if [ "$current_flag_value" != "" ]; then
         if [ "$current_flag_value" != "$only_mode" ]; then
             # Get COLLECT_METADATA_ONLY index in env array
-            patch_index=$(kubectl get alamedaservice $alamedaservice_name -n $install_namespace -o jsonpath='{.spec.federatoraiDataAdapter.env[*]}'|sed 's/]/\n/g'|awk '{print NR-1 "," $0}'|grep "name:COLLECT_METADATA_ONLY"|cut -d ',' -f1)
+            patch_index=$(kubectl get alamedaservice $alamedaservice_name -n $install_namespace -o jsonpath='{.spec.federatoraiDataAdapter.env[*]}'|sed 's/}/\n/g'|awk '{print NR-1 "," $0}'|grep "COLLECT_METADATA_ONLY"|cut -d ',' -f1)
             if [ "$patch_index" != "" ]; then
                 # replace value at $patch_index
                 kubectl patch alamedaservice $alamedaservice_name -n $install_namespace --type json --patch "[ { \"op\" : \"replace\" , \"path\" : \"/spec/federatoraiDataAdapter/env/${patch_index}\" , \"value\" : { \"name\" : \"COLLECT_METADATA_ONLY\", \"value\" : \"$only_mode\" } } ]"
