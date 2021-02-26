@@ -1299,8 +1299,8 @@ if [ "$ALAMEDASERVICE_FILE_PATH" = "" ]; then
             done
 
             if [[ "$storage_type" == "persistent" ]]; then
-                default="10"
-                read -r -p "$(tput setaf 127)Specify log storage size [e.g., 10 for 10GB, default: 10]: $(tput sgr 0)" log_size </dev/tty
+                default="2"
+                read -r -p "$(tput setaf 127)Specify log storage size [e.g., 2 for 2GB, default: 2]: $(tput sgr 0)" log_size </dev/tty
                 log_size=${log_size:-$default}
                 default="10"
                 read -r -p "$(tput setaf 127)Specify AI engine storage size [e.g., 10 for 10GB, default: 10]: $(tput sgr 0)" aiengine_size </dev/tty
