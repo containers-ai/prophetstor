@@ -1,29 +1,42 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
+  creationTimestamp: null
   name: federatorai-operator
   namespace: federatorai
 rules:
-# following is taken from Federatorai-operator CSV v0.0.1 permissions section
 - apiGroups:
   - ""
   resources:
   - configmaps
-  - events
   - endpoints
+  - events
   - persistentvolumeclaims
   - pods
   - secrets
   - services
   verbs:
-  - "*"
+  - '*'
+- apiGroups:
+  - ""
+  resources:
+  - nodes
+  - persistentvolumeclaims
+  - persistentvolumes
+  - pods/log
+  - replicationcontrollers
+  - services
+  verbs:
+  - get
+  - list
+  - watch
 - apiGroups:
   - apps
   resources:
   - daemonsets
   - statefulsets
   verbs:
-  - "*"
+  - '*'
 - apiGroups:
   - apps
   resources:
@@ -31,21 +44,12 @@ rules:
   verbs:
   - update
 - apiGroups:
-  - monitoring.coreos.com
+  - apps
+  - extensions
   resources:
-  - servicemonitors
-  verbs:
-  - create
-  - get
-- apiGroups:
-  - ""
-  resources:
-  - pods/log
-  - replicationcontrollers
-  - services
-  - nodes
-  - persistentvolumes
-  - persistentvolumeclaims
+  - deployments
+  - deployments/scale
+  - replicasets
   verbs:
   - get
   - list
@@ -61,34 +65,16 @@ rules:
   - watch
 - apiGroups:
   - extensions
-  - apps
-  resources:
-  - deployments
-  - deployments/scale
-  - replicasets
-  verbs:
-  - get
-  - list
-  - watch
-- apiGroups:
-  - extensions
   resources:
   - deployments/scale
   verbs:
   - update
 - apiGroups:
-  - storage.k8s.io
-  resources:
-  - storageclasses
-  verbs:
-  - list
-  - watch
-- apiGroups:
   - extensions
   resources:
   - podsecuritypolicies
   verbs:
-  - "*"
+  - '*'
 - apiGroups:
   - extensions
   resourceNames:
@@ -98,10 +84,24 @@ rules:
   verbs:
   - use
 - apiGroups:
+  - monitoring.coreos.com
+  resources:
+  - servicemonitors
+  verbs:
+  - create
+  - get
+- apiGroups:
+  - storage.k8s.io
+  resources:
+  - storageclasses
+  verbs:
+  - list
+  - watch
+- apiGroups:
   - volumesnapshot.external-storage.k8s.io
   resources:
-  - volumesnapshots
   - volumesnapshotdatas
+  - volumesnapshots
   verbs:
   - list
   - watch

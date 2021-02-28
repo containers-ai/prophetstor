@@ -23,6 +23,14 @@
 #   -i followed by influxdb_size
 #   -c followed by storage_class
 #   -x followed by expose_service (y or n)
+#
+#   4. AWS support
+#      Usage: ./install.sh --image-path 88888976.dkr.ecr.us-east-1.amazonaws.com/888888-37c8-4328-91b2-62c1acd2a04b/cg-1231030144/federatorai-operator:4.2-latest
+#                   --cluster awsmp-new --region us-west-2
+#
+#   --image-path <space> AWS ECR url
+#   --cluster <space> AWS EKS cluster name
+#   --region <space> AWS region
 #################################################################################################################
 
 is_pod_ready()
@@ -69,7 +77,7 @@ webhook_reminder()
 {
     if [ "$openshift_minor_version" != "" ]; then
         echo -e "\n========================================"
-        echo -e "$(tput setaf 9)Note!$(tput setaf 10) The following $(tput setaf 9)two admission plugins $(tput setaf 10)need to be enabled on $(tput setaf 9)each master node $(tput setaf 10)to make Email Notification work properly."
+        echo -e "$(tput setaf 9)Note!$(tput setaf 10) The following $(tput setaf 9)two admission plugins $(tput setaf 10)need to be enabled on $(tput setaf 9)each master node $(tput setaf 10)to make Federator.ai work properly."
         echo -e "$(tput setaf 6)1. ValidatingAdmissionWebhook 2. MutatingAdmissionWebhook$(tput sgr 0)"
         echo -e "Steps: (On every master nodes)"
         echo -e "A. Edit /etc/origin/master/master-config.yaml"
@@ -693,9 +701,151 @@ backup_configuration()
 #     fi
 # }
 
+check_aws_version()
+{
+    awscli_required_version="1.16.283"
+    awscli_required_version_major=`echo $awscli_required_version | cut -d'.' -f1`
+    awscli_required_version_minor=`echo $awscli_required_version | cut -d'.' -f2`
+    awscli_required_version_build=`echo $awscli_required_version | cut -d'.' -f3`
 
-while getopts "t:n:e:p:s:l:d:c:x:o" o; do
+    # aws --version: aws-cli/2.0.0dev0
+    awscli_version=`aws --version 2>&1 | cut -d' ' -f1 | cut -d'/' -f2`
+    awscli_version_major=`echo $awscli_version | cut -d'.' -f1`
+    awscli_version_minor=`echo $awscli_version | cut -d'.' -f2`
+    awscli_version_build=`echo $awscli_version | cut -d'.' -f3`
+    awscli_version_build=${awscli_version_build%%[^0-9]*}   # remove everything from the first non-digit
+
+    if [ "$awscli_version_major" -gt "$awscli_required_version_major" ]; then
+        return 0
+    fi
+
+    if [ "$awscli_version_major" = "$awscli_required_version_major" ] && \
+        [ "$awscli_version_minor" -gt "$awscli_required_version_minor" ]; then
+            return 0
+    fi
+
+    if [ "$awscli_version_major" = "$awscli_required_version_major" ] && \
+        [ "$awscli_version_minor" = "$awscli_required_version_minor" ] && \
+        [ "$awscli_version_build" -ge "$awscli_required_version_build" ]; then
+            return 0
+    fi
+
+    echo -e "\n$(tput setaf 10)Error! AWS CLI version must be $awscli_required_version or greater.$(tput sgr 0)"
+    exit 9
+}
+
+setup_aws_iam_role()
+{
+    REGION_NAME=$aws_region
+    CLUSTER_NAME=$eks_cluster
+
+    # Create an OIDC provider for the cluster
+    ISSUER_URL=$(aws eks describe-cluster \
+                    --name $CLUSTER_NAME \
+                    --region $REGION_NAME \
+                    --query cluster.identity.oidc.issuer \
+                    --output text )
+    ISSUER_URL_WITHOUT_PROTOCOL=$(echo $ISSUER_URL | sed 's/https:\/\///g' )
+    ISSUER_HOSTPATH=$(echo $ISSUER_URL_WITHOUT_PROTOCOL | sed "s/\/id.*//" )
+    # Grab all certificates associated with the issuer hostpath and save them to files. The root certificate is last
+    rm -f *.crt || echo "No files that match *.crt exist"
+    ROOT_CA_FILENAME=$(openssl s_client -showcerts -connect $ISSUER_HOSTPATH:443 < /dev/null 2>&1 \
+                        | awk '/BEGIN/,/END/{ if(/BEGIN/){a++}; out="cert"a".crt"; print > out } END {print "cert"a".crt"}')
+    ROOT_CA_FINGERPRINT=$(openssl x509 -fingerprint -noout -in $ROOT_CA_FILENAME \
+                        | sed 's/://g' | sed 's/SHA1 Fingerprint=//')
+    result=$(aws iam create-open-id-connect-provider \
+                --url $ISSUER_URL \
+                --thumbprint-list $ROOT_CA_FINGERPRINT \
+                --client-id-list sts.amazonaws.com \
+                --region $REGION_NAME 2>&1 | grep EntityAlreadyExists)
+    if [ "$result" != "" ]; then
+        echo "The provider for $ISSUER_URL already exists"
+    fi
+
+    ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+    PROVIDER_ARN="arn:aws:iam::$ACCOUNT_ID:oidc-provider/$ISSUER_URL_WITHOUT_PROTOCOL"
+    ROLE_NAME="FederatorAI-$CLUSTER_NAME"
+    POLICY_NAME="AWSMarketplaceMetering-$CLUSTER_NAME"
+    POLICY_ARN="arn:aws:iam::$ACCOUNT_ID:policy/$POLICY_NAME"
+
+    # Update trust relationships of pod execution roles so pods on our cluster can assume them
+    cat > trust-policy.json << EOF
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Principal": {
+                "Federated": "$PROVIDER_ARN"
+            },
+            "Action": "sts:AssumeRoleWithWebIdentity"
+        }
+    ]
+}
+EOF
+
+    result=$(aws iam create-role \
+                --role-name $ROLE_NAME \
+                --assume-role-policy-document file://trust-policy.json 2>&1 | grep EntityAlreadyExists)
+    if [ "$result" != "" ]; then
+        echo "The IAM role $ROLE_NAME already exists"
+    fi
+
+    # Attach policy to give required permission to call RegisterUsage API
+cat > iam-policy.json << EOF
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Action": [
+                "aws-marketplace:RegisterUsage"
+            ],
+            "Effect": "Allow",
+            "Resource": "*"
+        }
+    ]
+}
+EOF
+    result=$(aws iam create-policy \
+        --policy-name $POLICY_NAME \
+        --policy-document file://iam-policy.json 2>&1 | grep EntityAlreadyExists)
+    if [ "$result" != "" ]; then
+        echo "The policy $POLICY_NAME already exists"
+    fi
+
+    aws iam attach-role-policy --role-name $ROLE_NAME --policy-arn $POLICY_ARN
+}
+
+while getopts "t:n:e:p:s:l:d:c:x:o-:" o; do
     case "${o}" in
+        -)
+            case "${OPTARG}" in
+                image-path)
+                    ecr_url="${!OPTIND}"; OPTIND=$(( $OPTIND + 1 ))
+                    if [ "$ecr_url" = "" ]; then
+                        echo "Error! Missing --${OPTARG} value"
+                        exit
+                    fi
+                    ;;
+                cluster)
+                    eks_cluster="${!OPTIND}"; OPTIND=$(( $OPTIND + 1 ))
+                    if [ "$eks_cluster" = "" ]; then
+                        echo "Error! Missing --${OPTARG} value"
+                        exit
+                    fi
+                    ;;
+                region)
+                    aws_region="${!OPTIND}"; OPTIND=$(( $OPTIND + 1 ))
+                    if [ "$aws_region" = "" ]; then
+                        echo "Error! Missing --${OPTARG} value"
+                        exit
+                    fi
+                    ;;
+                *)
+                    echo "Unknown option --${OPTARG}"
+                    exit
+                    ;;
+            esac;;
         o)
             offline_mode_enabled="y"
             ;;
@@ -734,6 +884,22 @@ while getopts "t:n:e:p:s:l:d:c:x:o" o; do
             ;;
     esac
 done
+
+# ecr_url, eks_cluster, aws_region all are empty or all have values
+if [ "$ecr_url" != "" ] && [ "$eks_cluster" != "" ] && [ "$aws_region" != "" ]; then
+    aws_mode="y"
+elif [ "$ecr_url" != "" ] || [ "$eks_cluster" != "" ] || [ "$aws_region" != "" ]; then
+    if [ "$ecr_url" = "" ]; then
+        echo -e "\n$(tput setaf 1)Error! Missing --image-path parameter in AWS mode.$(tput sgr 0)"
+        exit
+    elif [ "$eks_cluster" = "" ]; then
+        echo -e "\n$(tput setaf 1)Error! Missing --cluster parameter in AWS mode.$(tput sgr 0)"
+        exit
+    elif [ "$aws_region" = "" ]; then
+        echo -e "\n$(tput setaf 1)Error! Missing --region parameter in AWS mode.$(tput sgr 0)"
+        exit
+    fi
+fi
 
 [ "${t_arg}" = "" ] && silent_mode_disabled="y"
 [ "${n_arg}" = "" ] && silent_mode_disabled="y"
@@ -781,6 +947,12 @@ fi
 echo "Checking environment version..."
 check_version
 echo "...Passed"
+
+if [ "$aws_mode" = "y" ]; then
+    echo -e "Checking AWS CLI version..."
+    check_aws_version
+    echo -e "...Passed\n"
+fi
 
 if [ "$offline_mode_enabled" != "y" ]; then
     which curl > /dev/null 2>&1
@@ -918,23 +1090,44 @@ current_location=`pwd`
 script_located_path=$(dirname $(readlink -f "$0"))
 cd $file_folder
 
+if [ "$aws_mode" = "y" ]; then
+    # Setup AWS IAM role for service account
+    echo -e "\n$(tput setaf 2)Setting AWS IAM role for service account...$(tput sgr 0)"
+    setup_aws_iam_role
+    role_arn=$(aws iam get-role --role-name ${ROLE_NAME} --query Role.Arn --output text)
+    echo "Done"
+fi
+
 if [ "$need_upgrade" = "y" ];then
     source_full_tag=$(echo "$previous_tag"|cut -d '-' -f1)
-    source_tag_first_digit=${source_full_tag%%.*}
-    source_tag_last_digit=${source_full_tag##*.}
-    source_tag_middle_digit=${source_full_tag##$source_tag_first_digit.}
-    source_tag_middle_digit=${source_tag_middle_digit%%.$source_tag_last_digit}
-    source_tag_first_digit=$(echo $source_tag_first_digit|cut -d 'v' -f2)
+    if [ "$source_full_tag" = "dev" ]; then
+        source_tag_first_digit=""
+        source_tag_middle_digit=""
+        source_tag_last_digit=""
+    else
+        source_tag_first_digit=${source_full_tag%%.*}
+        source_tag_last_digit=${source_full_tag##*.}
+        source_tag_middle_digit=${source_full_tag##$source_tag_first_digit.}
+        source_tag_middle_digit=${source_tag_middle_digit%%.$source_tag_last_digit}
+        source_tag_first_digit=$(echo $source_tag_first_digit|cut -d 'v' -f2)
+
+    fi
 
     target_full_tag=$(echo "$tag_number"|cut -d '-' -f1)
-    target_tag_first_digit=${target_full_tag%%.*}
-    target_tag_last_digit=${target_full_tag##*.}
-    target_tag_middle_digit=${target_full_tag##$target_tag_first_digit.}
-    target_tag_middle_digit=${target_tag_middle_digit%%.$target_tag_last_digit}
-    target_tag_first_digit=$(echo $target_tag_first_digit|cut -d 'v' -f2)
+    if [ "$target_full_tag" = "dev" ]; then
+        target_tag_first_digit=""
+        target_tag_middle_digit=""
+        target_tag_last_digit=""
+    else
+        target_tag_first_digit=${target_full_tag%%.*}
+        target_tag_last_digit=${target_full_tag##*.}
+        target_tag_middle_digit=${target_full_tag##$target_tag_first_digit.}
+        target_tag_middle_digit=${target_tag_middle_digit%%.$target_tag_last_digit}
+        target_tag_first_digit=$(echo $target_tag_first_digit|cut -d 'v' -f2)
+    fi
 
     # Only do backup when major or middle digit bigger than previous build
-    if [ "$target_tag_first_digit" -gt "$source_tag_first_digit" ] || [ "$target_tag_middle_digit" -gt "$source_tag_middle_digit" ]; then
+    if [ "0${target_tag_first_digit}" -gt "0${source_tag_first_digit}" ] || [ "0${target_tag_middle_digit}" -gt "0${source_tag_middle_digit}" ]; then
         backup_configuration
     fi
 fi
@@ -972,7 +1165,17 @@ fi
 
 # Modify federator.ai operator yaml(s)
 # for tag
-sed -i "s/:latest$/:${tag_number}/g" 03*.yaml
+if [ "$aws_mode" = "y" ]; then
+    sed -i "s|quay.io/prophetstor/federatorai-operator-ubi:latest|$ecr_url|g" 03*.yaml
+    #sed -i "/\- federatorai-operator/d" 03*.yaml
+    #sed -i "/command:/d" 03*.yaml
+cat >> 01*.yaml << __EOF__
+  annotations:
+    eks.amazonaws.com/role-arn: ${role_arn}
+__EOF__
+else
+    sed -i "s/:latest$/:${tag_number}/g" 03*.yaml
+fi
 
 # Specified alternative container image location
 if [ "${RELATED_IMAGE_URL_PREFIX}" != "" ]; then
@@ -991,6 +1194,20 @@ sed -i "s|\bnamespace:.*|namespace: ${install_namespace}|g" *.yaml
 
 if [ "${ENABLE_RESOURCE_REQUIREMENT}" = "y" ]; then
     sed -i -e "/image: /a\          resources:\n            limits:\n              cpu: 4000m\n              memory: 8000Mi\n            requests:\n              cpu: 100m\n              memory: 100Mi" `ls 03*.yaml`
+fi
+
+if [ "$need_upgrade" = "y" ];then
+    # for upgrade - update owner of influxdb
+    current_influxdb_owner="$(kubectl -n $install_namespace exec alameda-influxdb-0 -- id -u)"
+    if [ "$current_influxdb_owner" = "0" ]; then
+        # Currently, the owner is root
+        echo -e "\n$(tput setaf 2)Updating InfluxDB owner...$(tput sgr 0)"
+        kubectl -n $install_namespace exec alameda-influxdb-0 -- chown -R 1001:1001 /var/log/influxdb
+        kubectl -n $install_namespace exec alameda-influxdb-0 -- chown -R 1001:1001 /var/lib/influxdb
+        kubectl -n $install_namespace exec alameda-influxdb-0 -- chmod -R 777 /var/log/influxdb
+        kubectl -n $install_namespace exec alameda-influxdb-0 -- chmod -R 777 /var/lib/influxdb
+        echo "Done"
+    fi
 fi
 
 echo -e "\n$(tput setaf 2)Applying Federator.ai operator yaml files...$(tput sgr 0)"
@@ -1095,8 +1312,8 @@ if [ "$ALAMEDASERVICE_FILE_PATH" = "" ]; then
             done
 
             if [[ "$storage_type" == "persistent" ]]; then
-                default="10"
-                read -r -p "$(tput setaf 127)Specify log storage size [e.g., 10 for 10GB, default: 10]: $(tput sgr 0)" log_size </dev/tty
+                default="2"
+                read -r -p "$(tput setaf 127)Specify log storage size [e.g., 2 for 2GB, default: 2]: $(tput sgr 0)" log_size </dev/tty
                 log_size=${log_size:-$default}
                 default="10"
                 read -r -p "$(tput setaf 127)Specify AI engine storage size [e.g., 10 for 10GB, default: 10]: $(tput sgr 0)" aiengine_size </dev/tty
@@ -1345,7 +1562,7 @@ __EOF__
         while [ "$_count" -gt "0" ]
         do
             echo -e "Update alamedaservice..."
-            if [ "$target_tag_first_digit" -gt "$source_tag_first_digit" ] || [ "$target_tag_middle_digit" -gt "$source_tag_middle_digit" ]; then
+            if [ "0${target_tag_first_digit}" -gt "0${source_tag_first_digit}" ] || [ "0${target_tag_middle_digit}" -gt "0${source_tag_middle_digit}" ]; then
                 # Upgrade from older version, patch version and enableExecution
                 kubectl patch alamedaservice $previous_alamedaservice -n $install_namespace --type merge --patch "{\"spec\":{\"enableExecution\": true,\"version\": \"$tag_number\"}}"
             else
@@ -1437,6 +1654,15 @@ echo "Processing..."
 check_if_pod_match_expected_version "datahub" $max_wait_pods_ready_time 60 $install_namespace
 wait_until_pods_ready $max_wait_pods_ready_time 60 $install_namespace 5
 wait_until_cr_ready $max_wait_pods_ready_time 60 $install_namespace
+
+if [ "$need_upgrade" = "y" ];then
+    # Drop fedemeter measurements during upgrade (4.2, 4.3, 4.3.1 upgrade to 4.4 or later)
+    if [ "0${target_tag_first_digit}" -ge "4" ] && [ "0${target_tag_middle_digit}" -ge "4" ] && [ "0${source_tag_first_digit}" -eq "4" ] && [ "0${source_tag_middle_digit}" -lt "4" ]; then
+        influxdb_name="alameda-influxdb-0"
+        database_name="alameda_fedemeter"
+        kubectl exec $influxdb_name -n $install_namespace -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database $database_name -execute "drop measurement calculation_price_instance;drop measurement calculation_price_storage;drop measurement recommendation_jeri;"
+    fi
+fi
 
 webhook_exist_checker
 if [ "$webhook_exist" != "y" ];then

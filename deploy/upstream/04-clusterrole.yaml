@@ -1,25 +1,31 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
+  creationTimestamp: null
   name: federatorai-operator
 rules:
-# following is taken from Federatorai-operator CSV v0.0.1 clusterPermissions section
 - apiGroups:
-  - route.openshift.io
+  - ""
   resources:
-  - "*"
+  - configmaps
   verbs:
-  - "*"
+  - create
+  - delete
+  - get
+  - list
+  - update
+  - watch
 - apiGroups:
-  - federatorai.containers.ai
-  - autoscaling.containers.ai
-  - tenant.containers.ai
-  - analysis.containers.ai
-  - notifying.containers.ai
+  - ""
   resources:
-  - "*"
+  - endpoints
+  - pods
   verbs:
-  - "*"
+  - delete
+  - get
+  - list
+  - patch
+  - watch
 - apiGroups:
   - ""
   resources:
@@ -35,29 +41,31 @@ rules:
   - persistentvolumeclaims
   - serviceaccounts
   verbs:
-  - delete #[issue 150]for openshift v3.09
-  - get
-  - list
-  - watch
   - create
+  - delete
+  - get
+  - list
+  - watch
 - apiGroups:
   - ""
   resources:
-  - endpoints
-  - pods
+  - persistentvolumes
+  - pods/log
+  - replicationcontrollers
+  - services
   verbs:
   - get
   - list
   - watch
-  - delete
-  - patch
 - apiGroups:
-  - extensions
   - ""
   resources:
-  - replicationcontrollers
+  - secrets
   verbs:
-  - "*"
+  - create
+  - delete
+  - list
+  - watch
 - apiGroups:
   - ""
   resources:
@@ -69,63 +77,42 @@ rules:
 - apiGroups:
   - ""
   resources:
-  - secrets
-  verbs:
-  - delete #[issue 150]for openshift v3.09
-  - create
-  - list
-  - watch
-- apiGroups:
-  - ""
-  resources:
-  - configmaps
-  verbs:
-  - delete #[issue 150]for openshift v3.09
-  - create
-  - list
-  - update
-  - watch
-  - get
-- apiGroups:
-  - ""
-  resources:
   - services
   verbs:
   - create
-  - list
-  - update
-  - watch
   - delete
-- apiGroups:
-  - rbac.authorization.k8s.io
-  resources:
-  - clusterroles
-  - clusterroles/finalizers
-  - clusterrolebindings
-  - roles
-  - rolebindings
-  verbs:
-  - delete #[issue 150]for openshift v3.09
-  - create
   - list
-  - watch
   - update
+  - watch
+- apiGroups:
+  - ""
+  - extensions
+  resources:
+  - replicationcontrollers
+  verbs:
+  - '*'
+- apiGroups:
+  - admissionregistration.k8s.io
+  resources:
+  - mutatingwebhookconfigurations
+  - validatingwebhookconfigurations
+  verbs:
+  - create
+  - delete
   - get
+  - list
+  - update
+  - watch
 - apiGroups:
-  - extensions
-  - apps
+  - analysis.containers.ai
+  - autoscaling.containers.ai
+  - federatorai.containers.ai
+  - notifying.containers.ai
+  - tenant.containers.ai
   resources:
-  - deployments
-  - statefulsets
+  - '*'
   verbs:
-  - "*"
-- apiGroups:
-  - extensions
-  - apps
-  resources:
-  - replicasets
-  verbs:
-  - "*"
+  - '*'
 - apiGroups:
   - apiextensions.k8s.io
   resources:
@@ -136,42 +123,39 @@ rules:
   - get
   - update
 - apiGroups:
-  - admissionregistration.k8s.io
+  - apps
+  - extensions
   resources:
-  - mutatingwebhookconfigurations
-  - validatingwebhookconfigurations
+  - daemonsets
+  - deployments/scale
   verbs:
   - create
+  - delete
   - get
   - list
   - update
   - watch
-  - delete
+- apiGroups:
+  - apps
+  - extensions
+  resources:
+  - deployments
+  - replicasets
+  - statefulsets
+  verbs:
+  - '*'
 - apiGroups:
   - apps.openshift.io
   resources:
   - deploymentconfigs
   verbs:
-  - "*"
+  - '*'
 - apiGroups:
   - autoscaling
   resources:
   - horizontalpodautoscalers
   verbs:
   - list
-- apiGroups:
-  - ""
-  resources:
-  - pods/log
-  - replicationcontrollers
-  - services
-  - nodes
-  - persistentvolumes
-  - persistentvolumeclaims
-  verbs:
-  - get
-  - list
-  - watch
 - apiGroups:
   - batch
   resources:
@@ -183,38 +167,11 @@ rules:
   - watch
 - apiGroups:
   - extensions
-  - apps
-  resources:
-  - daemonsets
-  - deployments
-  - deployments/scale
-  verbs:
-  - get
-  - list
-  - watch
-  - create
-  - delete
-  - update
-- apiGroups:
-  - extensions
-  resources:
-  - deployments/scale
-  verbs:
-  - update
-- apiGroups:
-  - storage.k8s.io
-  resources:
-  - storageclasses
-  verbs:
-  - list
-  - watch
-- apiGroups:
-  - extensions
   - policy
   resources:
   - podsecuritypolicies
   verbs:
-  - "*"
+  - '*'
 - apiGroups:
   - extensions
   - policy
@@ -225,48 +182,70 @@ rules:
   verbs:
   - use
 - apiGroups:
-  - volumesnapshot.external-storage.k8s.io
+  - monitoring.coreos.com
   resources:
-  - volumesnapshots
-  - volumesnapshotdatas
+  - prometheuses
   verbs:
   - list
-  - watch
-- apiGroups:
-  - security.openshift.io 
-  resources:
-  - securitycontextconstraints 
-  verbs:
-  - create
-  - get
-  - list
-  - watch
-  - update
-  - delete
-  - use
 - apiGroups:
   - monitoring.coreos.com
   resources:
   - prometheusrules
   verbs:
   - create
+  - delete
   - get
   - list
   - update
-  - delete
-#- apiGroups:
-  #- monitoring.coreos.com
-  #resources:
-  #- servicemonitors
-  #verbs:
-  #- list
-  #- update
 - apiGroups:
-  - monitoring.coreos.com
+  - rbac.authorization.k8s.io
   resources:
-  - prometheuses
+  - clusterrolebindings
+  - clusterroles
+  - clusterroles/finalizers
+  - rolebindings
+  - roles
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - update
+  - watch
+- apiGroups:
+  - route.openshift.io
+  resources:
+  - '*'
+  verbs:
+  - '*'
+- apiGroups:
+  - security.openshift.io
+  resources:
+  - securitycontextconstraints
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - update
+  - use
+  - watch
+- apiGroups:
+  - storage.k8s.io
+  resources:
+  - storageclasses
   verbs:
   - list
+  - watch
+- apiGroups:
+  - volumesnapshot.external-storage.k8s.io
+  resources:
+  - volumesnapshotdatas
+  - volumesnapshots
+  verbs:
+  - list
+  - watch
+
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole

@@ -4,24 +4,35 @@
 #
 #   This script is created for demo purpose.
 #   Usage:
-#       [-p] # Prepare environment
-#           Requirement:
-#                [-a cluster_name] # Specify cluster name
-#       [-c] # clean environment for preloader test
-#       [-e] # Enable preloader pod
-#       [-r] # Run preloader (normal mode: historical + current)
-#       [-o] # Run preloader (historical + ab test)
-#       [-f future data point (hour)] # Run preloader future mode
-#       [-d] # Disable & Remove preloader
-#       [-v] # Revert environment to normal mode
-#       [-n nginx_prefix_name] # Specify nginx prefix name (optional)
+#       For K8S:
+#           [-p] # Prepare environment
+#               Requirement:
+#                    [-a cluster_name] # Specify cluster name
+#           [-c] # clean environment for preloader test
+#           [-e] # Enable preloader pod
+#           [-r] # Run preloader (normal mode: historical + current)
+#           [-o] # Run preloader (historical + ab test)
+#           [-f future data point (hour)] # Run preloader future mode
+#           [-d] # Disable & Remove preloader
+#           [-v] # Revert environment to normal mode
+#           [-n nginx_prefix_name] # Specify nginx prefix name (optional)
+#       For VM:
+#           [-p] # Prepare environment
+#           [-c] # clean environment for preloader test
+#           [-e] # Enable preloader pod
+#           [-r] # Run preloader (normal mode: historical + current)
+#           [-o] # Run preloader (historical)
+#           [-f future data point (hour)] # Run preloader future mode
+#           [-d] # Disable & Remove preloader
+#           [-v] # Revert environment to normal mode
 #       [-h] # Display script usage
 #   Standalone options:
-#       [-i] # Install Nginx
-#       [-k] # Remove Nginx
-#       [-b] # Retrigger ab test inside preloader pod
-#       [-g ab_traffic_ratio] # ab test traffic ratio (default:4000) [e.g., -g 4000]
-#       [-t replica number] # Nginx default replica number (default:5) [e.g., -t 5]
+#       For K8S:
+#           [-i] # Install Nginx
+#           [-k] # Remove Nginx
+#           [-b] # Retrigger ab test inside preloader pod
+#           [-g ab_traffic_ratio] # ab test traffic ratio (default:4000) [e.g., -g 4000]
+#           [-t replica number] # Nginx default replica number (default:5) [e.g., -t 5]
 #
 #################################################################################################################
 
@@ -30,24 +41,35 @@ show_usage()
     cat << __EOF__
 
     Usage:
-        [-p] # Prepare environment
-            Requirement:
-                [-a cluster_name] # Specify cluster name
-        [-c] # clean environment for preloader test
-        [-e] # Enable preloader pod
-        [-r] # Run preloader (normal mode: historical + current)
-        [-o] # Run preloader (historical + ab test)
-        [-f future data point (hour)] # Run preloader future mode
-        [-d] # Disable & Remove preloader
-        [-v] # Revert environment to normal mode
-        [-n nginx_prefix_name] # Specify nginx prefix name (optional)
-        [-h] # Display script usage
+        For K8S:
+            [-p] # Prepare environment
+                Requirement:
+                    [-a cluster_name] # Specify cluster name
+            [-c] # clean environment for preloader test
+            [-e] # Enable preloader pod
+            [-r] # Run preloader (normal mode: historical + current)
+            [-o] # Run preloader (historical + ab test)
+            [-f future data point (hour)] # Run preloader future mode
+            [-d] # Disable & Remove preloader
+            [-v] # Revert environment to normal mode
+            [-n nginx_prefix_name] # Specify nginx prefix name (optional)
+            [-h] # Display script usage
+        For VM:
+            [-p] # Prepare environment
+            [-c] # clean environment for preloader test
+            [-e] # Enable preloader pod
+            [-r] # Run preloader (normal mode: historical + current)
+            [-o] # Run preloader (historical only)
+            [-f future data point (hour)] # Run preloader future mode
+            [-d] # Disable & Remove preloader
+            [-v] # Revert environment to normal mode
     Standalone options:
-        [-i] # Install Nginx
-        [-k] # Remove Nginx
-        [-b] # Retrigger ab test inside preloader pod
-        [-g ab_traffic_ratio] # ab test traffic ratio (default:4000) [e.g., -g 4000]
-        [-t replica number] # Nginx default replica number (default:5) [e.g., -t 5]
+        For K8S:
+            [-i] # Install Nginx
+            [-k] # Remove Nginx
+            [-b] # Retrigger ab test inside preloader pod
+            [-g ab_traffic_ratio] # ab test traffic ratio (default:4000) [e.g., -g 4000]
+            [-t replica number] # Nginx default replica number (default:5) [e.g., -t 5]
 
 __EOF__
     exit 1
@@ -243,7 +265,14 @@ wait_for_cluster_status_data_ready()
     pass="n"
     for i in $(seq 1 $repeat_count)
     do
-        kubectl exec $influxdb_pod_name -n $install_namespace -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database alameda_cluster_status -execute "select * from pod" 2>/dev/null |grep -q "${alamedascaler_name}"
+        if [ "$cluster_type" = "vm" ]; then
+            # VM
+            kubectl exec $influxdb_pod_name -n $install_namespace -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database alameda_cluster_status -format 'csv' -execute "select * from node" 2>/dev/null
+        else
+            # K8S
+            kubectl exec $influxdb_pod_name -n $install_namespace -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database alameda_cluster_status -execute "select * from pod" 2>/dev/null |grep -q "${alamedascaler_name}"
+        fi
+
         if [ "$?" != 0 ]; then
             echo "Not ready, keep retrying cluster status..."
             sleep $sleep_interval
@@ -252,8 +281,15 @@ wait_for_cluster_status_data_ready()
             break
         fi
     done
+
     if [ "$pass" = "n" ]; then
-        echo -e "\n$(tput setaf 1)Error! Failed to find alamedascaler ($alamedascaler_name) status in alameda_cluster_status measurement.$(tput sgr 0)"
+        if [ "$cluster_type" = "vm" ]; then
+            # VM
+            echo -e "\n$(tput setaf 1)Error! Failed to get any node record in alameda_cluster_status..node$(tput sgr 0)"
+        else
+            # K8S
+            echo -e "\n$(tput setaf 1)Error! Failed to find alamedascaler ($alamedascaler_name) status in alameda_cluster_status..pod$(tput sgr 0)"
+        fi
         leave_prog
         exit 8
     fi
@@ -384,7 +420,7 @@ run_preloader_command()
         exit 5
     fi
 
-    if [ "$running_mode" = "historical_only" ]; then
+    if [ "$running_mode" = "historical_only" ] && [ "$cluster_type" != "vm" ]; then
         run_ab_test
     fi
 
@@ -504,7 +540,7 @@ patch_data_adapter_for_preloader()
     if [ "$current_flag_value" != "" ]; then
         if [ "$current_flag_value" != "$only_mode" ]; then
             # Get COLLECT_METADATA_ONLY index in env array
-            patch_index=$(kubectl get alamedaservice $alamedaservice_name -n $install_namespace -o jsonpath='{.spec.federatoraiDataAdapter.env[*]}'|sed 's/]/\n/g'|awk '{print NR-1 "," $0}'|grep "name:COLLECT_METADATA_ONLY"|cut -d ',' -f1)
+            patch_index=$(kubectl get alamedaservice $alamedaservice_name -n $install_namespace -o jsonpath='{.spec.federatoraiDataAdapter.env[*]}'|sed 's/}/\n/g'|awk '{print NR-1 "," $0}'|grep "COLLECT_METADATA_ONLY"|cut -d ',' -f1)
             if [ "$patch_index" != "" ]; then
                 # replace value at $patch_index
                 kubectl patch alamedaservice $alamedaservice_name -n $install_namespace --type json --patch "[ { \"op\" : \"replace\" , \"path\" : \"/spec/federatoraiDataAdapter/env/${patch_index}\" , \"value\" : { \"name\" : \"COLLECT_METADATA_ONLY\", \"value\" : \"$only_mode\" } } ]"
@@ -597,6 +633,23 @@ patch_datahub_back_to_normal()
     echo "Duration patch_datahub_back_to_normal = $duration" >> $debug_log
 }
 
+check_federatorai_cluster_type()
+{
+    echo -e "\n$(tput setaf 6)Checking Federator.ai cluster type...$(tput sgr 0)"
+    influxdb_pod_name="`kubectl get pods -n $install_namespace |grep "alameda-influxdb-"|awk '{print $1}'|head -1`"
+    cluster_output=$(kubectl exec $influxdb_pod_name -n $install_namespace -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database alameda_cluster_status -format 'csv' -execute "select * from cluster"|tail -n +2|awk -F',' '{print $7}')
+    if [ "$(echo "$cluster_output"|grep "vm"|head -1)" != "" ]; then
+        cluster_type="vm"
+    elif [ "$(echo "$cluster_output"|grep "k8s"|head -1)" != "" ]; then
+        cluster_type="k8s"
+    else
+        echo -e "\n$(tput setaf 1)Error! Failed to determine Federator.ai cluster type from (alameda_cluster_status..cluster).$(tput sgr 0)"
+        exit 8
+    fi
+    echo "cluster_type = $cluster_type"
+    echo "Done"
+}
+
 check_influxdb_retention()
 {
     start=`date +%s`
@@ -670,7 +723,13 @@ verify_metrics_exist()
 {
     start=`date +%s`
     echo -e "\n$(tput setaf 6)Verifying metrics in influxdb ...$(tput sgr 0)"
-    metricsArray=("container_cpu" "container_memory" "namespace_cpu" "namespace_memory" "node_cpu" "node_memory")
+    if [ "$cluster_type" = "vm" ]; then
+        metricsArray=("node_cpu" "node_memory")
+    else
+        #K8S
+        metricsArray=("container_cpu" "container_memory" "namespace_cpu" "namespace_memory" "node_cpu" "node_memory")
+    fi
+    
     metrics_required_number=`echo "${#metricsArray[@]}"`
     influxdb_pod_name="`kubectl get pods -n $install_namespace |grep "alameda-influxdb-"|awk '{print $1}'|head -1`"
     metrics_list=$(kubectl exec $influxdb_pod_name -n $install_namespace -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database alameda_metric -execute "show measurements")
@@ -1482,9 +1541,26 @@ if [ "$install_namespace" = "" ];then
     exit 3
 fi
 
-if [[( "$prepare_environment" = "y" && "$cluster_name_specified" != "y" ) || ( "$install_nginx" = "y" && "$cluster_name_specified" != "y" )]]; then
-    check_cluster_name_not_empty
+check_federatorai_cluster_type
+if [ "$cluster_type" = "vm" ]; then
+    not_support_action_list=( install_nginx remove_nginx run_ab_from_preloader replica_num_specified enable_execution_specified cluster_name_specified traffic_ratio_specified nginx_name_specified )
+    for action in "${not_support_action_list[@]}"
+    do
+        if [ "`echo ${!action}`" = "y" ]; then
+            echo -e "\n$(tput setaf 1)Error! Action \"$action\" is not supported when cluster_type = vm$(tput sgr 0)"
+            show_usage
+            exit 3
+        fi
+    done
 fi
+
+if [ "$cluster_type" != "vm" ]; then
+    #K8S
+    if [[( "$prepare_environment" = "y" && "$cluster_name_specified" != "y" ) || ( "$install_nginx" = "y" && "$cluster_name_specified" != "y" )]]; then
+        check_cluster_name_not_empty
+    fi
+fi
+
 
 if [ "$cluster_name_specified" = "y" ]; then
     cluster_name="$a_arg"
@@ -1615,23 +1691,27 @@ if [ "$enable_execution_specified" = "y" ]; then
 else
     enable_execution="true"
 fi
-# copy preloader ab files if run historical only mode enabled
-preloader_folder="$(dirname $0)/preloader_ab_runner"
-if [ "$run_preloader_with_historical_only" = "y" ] || [ "$run_ab_from_preloader" = "y" ]; then
-    # Check folder exists
-    [ ! -d "$preloader_folder" ] && echo -e "$(tput setaf 1)Error! Can't locate $preloader_folder folder.$(tput sgr 0)" && exit 3
 
-    ab_files_list=("define.py" "generate_loads.sh" "generate_traffic1.py" "run_ab.py" "transaction.txt")
-    for ab_file in "${ab_files_list[@]}"
-    do
-        # Check files exist
-        [ ! -f "$preloader_folder/$ab_file" ] && echo -e "$(tput setaf 1)Error! Can't locate file ($preloader_folder/$ab_file).$(tput sgr 0)" && exit 3
-    done
+if [ "$cluster_type" != "vm" ]; then
+    # K8S
+    # copy preloader ab files if run historical only mode enabled
+    preloader_folder="$(dirname $0)/preloader_ab_runner"
+    if [ "$run_preloader_with_historical_only" = "y" ] || [ "$run_ab_from_preloader" = "y" ]; then
+        # Check folder exists
+        [ ! -d "$preloader_folder" ] && echo -e "$(tput setaf 1)Error! Can't locate $preloader_folder folder.$(tput sgr 0)" && exit 3
 
-    cp -r $preloader_folder $file_folder
-    if [ "$?" != "0" ]; then
-        echo -e "\n$(tput setaf 1)Error! Can't copy folder $preloader_folder to $file_folder"
-        exit 3
+        ab_files_list=("define.py" "generate_loads.sh" "generate_traffic1.py" "run_ab.py" "transaction.txt")
+        for ab_file in "${ab_files_list[@]}"
+        do
+            # Check files exist
+            [ ! -f "$preloader_folder/$ab_file" ] && echo -e "$(tput setaf 1)Error! Can't locate file ($preloader_folder/$ab_file).$(tput sgr 0)" && exit 3
+        done
+
+        cp -r $preloader_folder $file_folder
+        if [ "$?" != "0" ]; then
+            echo -e "\n$(tput setaf 1)Error! Can't copy folder $preloader_folder to $file_folder"
+            exit 3
+        fi
     fi
 fi
 
@@ -1639,11 +1719,13 @@ cd $file_folder
 echo "Receiving command '$0 $@'" >> $debug_log
 
 if [ "$prepare_environment" = "y" ]; then
-    delete_all_alamedascaler
-    new_nginx_example
-    add_svc_for_nginx
-    #patch_datahub_for_preloader
-    #patch_grafana_for_preloader
+    if [ "$cluster_type" != "vm" ]; then
+        delete_all_alamedascaler
+        new_nginx_example
+        add_svc_for_nginx
+        #patch_datahub_for_preloader
+        #patch_grafana_for_preloader
+    fi
     patch_data_adapter_for_preloader "true"
     check_influxdb_retention
 fi
@@ -1661,36 +1743,45 @@ if [ "$run_ab_from_preloader" = "y" ]; then
 fi
 
 if [ "$run_preloader_with_normal_mode" = "y" ] || [ "$run_preloader_with_historical_only" = "y" ]; then
-    # Move scale_down_pods into run_preloader_command method
-    #scale_down_pods
-    if [ "$run_preloader_with_normal_mode" = "y" ]; then
-        add_alamedascaler_for_nginx
-        run_preloader_command "normal"
-    else
-        # historical mode
-        get_datasource_in_alamedaorganization
-        if [ "$data_source_type" = "datadog" ]; then
-            if [ "$enable_execution_specified" = "y" ]; then
-                enable_execution="$s_arg"
-            else
-                enable_execution="false"
+    if [ "$cluster_type" != "vm" ]; then
+        # K8S
+        # Move scale_down_pods into run_preloader_command method
+        #scale_down_pods
+        if [ "$run_preloader_with_normal_mode" = "y" ]; then
+            add_alamedascaler_for_nginx
+            run_preloader_command "normal"
+        else
+            # historical mode
+            get_datasource_in_alamedaorganization
+            if [ "$data_source_type" = "datadog" ]; then
+                if [ "$enable_execution_specified" = "y" ]; then
+                    enable_execution="$s_arg"
+                else
+                    enable_execution="false"
+                fi
+            elif [ "$data_source_type" = "prometheus" ]; then
+                echo ""
+            elif [ "$data_source_type" = "sysdig" ]; then
+                # Not sure for now
+                if [ "$enable_execution_specified" = "y" ]; then
+                    enable_execution="$s_arg"
+                else
+                    enable_execution="false"
+                fi
             fi
-        elif [ "$data_source_type" = "prometheus" ]; then
-            echo ""
-        elif [ "$data_source_type" = "sysdig" ]; then
-            # Not sure for now
-            if [ "$enable_execution_specified" = "y" ]; then
-                enable_execution="$s_arg"
-            else
-                enable_execution="false"
-            fi
+            add_alamedascaler_for_nginx
+            run_preloader_command "historical_only"
         fi
-        add_alamedascaler_for_nginx
-        run_preloader_command "historical_only"
+    else
+        # VM
+        if [ "$run_preloader_with_normal_mode" = "y" ]; then
+            run_preloader_command "normal"
+        else
+            run_preloader_command "historical_only"
+        fi
     fi
     verify_metrics_exist
     scale_up_pods
-    #check_prediction_status
 fi
 
 if [ "$future_mode_enabled" = "y" ]; then
@@ -1708,10 +1799,13 @@ fi
 if [ "$revert_environment" = "y" ]; then
     # scale up if any failure encounter previously or program abort
     scale_up_pods
-    delete_all_alamedascaler
-    delete_nginx_example
-    #patch_datahub_back_to_normal
-    #patch_grafana_back_to_normal
+    if [ "$cluster_type" != "vm" ]; then
+        # K8S
+        delete_all_alamedascaler
+        delete_nginx_example
+        #patch_datahub_back_to_normal
+        #patch_grafana_back_to_normal
+    fi
     patch_data_adapter_for_preloader "false"
     clean_environment_operations
 fi
