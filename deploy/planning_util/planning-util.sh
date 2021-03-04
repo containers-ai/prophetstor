@@ -319,11 +319,11 @@ get_controller_resources_from_kubectl()
         limit_cpu_before=$(echo $resources|jq '.limits.cpu'|sed 's/"//g')
         [ "$limit_cpu_before" = "" ] && limit_cpu_before="N/A"
         limit_memory_before=$(echo $resources|jq '.limits.memory'|sed 's/"//g')
-        [ "$limit_memory_before" = "" ] && limit_cpu_before="N/A"
+        [ "$limit_memory_before" = "" ] && limit_memory_before="N/A"
         request_cpu_before=$(echo $resources|jq '.requests.cpu'|sed 's/"//g')
-        [ "$request_cpu_before" = "" ] && limit_cpu_before="N/A"
+        [ "$request_cpu_before" = "" ] && request_cpu_before="N/A"
         request_memory_before=$(echo $resources|jq '.requests.memory'|sed 's/"//g')
-        [ "$request_memory_before" = "" ] && limit_cpu_before="N/A"
+        [ "$request_memory_before" = "" ] && request_memory_before="N/A"
         show_info "$(tput setaf 3)limits:"
         show_info "  cpu: $limit_cpu_before"
         show_info "  memory: $limit_memory_before"
@@ -333,15 +333,26 @@ get_controller_resources_from_kubectl()
         show_info "--------------------------------------------"
     else
         # mode = "after"
-        show_info "----------------After patch-----------------"
-        limit_cpu_after=$(echo $resources|jq '.limits.cpu'|sed 's/"//g')
-        [ "$limit_cpu_after" = "" ] && limit_cpu_before="N/A"
-        limit_memory_after=$(echo $resources|jq '.limits.memory'|sed 's/"//g')
-        [ "$limit_memory_after" = "" ] && limit_cpu_before="N/A"
-        request_cpu_after=$(echo $resources|jq '.requests.cpu'|sed 's/"//g')
-        [ "$request_cpu_after" = "" ] && limit_cpu_before="N/A"
-        request_memory_after=$(echo $resources|jq '.requests.memory'|sed 's/"//g')
-        [ "$request_memory_after" = "" ] && limit_cpu_before="N/A"
+        if [ "$do_dry_run" = "y" ]; then
+            show_info "---------------- dry run -------------------"
+            # dry run - set resource values from planning results to display
+            limit_cpu_after="${limits_pod_cpu}m"
+            limit_memory_after="$limits_pod_memory"
+            request_cpu_after="${requests_pod_cpu}m"
+            request_memory_after="$requests_pod_memory"
+        else
+            # patch is done
+            show_info "----------------After patch-----------------"
+            limit_cpu_after=$(echo $resources|jq '.limits.cpu'|sed 's/"//g')
+            [ "$limit_cpu_after" = "" ] && limit_cpu_after="N/A"
+            limit_memory_after=$(echo $resources|jq '.limits.memory'|sed 's/"//g')
+            [ "$limit_memory_after" = "" ] && limit_memory_after="N/A"
+            request_cpu_after=$(echo $resources|jq '.requests.cpu'|sed 's/"//g')
+            [ "$request_cpu_after" = "" ] && request_cpu_after="N/A"
+            request_memory_after=$(echo $resources|jq '.requests.memory'|sed 's/"//g')
+            [ "$request_memory_after" = "" ] && request_memory_after="N/A"
+        fi
+
         show_info "$(tput setaf 3)limits:"
         show_info "  cpu: $limit_cpu_before -> $limit_cpu_after"
         show_info "  memory: $limit_memory_before -> $limit_memory_after"
