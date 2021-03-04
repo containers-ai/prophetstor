@@ -61,7 +61,7 @@ get_build_tag()
     tag_middle_digit=${tag_middle_digit%%.$tag_last_digit}  # Delete dot and last number.
     tag_first_digit=$(echo $tag_first_digit|cut -d 'v' -f2) # Delete v
     # Purposely ignore error of unofficial tag_number for development build, start from v4.4
-    if [ "${SKIP_TAG_NUMBER_CHECK}" = "1" ]; then tag_first_digit="4"; tag_middle_digit="4"; fi
+    if [ "${SKIP_TAG_NUMBER_CHECK}" = "1" ]; then tag_first_digit="4"; tag_middle_digit="5"; fi
 
     if [ "$tag_first_digit" -le "4" ] && [ "$tag_middle_digit" -le "3" ]; then
         # <= 4.3
@@ -143,7 +143,7 @@ done
 
 download_files()
 {
-    scriptarray=("install.sh" "email-notifier-setup.sh" "node-label-assignor.sh" "planning-util.sh" "preloader-util.sh" "prepare-private-repository.sh" "uninstall.sh")
+    scriptarray=("install.sh" "email-notifier-setup.sh" "node-label-assignor.sh" "preloader-util.sh" "prepare-private-repository.sh" "uninstall.sh")
     if [ "$tag_first_digit" -ge "4" ] && [ "$tag_middle_digit" -ge "3" ]; then
         # >= 4.3
         scriptarray=("${scriptarray[@]}" "federatorai-setup-for-datadog.sh")
@@ -152,6 +152,11 @@ download_files()
     if [ "$tag_first_digit" -ge "4" ] && [ "$tag_middle_digit" -ge "4" ]; then
         # >= 4.4
         scriptarray=("${scriptarray[@]}" "cluster-property-setup.sh" "backup-restore.sh")
+    fi
+
+    if [ "$tag_first_digit" -ge "4" ] && [ "$tag_middle_digit" -lt "5" ]; then
+        # < 4.5
+        scriptarray=("${scriptarray[@]}" "planning-util.sh")
     fi
 
     mkdir -p $scripts_folder
@@ -225,6 +230,25 @@ download_files()
             echo -e "\n$(tput setaf 3)Warning, download Federator.ai preloader ab file \"${file}\" failed!!!$(tput sgr 0)"
         fi
     done
+
+    if [ "$tag_first_digit" -ge "4" ] && [ "$tag_middle_digit" -ge "5" ]; then
+        # >= 4.5
+        # Download planning util folder
+        planning_folder_name="planning_util"
+        mkdir -p $planning_folder_name
+
+        planning_file_lists=`curl --silent https://api.github.com/repos/containers-ai/prophetstor/contents/deploy/${planning_folder_name}?ref=${tag_number} 2>&1|grep "\"name\":"|cut -d ':' -f2|cut -d '"' -f2`
+        if [ "$planning_file_lists" = "" ]; then
+            echo -e "\n$(tput setaf 3)Warning, download Federator.ai planning files list failed!!!$(tput sgr 0)"
+        fi
+
+        for file in `echo $planning_file_lists`
+        do
+            if ! curl -sL --fail https://raw.githubusercontent.com/containers-ai/prophetstor/${tag_number}/deploy/${planning_folder_name}/${file} -o $planning_folder_name/${file}; then
+                echo -e "\n$(tput setaf 3)Warning, download Federator.ai planning file \"${file}\" failed!!!$(tput sgr 0)"
+            fi
+        done
+    fi
 
     cd - > /dev/null
 
