@@ -4,18 +4,41 @@ Auto Provisioning Helper Script
 
 -----------------------------------------------------------------------
 Note:
-1. planning.json only support json format
-2. planning.json is located in the same folder as planning-util.sh 
+1. planning config file (planning.json) only support json format
+2. planning.json needs to be located in the same folder as planning-util.sh
 3. User needs to use schedule tool (e.g. cronjob) to launch planning-util.sh in certain interval
    to patch controller resource regularly and continuously.
-4. Planning targets with different time intervals may need different planning-util.sh to patch. (Due to different sleep interval)
+4. Planning targets with different time intervals may need different planning-util.sh to patch. (Due to different time interval and cron job interval)
 -----------------------------------------------------------------------
 File description:
 
-planning-util.sh
-	1. Run ./planning-util.sh -h for further detail
+* planning-util.sh
+	planning-util.sh by default will only display any error encountered or json output of controller resources changed on standard output.
+	This is useful for user to parse the result and proceed further automation. However, user can choose to display all the operation steps detail to stdout by specified “--verbose” in parameters or go check the log file instead.
 
-planning.json
+	A: Normal mode
+		Planning values will be retrieved and applied on controller.
+		e.g. ./planning-util.sh --config-file planning.json
+
+	B: Run test connection only
+		Only test if login token can be retrieved.
+		e.g. ./planning-util.sh --config-file planning.json --test-connection-only
+
+	C. Dry run only
+		Planning values will be retrieved and suggested kubectl command will be displayed.
+		e.g. ./planning-util.sh --config-file planning.json --dry-run-only
+
+	D. [Optional] Verbose
+		Detail will be put to stdout.
+		e.g. ./planning-util.sh --config-file planning.json --verbose
+
+	E. [Optional] Log file name
+		Specify log file name to replace default one (output.log)
+		All the logs will be put under /tmp/auto-provisioning/
+
+		e.g. ./planning-util.sh --config-file planning.json --log-name mycluster.log
+
+* planning.json
 	1.	rest_api_full_path:
             K8S: 
 	            From REST API Node port
@@ -30,19 +53,21 @@ planning.json
 	4.	planning_targets:
             Support multiple target sets.
 	            Keys:
-                A. namespace:
+				A. cluster_name:
+				    Cluster name where application exist
+                B. namespace:
                     Controller namespace
-	            B. controller_name:
+	            C. controller_name:
                     Controller name
-	            C. controller_type:
+	            D. controller_type:
                     Three kinds of controller types are supported. 
 	                1.	statefulset
 	                2.	deployment
 	                3.	deploymentconfig
-	            D. time_interval:
+	            E. time_interval:
                     Three kinds of planning recommendation time intervals are supported
 	                1.	daily
 	                2.	weekly
 	                3.	monthly
-	            E. cluster_name:Cluster name where application exist
+
 -----------------------------------------------------------------------

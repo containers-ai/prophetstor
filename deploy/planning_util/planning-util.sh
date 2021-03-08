@@ -7,11 +7,12 @@ show_usage()
 
     Usage:
         $(tput setaf 2)Requirement:$(tput sgr 0)
-            --config-file <planning config filename> [e.g., $(tput setaf 6)--config-file planning.config$(tput sgr 0)]
+            --config-file <planning config filename> [e.g., $(tput setaf 6)--config-file planning.json$(tput sgr 0)]
         $(tput setaf 2)Standalone options:$(tput sgr 0)
             --test-connection-only
             --dry-run-only
             --verbose
+            --log-name <log filename> [e.g., $(tput setaf 6)--log-name mycluster.log$(tput sgr 0)]
 __EOF__
 }
 
@@ -119,11 +120,11 @@ rest_api_check_cluster_name()
     show_info "Done."
 }
 
-get_controller_info()
+get_controller_info_from_config()
 {
     index=$1
     if [ "$index" = "" ]; then
-        echo -e "\n$(tput setaf 1)Error! get_controller_info() index parameter can't be empty.$(tput sgr 0)" | tee -a $debug_log
+        echo -e "\n$(tput setaf 1)Error! get_controller_info_from_config() index parameter can't be empty.$(tput sgr 0)" | tee -a $debug_log
         log_prompt
         exit 3
     fi
@@ -173,9 +174,10 @@ get_controller_info()
         exit 8
     fi
 
+    show_info "Cluster name = $cluster_name"
     show_info "Namespace = $target_namespace"
-    show_info "Controller type = $owner_reference_kind"
     show_info "Controller name = $owner_reference_name"
+    show_info "Controller type = $owner_reference_kind"
     show_info "Time interval = $readable_granularity"
     show_info "Done."
 }
@@ -183,9 +185,10 @@ get_controller_info()
 get_controller_planning_from_api()
 {
     show_info "$(tput setaf 6)Getting planning values for the controller through REST API...$(tput sgr 0)"
+    show_info "Cluster name = $cluster_name"
     show_info "Namespace = $target_namespace"
-    show_info "Controller type = $owner_reference_kind"
     show_info "Controller name = $owner_reference_name"
+    show_info "Controller type = $owner_reference_kind"
     show_info "Time interval = $readable_granularity"
 
     interval_start_time="$(date +%s)"
@@ -243,12 +246,12 @@ get_controller_planning_from_api()
     limits_pod_memory=`echo "($limits_pod_memory + $replica_number - 1)/$replica_number" | bc`
     requests_pod_memory=`echo "($requests_pod_memory + $replica_number - 1)/$replica_number" | bc`
 
-    show_info "$(tput setaf 2)-------Planning for controller -------------$(tput sgr 0)"
+    show_info "-------------- Planning for controller --------------"
     show_info "$(tput setaf 2)resources.limits.cpu $(tput sgr 0)= $(tput setaf 3)$limits_pod_cpu(m)$(tput sgr 0)"
     show_info "$(tput setaf 2)resources.limits.momory $(tput sgr 0)= $(tput setaf 3)$limits_pod_memory(byte)$(tput sgr 0)"
     show_info "$(tput setaf 2)resources.requests.cpu $(tput sgr 0)= $(tput setaf 3)$requests_pod_cpu(m)$(tput sgr 0)"
     show_info "$(tput setaf 2)resources.requests.memory $(tput sgr 0)= $(tput setaf 3)$requests_pod_memory(byte)$(tput sgr 0)"
-    show_info "--------------------------------------------"
+    show_info "-----------------------------------------------------"
 
     if [ "$limits_pod_cpu" = "" ] || [ "$requests_pod_cpu" = "" ] || [ "$limits_pod_memory" = "" ] || [ "$requests_pod_memory" = "" ]; then
         echo -e "\n$(tput setaf 1)Error! Failed to get controller ($owner_reference_name) planning. Missing value.$(tput sgr 0)" | tee -a $debug_log
@@ -259,16 +262,16 @@ get_controller_planning_from_api()
     show_info "Done."
 }
 
-patch_controller()
+update_controller_resources()
 {
     mode=$1
     if [ "$mode" = "" ]; then
-        echo -e "\n$(tput setaf 1)Error! patch_controller() mode parameter can't be empty.$(tput sgr 0)" | tee -a $debug_log
+        echo -e "\n$(tput setaf 1)Error! update_controller_resources() mode parameter can't be empty.$(tput sgr 0)" | tee -a $debug_log
         log_prompt
         exit 3
     fi
 
-    show_info "$(tput setaf 6)Patching controller ...$(tput sgr 0)"
+    show_info "$(tput setaf 6)Updateing controller resources...$(tput sgr 0)"
 
     if [ "$limits_pod_cpu" = "" ] || [ "$requests_pod_cpu" = "" ] || [ "$limits_pod_memory" = "" ] || [ "$requests_pod_memory" = "" ]; then
         echo -e "\n$(tput setaf 1)Error! Missing planning values.$(tput sgr 0)" | tee -a $debug_log
@@ -276,19 +279,19 @@ patch_controller()
         exit 8
     fi
 
-    # Patch resources
+    # Update resources
     exec_cmd="kubectl -n $target_namespace set resources $owner_reference_kind $owner_reference_name --limits cpu=${limits_pod_cpu}m,memory=${limits_pod_memory} --requests cpu=${requests_pod_cpu}m,memory=${requests_pod_memory}"
 
     show_info "$(tput setaf 3)Issuing cmd:$(tput sgr 0)"
     show_info "$(tput setaf 2)$exec_cmd$(tput sgr 0)"
     if [ "$mode" = "dry_run" ]; then
-        execution_time="N/A"
+        execution_time="N/A, skip due to dry run is enabled."
         show_info "$(tput setaf 3)Dry run is enabled, skip execution.$(tput sgr 0)"
         show_info "Done. Dry run is done."
         return
     fi
 
-    execution_time="$(date +%s)"
+    execution_time="$(date -u)"
     eval $exec_cmd 2>&1|tee -a $debug_log
     if [ "$?" != "0" ]; then
         echo -e "\nFailed to update resources for $owner_reference_kind $owner_reference_name" | tee -a $debug_log
@@ -310,12 +313,12 @@ get_controller_resources_from_kubectl()
 
     show_info "$(tput setaf 6)Getting current controller resources...$(tput sgr 0)"
     show_info "Namespace = $target_namespace"
-    show_info "Controller type = $owner_reference_kind"
     show_info "Controller name = $owner_reference_name"
+    show_info "Controller type = $owner_reference_kind"
     
     resources=$(kubectl get $owner_reference_kind $owner_reference_name -n $target_namespace -o json |jq '.spec.template.spec.containers[].resources')
     if [ "$mode" = "before" ]; then
-        show_info "----------------Before patch----------------"
+        show_info "----------------- Before execution ------------------"
         limit_cpu_before=$(echo $resources|jq '.limits.cpu'|sed 's/"//g')
         [ "$limit_cpu_before" = "" ] && limit_cpu_before="N/A"
         limit_memory_before=$(echo $resources|jq '.limits.memory'|sed 's/"//g')
@@ -330,11 +333,11 @@ get_controller_resources_from_kubectl()
         show_info "Requests:"
         show_info "  cpu: $request_cpu_before"
         show_info "  memory: $request_memory_before$(tput sgr 0)"
-        show_info "--------------------------------------------"
+        show_info "-----------------------------------------------------"
     else
         # mode = "after"
         if [ "$do_dry_run" = "y" ]; then
-            show_info "---------------- dry run -------------------"
+            show_info "--------------------- Dry run -----------------------"
             # dry run - set resource values from planning results to display
             limit_cpu_after="${limits_pod_cpu}m"
             limit_memory_after="$limits_pod_memory"
@@ -342,7 +345,7 @@ get_controller_resources_from_kubectl()
             request_memory_after="$requests_pod_memory"
         else
             # patch is done
-            show_info "----------------After patch-----------------"
+            show_info "------------------ After execution ------------------"
             limit_cpu_after=$(echo $resources|jq '.limits.cpu'|sed 's/"//g')
             [ "$limit_cpu_after" = "" ] && limit_cpu_after="N/A"
             limit_memory_after=$(echo $resources|jq '.limits.memory'|sed 's/"//g')
@@ -359,8 +362,9 @@ get_controller_resources_from_kubectl()
         show_info "Requests:"
         show_info "  cpu: $request_cpu_before -> $request_cpu_after"
         show_info "  memory: $request_memory_before -> $request_memory_after$(tput sgr 0)"
-        show_info "--------------------------------------------"
-        jq -n --arg execution_time $execution_time --arg limit_cpu_before $limit_cpu_before --arg limit_cpu_after $limit_cpu_after --arg limit_memory_before $limit_memory_before --arg limit_memory_after $limit_memory_after --arg request_cpu_before $request_cpu_before --arg request_cpu_after $request_cpu_after --arg request_memory_before $request_memory_before --arg request_memory_after $request_memory_after '{"execution_time":"\($execution_time)","before_patch":{"limits": {"cpu":"\($limit_cpu_before)","memory":"\($limit_memory_before)"},"requests": {"cpu":"\($request_cpu_before)","memory":"\($request_memory_before)"}},"after_patch":{"limits": {"cpu":"\($limit_cpu_after)","memory":"\($limit_memory_after)"},"requests":{"cpu":"\($request_cpu_after)","memory":"\($request_memory_after)"}}}' | tee -a $debug_log
+        show_info "-----------------------------------------------------"
+
+        jq -n --arg namespace $target_namespace --arg time_interval $readable_granularity --arg controller_type $owner_reference_kind --arg controller_name $owner_reference_name --arg cluster_name $cluster_name --arg exec_cmd "$exec_cmd" --arg execution_time "$execution_time" --arg limit_cpu_before $limit_cpu_before --arg limit_cpu_after $limit_cpu_after --arg limit_memory_before $limit_memory_before --arg limit_memory_after $limit_memory_after --arg request_cpu_before $request_cpu_before --arg request_cpu_after $request_cpu_after --arg request_memory_before $request_memory_before --arg request_memory_after $request_memory_after '{"info":{"cluster_name":"\($cluster_name)","namespace":"\($namespace)","controller_name":"\($controller_name)","controller_type":"\($controller_type)","time_interval":"\($time_interval)","execute_cmd":"\($exec_cmd)","execution_time":"\($execution_time)"},"before_execution":{"limits": {"cpu":"\($limit_cpu_before)","memory":"\($limit_memory_before)"},"requests": {"cpu":"\($request_cpu_before)","memory":"\($request_memory_before)"}},"after_execution":{"limits": {"cpu":"\($limit_cpu_after)","memory":"\($limit_memory_after)"},"requests":{"cpu":"\($request_cpu_after)","memory":"\($request_memory_after)"}}}' | tee -a $debug_log
     fi
     
     show_info "Done."
@@ -372,15 +376,6 @@ connection_test()
     rest_api_login
 }
 
-file_folder="/tmp/auto-provisioning"
-mkdir -p $file_folder
-log_name="output-`date +%F-%H%M%S`.log"
-debug_log="${file_folder}/${log_name}"
-
-current_location=`pwd`
-
-echo "Receiving command '$0 $@'" > $debug_log
-
 while getopts "h-:" o; do
     case "${o}" in
         -)
@@ -388,7 +383,7 @@ while getopts "h-:" o; do
                 config-file)
                     config_file_name="${!OPTIND}"; OPTIND=$(( $OPTIND + 1 ))
                     if [ "$config_file_name" = "" ]; then
-                        echo -e "\n$(tput setaf 1)Error! Missing --${OPTARG} value$(tput sgr 0)" | tee -a $debug_log
+                        echo -e "\n$(tput setaf 1)Error! Missing --${OPTARG} value$(tput sgr 0)"
                         show_usage
                         exit 4
                     fi
@@ -402,12 +397,20 @@ while getopts "h-:" o; do
                 verbose)
                     verbose_mode="y"
                     ;;
+                log-name)
+                    log_name="${!OPTIND}"; OPTIND=$(( $OPTIND + 1 ))
+                    if [ "$log_name" = "" ]; then
+                        echo -e "\n$(tput setaf 1)Error! Missing --${OPTARG} value$(tput sgr 0)"
+                        show_usage
+                        exit 4
+                    fi
+                    ;;
                 help)
                     show_usage
                     exit 0
                     ;;
                 *)
-                    echo -e "\n$(tput setaf 1)Error! Unknown option --${OPTARG}$(tput sgr 0)" | tee -a $debug_log
+                    echo -e "\n$(tput setaf 1)Error! Unknown option --${OPTARG}$(tput sgr 0)"
                     show_usage
                     exit 4
                     ;;
@@ -417,12 +420,23 @@ while getopts "h-:" o; do
             exit 0
             ;;
         *)
-            echo -e "\n$(tput setaf 1)Error! wrong parameter.$(tput sgr 0)" | tee -a $debug_log
+            echo -e "\n$(tput setaf 1)Error! wrong parameter.$(tput sgr 0)"
             show_usage
             exit 5
             ;;
     esac
 done
+
+file_folder="/tmp/auto-provisioning"
+mkdir -p $file_folder
+if [ "$log_name" = "" ]; then
+    log_name="output.log"
+fi
+debug_log="${file_folder}/${log_name}"
+current_location=`pwd`
+echo ""
+echo "Receiving command: '$0 $@'" >> $debug_log
+echo "Receiving time: `date -u`" >> $debug_log
 
 which kubectl > /dev/null 2>&1
 if [ "$?" != "0" ];then
@@ -477,8 +491,9 @@ if [ ! -f ${config_file} ]; then
     log_prompt
     exit 3
 else
-    echo "-------------------- config file --------------------" >> $debug_log
-    cat ${config_file} >> $debug_log
+    echo "-------------- Receiving config file ----------------" >> $debug_log
+    # Hide password
+    cat ${config_file} |sed 's/"login_password.*/"login_password": *****/g' >> $debug_log
     echo "-----------------------------------------------------" >> $debug_log
 fi
 
@@ -511,14 +526,14 @@ fi
 while [[ $planning_index -lt $planning_target_count ]]
 do
     rest_api_check_cluster_name $planning_index
-    get_controller_info $planning_index
+    get_controller_info_from_config $planning_index
     get_controller_resources_from_kubectl "before"
     get_controller_planning_from_api
     
     if [ "$do_dry_run" = "y" ]; then
-        patch_controller "dry_run"
+        update_controller_resources "dry_run"
     else
-        patch_controller "normal"
+        update_controller_resources "normal"
     fi
     get_controller_resources_from_kubectl "after"
     ((planning_index = planning_index + 1))
