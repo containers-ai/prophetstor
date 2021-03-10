@@ -3,7 +3,7 @@ kind: Service
 metadata:
   labels:
     component: federatorai-operator
-  name: federatorai-operator
+  name: federatorai-operator-service
   namespace: federatorai
 spec:
   ports:

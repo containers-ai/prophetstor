@@ -7,7 +7,7 @@ webhooks:
 - clientConfig:
     caBundle: Cg==
     service:
-      name: federatorai-operator
+      name: federatorai-operator-service
       namespace: federatorai
       path: /mutate-federatorai-containers-ai-v1alpha1-alamedaservice
   failurePolicy: Fail

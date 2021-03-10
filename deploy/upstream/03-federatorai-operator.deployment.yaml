@@ -92,4 +92,4 @@ spec:
         - name: cert
           secret:
             defaultMode: 420
-            secretName: federatorai-operator-admission
+            secretName: federatorai-operator-service-cert
