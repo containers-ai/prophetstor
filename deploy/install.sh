@@ -1167,8 +1167,8 @@ fi
 # for tag
 if [ "$aws_mode" = "y" ]; then
     sed -i "s|quay.io/prophetstor/federatorai-operator-ubi:latest|$ecr_url|g" 03*.yaml
-    #sed -i "/\- federatorai-operator/d" 03*.yaml
-    #sed -i "/command:/d" 03*.yaml
+    # Change command to /start.sh
+    sed -i "/- federatorai-operator/ {n; :a; /- federatorai-operator/! {N; ba;}; s/- federatorai-operator/- \/start.sh/; :b; n; $! bb}" 03*.yaml
 cat >> 01*.yaml << __EOF__
   annotations:
     eks.amazonaws.com/role-arn: ${role_arn}
@@ -1217,23 +1217,49 @@ if [ "$need_upgrade" = "y" ];then
 
     while read deploy_name deploy_ns useless
     do
-        kubectl delete deployment $deploy_name -n $deploy_ns
-        if [ "$?" != "0" ]; then
-            echo -e "\n$(tput setaf 1)Error in deleting old Federator.ai operator deployment $deploy_name in ns $deploy_ns.$(tput sgr 0)"
-            exit 8
+        if [ "$deploy_name" != "" ] && [ "$deploy_ns" != "" ]; then
+            kubectl delete deployment $deploy_name -n $deploy_ns
+            if [ "$?" != "0" ]; then
+                echo -e "\n$(tput setaf 1)Error in deleting old Federator.ai operator deployment $deploy_name in ns $deploy_ns.$(tput sgr 0)"
+                exit 8
+            fi
         fi
-    done <<< "$(kubectl get deployment --all-namespaces --output jsonpath='{range .items[*]}{"\n"}{.metadata.name}{"\t"}{.metadata.namespace}{"\t"}{range .spec.template.spec.containers[*]}{.image}{end}{end}' 2>/dev/null | grep 'federatorai-operator-ubi')"
+    done <<< "$(kubectl get deployment --all-namespaces --output jsonpath='{range .items[*]}{"\n"}{.metadata.name}{"\t"}{.metadata.namespace}{"\t"}{range .spec.template.spec.containers[*]}{.image}{end}{end}' 2>/dev/null | grep '^federatorai-operator')"
 
 fi
 
-for yaml_fn in `ls [0-9]*.yaml | sort -n`; do
-    echo "Applying ${yaml_fn}..."
-    kubectl apply -f ${yaml_fn}
+if [ "$need_upgrade" = "y" ];then
+    for yaml_fn in `ls [0-9]*.yaml | sort -n`; do
+        case "$yaml_fn" in
+        *03-*)
+          later_yaml="$yaml_fn"
+          echo "Delay applying $yaml_fn"
+          continue
+          ;;
+        esac
+        echo "Applying ${yaml_fn}..."
+        kubectl apply -f ${yaml_fn}
+        if [ "$?" != "0" ]; then
+            echo -e "\n$(tput setaf 1)Error in applying yaml file ${yaml_fn}.$(tput sgr 0)"
+            exit 8
+        fi
+    done
+    echo "Applying ${later_yaml}..."
+    kubectl apply -f ${later_yaml}
     if [ "$?" != "0" ]; then
-        echo -e "\n$(tput setaf 1)Error in applying yaml file ${yaml_fn}.$(tput sgr 0)"
+        echo -e "\n$(tput setaf 1)Error in applying yaml file ${later_yaml}.$(tput sgr 0)"
         exit 8
     fi
-done
+else
+    for yaml_fn in `ls [0-9]*.yaml | sort -n`; do
+        echo "Applying ${yaml_fn}..."
+        kubectl apply -f ${yaml_fn}
+        if [ "$?" != "0" ]; then
+            echo -e "\n$(tput setaf 1)Error in applying yaml file ${yaml_fn}.$(tput sgr 0)"
+            exit 8
+        fi
+    done
+fi
 
 if [ "$need_upgrade" != "y" ];then
     wait_until_pods_ready $max_wait_pods_ready_time 30 $install_namespace 1

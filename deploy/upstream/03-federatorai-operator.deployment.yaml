@@ -22,6 +22,8 @@ spec:
         name: federatorai-operator
         app: Federator.ai
     spec:
+      securityContext:
+        fsGroup: 1001
       serviceAccountName: federatorai-operator
       initContainers:
         - name: upgrader
