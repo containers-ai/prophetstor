@@ -143,6 +143,26 @@ done
 
 download_files()
 {
+    echo -e "\n$(tput setaf 6)Downloading ${tag_number} tgz file ...$(tput sgr 0)"
+    tgz_name="${tag_number}.tar.gz"
+    if ! curl -sL --fail https://github.com/containers-ai/prophetstor/archive/${tgz_name} -O; then
+        echo -e "\n$(tput setaf 1)Error, download file $tgz_name failed!!!$(tput sgr 0)"
+        echo "Please check tag name and network"
+        exit 1
+    fi
+
+    tar -zxf $tgz_name
+    if [ "$?" != "0" ];then
+        echo -e "\n$(tput setaf 1)Error, untar $tgz_name file failed!!!$(tput sgr 0)"
+        exit 3
+    fi
+
+    tgz_folder_name=$(tar -tzf $tgz_name | head -1 | cut -f1 -d"/")
+    if [ "$tgz_folder_name" = "" ]; then
+        echo -e "\n$(tput setaf 1)Error, failed to get extracted directory name.$(tput sgr 0)"
+        exit 3
+    fi
+
     scriptarray=("install.sh" "email-notifier-setup.sh" "node-label-assignor.sh" "preloader-util.sh" "prepare-private-repository.sh" "uninstall.sh")
     if [ "$tag_first_digit" -ge "4" ] && [ "$tag_middle_digit" -ge "3" ]; then
         # >= 4.3
@@ -160,120 +180,47 @@ download_files()
     fi
 
     mkdir -p $scripts_folder
-    cd $scripts_folder
-    echo -e "\n$(tput setaf 6)Downloading scripts ...$(tput sgr 0)"
-    for file_name in "${scriptarray[@]}"
-    do
-        if ! curl -sL --fail https://raw.githubusercontent.com/containers-ai/prophetstor/${tag_number}/deploy/${file_name} -O; then
-            echo -e "\n$(tput setaf 1)Error, download file $file_name failed!!!$(tput sgr 0)"
-            echo "Please check tag name and network"
-            # To avoid backup-restore.sh download failure case
-            default="n"
-            read -r -p "$(tput setaf 2)Do you want to ignore this error and continue? [default: $default]: $(tput sgr 0)" continue_download </dev/tty
-            continue_download=${continue_download:-$default}
-            continue_download=$(echo "$continue_download" | tr '[:upper:]' '[:lower:]')
-            if [ "$continue_download" = "n" ]; then
-                exit 1
-            fi
-        fi
-    done
+
     # Download launcher itself.
+    cd $scripts_folder
     if ! curl -sL --fail https://raw.githubusercontent.com/containers-ai/prophetstor/master/deploy/federatorai-launcher.sh -O; then
         echo -e "\n$(tput setaf 1)Abort, download federatorai-launcher.sh failed!!!$(tput sgr 0)"
         echo "Please check network"
         exit 1
     fi
+    cd - > /dev/null
 
-    # Download Ansible folders.
+    # Copy all scripts.
+    for file_name in "${scriptarray[@]}"
+    do
+        cp $tgz_folder_name/deploy/$file_name $scripts_folder
+    done
+
+    # Copy Ansible folders.
     ansible_folder_name="ansible_for_federatorai"
-    mkdir -p $ansible_folder_name
+    cp -r $tgz_folder_name/deploy/$ansible_folder_name $scripts_folder
 
-    # Installer
-    ansible_install_file_lists=`curl --silent https://api.github.com/repos/containers-ai/prophetstor/contents/deploy/${ansible_folder_name}?ref=${tag_number} 2>&1|grep "\"name\":"|cut -d ':' -f2|cut -d '"' -f2|grep -v "uninstaller"`
-    if [ "$ansible_install_file_lists" = "" ]; then
-        echo -e "\n$(tput setaf 3)Warning, download Federator.ai ansible install files list failed!!!$(tput sgr 0)"
-    fi
-
-    for file in `echo $ansible_install_file_lists`
-    do
-        if ! curl -sL --fail https://raw.githubusercontent.com/containers-ai/prophetstor/${tag_number}/deploy/${ansible_folder_name}/${file} -o $ansible_folder_name/${file}; then
-            echo -e "\n$(tput setaf 3)Warning, download Federator.ai ansible install file \"${file}\" failed!!!$(tput sgr 0)"
-        fi
-    done
-
-    # Uninstaller
-    mkdir -p $ansible_folder_name/uninstaller
-    ansible_uninstall_file_lists=`curl --silent https://api.github.com/repos/containers-ai/prophetstor/contents/deploy/${ansible_folder_name}/uninstaller?ref=${tag_number} 2>&1|grep "\"name\":"|cut -d ':' -f2|cut -d '"' -f2`
-    if [ "$ansible_uninstall_file_lists" = "" ]; then
-        echo -e "\n$(tput setaf 3)Warning, download Federator.ai ansible uninstall files list failed!!!$(tput sgr 0)"
-    fi
-
-    for file in `echo $ansible_uninstall_file_lists`
-    do
-        if ! curl -sL --fail https://raw.githubusercontent.com/containers-ai/prophetstor/${tag_number}/deploy/${ansible_folder_name}/uninstaller/${file} -o $ansible_folder_name/uninstaller/${file}; then
-            echo -e "\n$(tput setaf 3)Warning, download Federator.ai ansible uninstall file \"${file}\" failed!!!$(tput sgr 0)"
-        fi
-    done
-
-    # Download preloader ab runnder folder
+    # Copy preloader ab runnder folder
     ab_folder_name="preloader_ab_runner"
-    mkdir -p $ab_folder_name
-
-    ab_file_lists=`curl --silent https://api.github.com/repos/containers-ai/prophetstor/contents/deploy/${ab_folder_name}?ref=${tag_number} 2>&1|grep "\"name\":"|cut -d ':' -f2|cut -d '"' -f2`
-    if [ "$ab_file_lists" = "" ]; then
-        echo -e "\n$(tput setaf 3)Warning, download Federator.ai preloader ab files list failed!!!$(tput sgr 0)"
-    fi
-
-    for file in `echo $ab_file_lists`
-    do
-        if ! curl -sL --fail https://raw.githubusercontent.com/containers-ai/prophetstor/${tag_number}/deploy/${ab_folder_name}/${file} -o $ab_folder_name/${file}; then
-            echo -e "\n$(tput setaf 3)Warning, download Federator.ai preloader ab file \"${file}\" failed!!!$(tput sgr 0)"
-        fi
-    done
+    cp -r $tgz_folder_name/deploy/$ab_folder_name $scripts_folder
 
     if [ "$tag_first_digit" -ge "4" ] && [ "$tag_middle_digit" -ge "5" ]; then
         # >= 4.5
-        # Download planning util folder
+        # Copy planning util folder
         planning_folder_name="planning_util"
-        mkdir -p $planning_folder_name
-
-        planning_file_lists=`curl --silent https://api.github.com/repos/containers-ai/prophetstor/contents/deploy/${planning_folder_name}?ref=${tag_number} 2>&1|grep "\"name\":"|cut -d ':' -f2|cut -d '"' -f2`
-        if [ "$planning_file_lists" = "" ]; then
-            echo -e "\n$(tput setaf 3)Warning, download Federator.ai planning files list failed!!!$(tput sgr 0)"
-        fi
-
-        for file in `echo $planning_file_lists`
-        do
-            if ! curl -sL --fail https://raw.githubusercontent.com/containers-ai/prophetstor/${tag_number}/deploy/${planning_folder_name}/${file} -o $planning_folder_name/${file}; then
-                echo -e "\n$(tput setaf 3)Warning, download Federator.ai planning file \"${file}\" failed!!!$(tput sgr 0)"
-            fi
-        done
+        cp -r $tgz_folder_name/deploy/$planning_folder_name $scripts_folder
     fi
-
-    cd - > /dev/null
 
     alamedaservice_example="alamedaservice_sample.yaml"
     yamlarray=( "alamedadetection.yaml" "alamedanotificationchannel.yaml" "alamedanotificationtopic.yaml" )
-    # if [ "$tag_first_digit" -eq "4" ] && [ "$tag_middle_digit" -eq "2" ]; then
-    #     yamlarray=("${yamlarray[@]}" "alamedascaler.yaml")
-    # fi
 
+    # Copy yamls
     mkdir -p $yamls_folder
-    cd $yamls_folder
-    echo -e "\n$(tput setaf 6)Downloading Federator.ai CR yamls ...$(tput sgr 0)"
-    if ! curl -sL --fail https://raw.githubusercontent.com/containers-ai/prophetstor/${tag_number}/deploy/example/${alamedaservice_example} -O; then
-        echo -e "\n$(tput setaf 1)Abort, download alamedaservice sample yaml file failed!!!$(tput sgr 0)"
-        echo "Please check tag name and network"
-        exit 2
-    fi
+    cp $tgz_folder_name/deploy/example/$alamedaservice_example $yamls_folder
 
     for file_name in "${yamlarray[@]}"
     do
-        if ! curl -sL --fail https://raw.githubusercontent.com/containers-ai/prophetstor/${tag_number}/deploy/example/${file_name} -O; then
-            echo -e "\n$(tput setaf 1)Abort, download $file_name file failed!!!$(tput sgr 0)"
-            echo "Please check tag name and network"
-            exit 3
-        fi
+        cp $tgz_folder_name/deploy/example/$file_name $yamls_folder
     done
 
     if [ "$tag_first_digit" -ge "4" ] && [ "$tag_middle_digit" -ge "3" ]; then
@@ -283,41 +230,24 @@ download_files()
 
         for pool in "${src_pool[@]}"
         do
-            if ! curl -sL --fail https://raw.githubusercontent.com/containers-ai/prophetstor/${tag_number}/deploy/example/${pool}/${alamedascaler_filename} -O; then
-                echo -e "\n$(tput setaf 1)Abort, download $alamedascaler_filename sample file from $pool folder failed!!!$(tput sgr 0)"
-                exit 3
-            fi
+            cp $tgz_folder_name/deploy/example/$pool/$alamedascaler_filename $yamls_folder
             if [ "$pool" = "kafka" ]; then
-                mv $alamedascaler_filename alamedascaler_kafka.yaml
+                mv $yamls_folder/$alamedascaler_filename $yamls_folder/alamedascaler_kafka.yaml
             elif [ "$pool" = "nginx" ]; then
-                mv $alamedascaler_filename alamedascaler_nginx.yaml
+                mv $yamls_folder/$alamedascaler_filename $yamls_folder/alamedascaler_nginx.yaml
             else
-                mv $alamedascaler_filename alamedascaler_generic.yaml
+                mv $yamls_folder/$alamedascaler_filename $yamls_folder/alamedascaler_generic.yaml
             fi
         done
     fi
-    cd - > /dev/null
 
+    # Copy operator yamls
     mkdir -p $operator_folder
-    cd $operator_folder
-    echo -e "\n$(tput setaf 6)Downloading Federator.ai operator yamls ...$(tput sgr 0)"
-    operator_lists=`curl --silent https://api.github.com/repos/containers-ai/prophetstor/contents/deploy/upstream?ref=${tag_number} 2>&1|grep "\"name\":"|cut -d ':' -f2|cut -d '"' -f2`
-    if [ "$operator_lists" = "" ]; then
-        echo -e "\n$(tput setaf 1)Abort, download Federator.ai operator yaml list failed!!!$(tput sgr 0)"
-        echo "Please check tag name and network"
-        exit 1
-    fi
+    cp $tgz_folder_name/deploy/upstream/* $operator_folder
 
-    for file in `echo $operator_lists`
-    do
-        if ! curl -sL --fail https://raw.githubusercontent.com/containers-ai/prophetstor/${tag_number}/deploy/upstream/${file} -O; then
-            echo -e "\n$(tput setaf 1)Abort, download file failed!!!$(tput sgr 0)"
-            echo "Please check tag name and network"
-            exit 1
-        fi
-    done
-    cd - > /dev/null
-
+    # Clean up
+    rm -rf $tgz_folder_name
+    rm -f $tgz_name
     echo "Done"
 }
 
