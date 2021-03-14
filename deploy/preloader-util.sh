@@ -467,6 +467,8 @@ scale_down_pods()
     kubectl patch deployment alameda-ai -n $install_namespace -p '{"spec":{"replicas": 0}}'
     kubectl patch deployment alameda-ai-dispatcher -n $install_namespace -p '{"spec":{"replicas": 0}}'
     kubectl patch deployment $restart_recommender_deploy -n $install_namespace -p '{"spec":{"replicas": 0}}'
+    kubectl patch deployment federatorai-dashboard-backend -n $install_namespace -p '{"spec":{"replicas": 0}}'
+    kubectl patch deployment federatorai-dashboard-frontend -n $install_namespace -p '{"spec":{"replicas": 0}}'
     echo "Done"
 }
 
@@ -494,6 +496,16 @@ scale_up_pods()
 
     if [ "`kubectl get deploy federatorai-operator -n $install_namespace -o jsonpath='{.spec.replicas}'`" -eq "0" ]; then
         kubectl patch deployment federatorai-operator -n $install_namespace -p '{"spec":{"replicas": 1}}'
+        do_something="y"
+    fi
+
+    if [ "`kubectl get deploy federatorai-dashboard-backend -n $install_namespace -o jsonpath='{.spec.replicas}'`" -eq "0" ]; then
+        kubectl patch deployment federatorai-dashboard-backend -n $install_namespace -p '{"spec":{"replicas": 1}}'
+        do_something="y"
+    fi
+
+    if [ "`kubectl get deploy federatorai-dashboard-frontend -n $install_namespace -o jsonpath='{.spec.replicas}'`" -eq "0" ]; then
+        kubectl patch deployment federatorai-dashboard-frontend -n $install_namespace -p '{"spec":{"replicas": 1}}'
         do_something="y"
     fi
 
