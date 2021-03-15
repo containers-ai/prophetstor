@@ -70,9 +70,25 @@ get_build_tag()
         exit 3
     fi
 
-    file_folder="/tmp/federatorai-scripts/${tag_number}"
-    rm -rf $file_folder
+    if [ "$tag_first_digit" -ge "4" ] && [ "$tag_middle_digit" -ge "5" ]; then
+        # >= 4.5
+        default="/opt"
+        read -r -p "$(tput setaf 2)Please input Federator.ai files save path [default: $default]: $(tput sgr 0) " save_path </dev/tty
+        save_path=${save_path:-$default}
+        save_path=$(echo "$save_path" | tr '[:upper:]' '[:lower:]')
+        file_folder="$save_path/federatorai-scripts/${tag_number}"
+    else
+        file_folder="/tmp/federatorai-scripts/${tag_number}"
+    fi
+
+    if [ -d "$file_folder" ]; then
+        rm -rf $file_folder
+    fi
     mkdir -p $file_folder
+    if [ ! -d "$file_folder" ]; then
+        echo -e "\n$(tput setaf 1)Error! Failed to create folder ($file_folder) to save Federator.ai files.$(tput sgr 0)"
+        exit 3
+    fi
     cd $file_folder
 }
 
@@ -299,6 +315,11 @@ go_interactive()
 
     if [ "$run_installation" = "y" ]; then
         echo -e "\n$(tput setaf 6)Executing install.sh ...$(tput sgr 0)"
+        # Pass files path to install.sh
+        if [ "$save_path" != "" ]; then
+            export FEDERATOR_FILES_PATH=$save_path
+        fi
+
         if [ "$aws_mode" = "y" ]; then
             bash $scripts_folder/install.sh -t $tag_number --image-path $ECR_URL --cluster $EKS_CLUSTER --region $AWS_REGION
         else
