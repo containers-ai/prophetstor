@@ -185,9 +185,12 @@ check_build_tag()
         show_usage
     fi
 
-    if [[ ! $build_tag =~ ^[v][[:digit:]]+\.[[:digit:]]+\.[0-9a-z\-]+$ ]]; then
-        echo -e "\n$(tput setaf 1)Error! The tag should follow the correct format (e.g., v4.2.755) $(tput sgr 0)"
-        show_usage
+    # skip dev- tag check
+    if [[ ! $build_tag =~ ^dev-.*$ ]]; then
+        if [[ ! $build_tag =~ ^[v][[:digit:]]+\.[[:digit:]]+\.[0-9a-z\-]+$ ]]; then
+            echo -e "\n$(tput setaf 1)Error! The tag should follow the correct format (e.g., v4.2.755) $(tput sgr 0)"
+            show_usage
+        fi
     fi
 }
 
