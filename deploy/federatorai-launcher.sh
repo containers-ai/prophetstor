@@ -76,7 +76,7 @@ get_build_tag()
         read -r -p "$(tput setaf 2)Please input Federator.ai files save path [default: $default]: $(tput sgr 0) " save_path </dev/tty
         save_path=${save_path:-$default}
         save_path=$(echo "$save_path" | tr '[:upper:]' '[:lower:]')
-        file_folder="$save_path/federatorai-scripts/${tag_number}"
+        file_folder="$save_path/federatorai/repo/${tag_number}"
     else
         file_folder="/tmp/federatorai-scripts/${tag_number}"
     fi
@@ -89,6 +89,7 @@ get_build_tag()
         echo -e "\n$(tput setaf 1)Error! Failed to create folder ($file_folder) to save Federator.ai files.$(tput sgr 0)"
         exit 3
     fi
+    save_path="$(dirname "$(dirname "$(realpath $file_folder)")")"
     cd $file_folder
 }
 
@@ -317,7 +318,7 @@ go_interactive()
         echo -e "\n$(tput setaf 6)Executing install.sh ...$(tput sgr 0)"
         # Pass files path to install.sh
         if [ "$save_path" != "" ]; then
-            export FEDERATOR_FILES_PATH=$save_path
+            export FEDERATORAI_FILE_PATH=$save_path
         fi
 
         if [ "$aws_mode" = "y" ]; then
