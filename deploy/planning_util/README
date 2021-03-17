@@ -34,7 +34,7 @@ File description:
 
 	E. [Optional] Log file name
 		Specify log file name to replace default one (output.log)
-		All the logs will be put under /tmp/auto-provisioning/
+		All the logs will be put under /opt/federatorai/auto-provisioning/
 
 		e.g. ./planning-util.sh --config-file planning.json --log-name mycluster.log
 

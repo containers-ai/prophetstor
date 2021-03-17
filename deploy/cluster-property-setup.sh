@@ -439,14 +439,38 @@ select_cluster_and_delete()
 }
 
 default_org_name="default"
-file_folder="/tmp/alamedaorganization"
 current_yaml="current_setting.yaml"
 global_cluster_yaml="global_cluster_settings.yaml"
 global_cluster_delete_yaml="global_cluster_delete.yaml"
 cluster_yaml="cluster_settings.yaml"
 cluster_append_yaml="cluster_append.yaml"
 
+script_located_path=$(dirname $(readlink -f "$0"))
+if [ "$FEDERATORAI_FILE_PATH" = "" ]; then
+    if [[ $script_located_path =~ .*/federatorai/repo/.* ]]; then
+        save_path="$(dirname "$(dirname "$(dirname "$(realpath $script_located_path)")")")"
+    else
+        # Ask for input
+        default="/opt"
+        read -r -p "$(tput setaf 2)Please input Federator.ai cluster-property-setup files save path [default: $default]: $(tput sgr 0) " save_path </dev/tty
+        save_path=${save_path:-$default}
+        save_path=$(echo "$save_path" | tr '[:upper:]' '[:lower:]')
+        save_path="$save_path/federatorai"
+    fi
+else
+    save_path="$FEDERATORAI_FILE_PATH"
+fi
+
+file_folder="$save_path/cluster-property-setup"
+if [ -d "$file_folder" ]; then
+    rm -rf $file_folder
+fi
 mkdir -p $file_folder
+if [ ! -d "$file_folder" ]; then
+    echo -e "\n$(tput setaf 1)Error! Failed to create folder to save Federator.ai cluster-property-setup files.$(tput sgr 0)"
+    exit 3
+fi
+current_location=`pwd`
 cd $file_folder
 
 check_yq_tool

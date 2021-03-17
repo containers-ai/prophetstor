@@ -1,1 +1,1 @@
-default_yaml_files_base_path: /tmp/uninstall-op
+default_yaml_files_base_path: /opt/federatorai/ansible/uninstallation

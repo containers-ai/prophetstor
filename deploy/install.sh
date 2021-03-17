@@ -909,7 +909,7 @@ fi
 #[ "${e_arg}" = "" ] && silent_mode_disabled="y"
 #[ "${p_arg}" = "" ] && silent_mode_disabled="y"
 [ "${s_arg}" = "" ] && silent_mode_disabled="y"
-[ "${FEDERATOR_FILES_PATH}" = "" ] && silent_mode_disabled="y"
+[ "${FEDERATORAI_FILE_PATH}" = "" ] && silent_mode_disabled="y"
 [ "${s_arg}" = "persistent" ] && [ "${l_arg}" = "" ] && silent_mode_disabled="y"
 [ "${s_arg}" = "persistent" ] && [ "${d_arg}" = "" ] && silent_mode_disabled="y"
 [ "${s_arg}" = "persistent" ] && [ "${c_arg}" = "" ] && silent_mode_disabled="y"
@@ -1018,23 +1018,31 @@ if [ "$previous_alameda_namespace" != "" ];then
     fi
 fi
 
-if [ "$FEDERATOR_FILES_PATH" = "" ]; then
-    default="/opt"
-    read -r -p "$(tput setaf 2)Please input Federator.ai files save path [default: $default]: $(tput sgr 0) " save_path </dev/tty
-    save_path=${save_path:-$default}
-    save_path=$(echo "$save_path" | tr '[:upper:]' '[:lower:]')
+script_located_path=$(dirname $(readlink -f "$0"))
+if [ "$FEDERATORAI_FILE_PATH" = "" ]; then
+    # Try to find existing path
+    if [[ $script_located_path =~ .*/federatorai/repo/.* ]]; then
+        save_path="$(dirname "$(dirname "$(dirname "$(realpath $script_located_path)")")")"
+    else
+        # Ask for input
+        default="/opt"
+        read -r -p "$(tput setaf 2)Please input Federator.ai installation files save path [default: $default]: $(tput sgr 0) " save_path </dev/tty
+        save_path=${save_path:-$default}
+        save_path=$(echo "$save_path" | tr '[:upper:]' '[:lower:]')
+        save_path="$save_path/federatorai"
+    fi
 else
-    save_path="$FEDERATOR_FILES_PATH"
+    save_path="$FEDERATORAI_FILE_PATH"
 fi
 
-file_folder="$save_path/install-op"
+file_folder="$save_path/installation"
 if [ -d "$file_folder" ]; then
     rm -rf $file_folder
 fi
 
 mkdir -p $file_folder
 if [ ! -d "$file_folder" ]; then
-    echo -e "\n$(tput setaf 1)Error! Failed to create input folder to save Federator.ai files.$(tput sgr 0)"
+    echo -e "\n$(tput setaf 1)Error! Failed to create folder to save Federator.ai installation files.$(tput sgr 0)"
     exit 3
 fi
 
@@ -1109,7 +1117,6 @@ fi
 [ "$max_wait_pods_ready_time" = "" ] && max_wait_pods_ready_time=900  # maximum wait time for pods become ready
 
 current_location=`pwd`
-script_located_path=$(dirname $(readlink -f "$0"))
 cd $file_folder
 
 if [ "$aws_mode" = "y" ]; then

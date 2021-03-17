@@ -427,8 +427,20 @@ while getopts "h-:" o; do
     esac
 done
 
-file_folder="/tmp/auto-provisioning"
+if [ "$FEDERATORAI_FILE_PATH" = "" ]; then
+    save_path="/opt/federatorai"
+else
+    save_path="$FEDERATORAI_FILE_PATH"
+fi
+
+file_folder="$save_path/auto-provisioning"
+
 mkdir -p $file_folder
+if [ ! -d "$file_folder" ]; then
+    echo -e "\n$(tput setaf 1)Error! Failed to create folder to save Federator.ai planning-util files.$(tput sgr 0)"
+    exit 3
+fi
+
 if [ "$log_name" = "" ]; then
     log_name="output.log"
 fi

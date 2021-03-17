@@ -921,9 +921,31 @@ done
 
 [ "$max_wait_pods_ready_time" = "" ] && max_wait_pods_ready_time=1500  # maximum wait time for pods become ready
 
-file_folder="./config_result"
-current_location=`pwd`
+script_located_path=$(dirname $(readlink -f "$0"))
+if [ "$FEDERATORAI_FILE_PATH" = "" ]; then
+    if [[ $script_located_path =~ .*/federatorai/repo/.* ]]; then
+        save_path="$(dirname "$(dirname "$(dirname "$(realpath $script_located_path)")")")"
+    else
+        # Ask for input
+        default="/opt"
+        read -r -p "$(tput setaf 2)Please input Federator.ai federatorai-setup-for-datadog files save path [default: $default]: $(tput sgr 0) " save_path </dev/tty
+        save_path=${save_path:-$default}
+        save_path=$(echo "$save_path" | tr '[:upper:]' '[:lower:]')
+        save_path="$save_path/federatorai"
+    fi
+else
+    save_path="$FEDERATORAI_FILE_PATH"
+fi
+
+file_folder="$save_path/setup-for-datadog"
+if [ -d "$file_folder" ]; then
+    rm -rf $file_folder
+fi
 mkdir -p $file_folder
+if [ ! -d "$file_folder" ]; then
+    echo -e "\n$(tput setaf 1)Error! Failed to create folder to save Federator.ai federatorai-setup-for-datadog files.$(tput sgr 0)"
+    exit 3
+fi
 
 if [ "$openshift_minor_version" != "" ]; then
     # OpenShift

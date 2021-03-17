@@ -1,4 +1,4 @@
-default_yaml_files_base_path: /tmp
+default_yaml_files_base_path: /opt/federatorai/ansible/installation
 alamedaservice_sample_file: "alamedaservice_sample.yaml"
 cr_files:
  - "alamedadetection.yaml"
