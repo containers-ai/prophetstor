@@ -450,6 +450,12 @@ echo ""
 echo "Receiving command: '$0 $@'" >> $debug_log
 echo "Receiving time: `date -u`" >> $debug_log
 
+if [ "$config_file_name" = "" ]; then
+    echo -e "\n$(tput setaf 1)Abort, config_file is not specified.$(tput sgr 0)" | tee -a $debug_log
+    log_prompt
+    exit 3
+fi
+
 which kubectl > /dev/null 2>&1
 if [ "$?" != "0" ];then
     echo -e "\n$(tput setaf 1)Abort, \"kubectl\" command is needed for this tool.$(tput sgr 0)" | tee -a $debug_log
