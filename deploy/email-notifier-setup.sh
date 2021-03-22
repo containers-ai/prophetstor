@@ -165,15 +165,15 @@ do
     channel_to=""
     channel_cc=""
 
-    read -r -p "$(tput setaf 2)Please input SMTP server:$(tput sgr 0) " channel_server </dev/tty
-    read -r -p "$(tput setaf 2)Please input SMTP port:$(tput sgr 0) " channel_port </dev/tty
-    read -r -p "$(tput setaf 2)Please input Encryption protocol (e.g., ssl,tls,starttls):$(tput sgr 0) " channel_encryption </dev/tty
-    read -r -p "$(tput setaf 2)Please input Login username:$(tput sgr 0) " channel_username </dev/tty
-    read -rs -p "$(tput setaf 2)Please input Login password:$(tput sgr 0) " channel_password </dev/tty
+    read -r -p "$(tput setaf 2)Please enter SMTP server:$(tput sgr 0) " channel_server </dev/tty
+    read -r -p "$(tput setaf 2)Please enter SMTP port:$(tput sgr 0) " channel_port </dev/tty
+    read -r -p "$(tput setaf 2)Please enter Encryption protocol (e.g., ssl,tls,starttls):$(tput sgr 0) " channel_encryption </dev/tty
+    read -r -p "$(tput setaf 2)Please enter Login username:$(tput sgr 0) " channel_username </dev/tty
+    read -rs -p "$(tput setaf 2)Please enter Login password:$(tput sgr 0) " channel_password </dev/tty
     echo ""
-    read -r -p "$(tput setaf 2)Please input From:$(tput sgr 0) " channel_from </dev/tty
-    read -r -p "$(tput setaf 2)Please input To(seperated by comma):$(tput sgr 0) " channel_to </dev/tty
-    read -r -p "$(tput setaf 2)Please input Cc(seperated by comma):$(tput sgr 0) " channel_cc </dev/tty
+    read -r -p "$(tput setaf 2)Please enter From:$(tput sgr 0) " channel_from </dev/tty
+    read -r -p "$(tput setaf 2)Please enter To(seperated by comma):$(tput sgr 0) " channel_to </dev/tty
+    read -r -p "$(tput setaf 2)Please enter Cc(seperated by comma):$(tput sgr 0) " channel_cc </dev/tty
 
     echo -e "\n------------------------------------------------------------------"
     echo "Input Values:"
@@ -244,7 +244,7 @@ else
     echo -e "Done."
 fi
 
-read -r -p "$(tput setaf 2)Please input an email address for receiving test email:$(tput sgr 0) " test_email </dev/tty
+read -r -p "$(tput setaf 2)Please enter an email address for receiving test email:$(tput sgr 0) " test_email </dev/tty
 
 cat > patch.channel.testemail.yaml << __EOF__
 metadata:

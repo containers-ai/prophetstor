@@ -361,8 +361,8 @@ get_datadog_key()
         key_modified="y"
         while [ "$datadogAPIKey" = "" ] || [ "$datadogApplicationKey" = "" ]
         do
-            read -r -p "$(tput setaf 6)Please input Datadog API key: $(tput sgr 0)" datadogAPIKey </dev/tty
-            read -r -p "$(tput setaf 6)Please input Datadog Application key: $(tput sgr 0)" datadogApplicationKey </dev/tty
+            read -r -p "$(tput setaf 6)Please enter Datadog API key: $(tput sgr 0)" datadogAPIKey </dev/tty
+            read -r -p "$(tput setaf 6)Please enter Datadog Application key: $(tput sgr 0)" datadogApplicationKey </dev/tty
         done
     else
         while [ "$reconfigure_action" != "y" ] && [ "$reconfigure_action" != "n" ]
@@ -376,10 +376,10 @@ get_datadog_key()
             key_modified="y"
             while [ "$datadogAPIKey" = "" ] || [ "$datadogApplicationKey" = "" ]
             do
-                read -r -p "$(tput setaf 6)Please input Datadog API key [current: $secret_api_key]: $(tput sgr 0)" datadogAPIKey </dev/tty
+                read -r -p "$(tput setaf 6)Please enter Datadog API key [current: $secret_api_key]: $(tput sgr 0)" datadogAPIKey </dev/tty
                 datadogAPIKey=${datadogAPIKey:-$secret_api_key}
 
-                read -r -p "$(tput setaf 6)Please input Datadog Application key [current: $secret_app_key]: $(tput sgr 0)" datadogApplicationKey </dev/tty
+                read -r -p "$(tput setaf 6)Please enter Datadog Application key [current: $secret_app_key]: $(tput sgr 0)" datadogApplicationKey </dev/tty
                 datadogApplicationKey=${datadogApplicationKey:-$secret_app_key}
             done
         fi
@@ -928,7 +928,7 @@ if [ "$FEDERATORAI_FILE_PATH" = "" ]; then
     else
         # Ask for input
         default="/opt"
-        read -r -p "$(tput setaf 2)Please input Federator.ai federatorai-setup-for-datadog files save path [default: $default]: $(tput sgr 0) " save_path </dev/tty
+        read -r -p "$(tput setaf 2)Please enter the path of Federator.ai federatorai-setup-for-datadog directory [default: $default]: $(tput sgr 0) " save_path </dev/tty
         save_path=${save_path:-$default}
         save_path=$(echo "$save_path" | tr '[:upper:]' '[:lower:]')
         save_path="$save_path/federatorai"

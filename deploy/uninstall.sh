@@ -211,7 +211,7 @@ else
         else
             # Ask for input
             default="/opt"
-            read -r -p "$(tput setaf 2)Please input Federator.ai uninstallation files save path [default: $default]: $(tput sgr 0) " save_path </dev/tty
+            read -r -p "$(tput setaf 2)Please enter the path of Federator.ai uninstallation directory [default: $default]: $(tput sgr 0) " save_path </dev/tty
             save_path=${save_path:-$default}
             save_path=$(echo "$save_path" | tr '[:upper:]' '[:lower:]')
             save_path="$save_path/federatorai"
@@ -237,7 +237,7 @@ else
         # init variables
         tag_number=""
 
-        read -r -p "$(tput setaf 2)Please input your Federator.ai Operator tag:$(tput sgr 0) " tag_number </dev/tty
+        read -r -p "$(tput setaf 2)Please enter your Federator.ai Operator tag:$(tput sgr 0) " tag_number </dev/tty
 
         echo -e "\n----------------------------------------"
         echo "Your tag number = $tag_number"

@@ -388,9 +388,9 @@ setup_data_adapter_secret()
         modified="y"
         while [ "$input_api_key" = "" ] || [ "$input_app_key" = "" ]
         do
-            read -r -p "$(tput setaf 2)Please input Datadog API key: $(tput sgr 0)" input_api_key </dev/tty
+            read -r -p "$(tput setaf 2)Please enter Datadog API key: $(tput sgr 0)" input_api_key </dev/tty
             input_api_key=`echo -n "$input_api_key" | base64`
-            read -r -p "$(tput setaf 2)Please input Datadog Application key: $(tput sgr 0)" input_app_key </dev/tty
+            read -r -p "$(tput setaf 2)Please enter Datadog Application key: $(tput sgr 0)" input_app_key </dev/tty
             input_app_key=`echo -n "$input_app_key" | base64`
         done
     else
@@ -406,12 +406,12 @@ setup_data_adapter_secret()
             while [ "$input_api_key" = "" ] || [ "$input_app_key" = "" ]
             do
                 default="$secret_api_key"
-                read -r -p "$(tput setaf 2)Please input Datadog API key [current: $default]: $(tput sgr 0)" input_api_key </dev/tty
+                read -r -p "$(tput setaf 2)Please enter Datadog API key [current: $default]: $(tput sgr 0)" input_api_key </dev/tty
                 input_api_key=${input_api_key:-$default}
                 input_api_key=`echo -n "$input_api_key" | base64`
 
                 default="$secret_app_key"
-                read -r -p "$(tput setaf 2)Please input Datadog Application key [current: $default]: $(tput sgr 0)" input_app_key </dev/tty
+                read -r -p "$(tput setaf 2)Please enter Datadog Application key [current: $default]: $(tput sgr 0)" input_app_key </dev/tty
                 input_app_key=${input_app_key:-$default}
                 input_app_key=`echo -n "$input_app_key" | base64`
             done
@@ -644,7 +644,7 @@ backup_configuration()
         fi
 
         default="$backup_folder"
-        read -r -p "$(tput setaf 2)Please input path for storing backup configuration: [default: $default] $(tput sgr 0)" backup_path </dev/tty
+        read -r -p "$(tput setaf 2)Please enter the path for storing backup configuration: [default: $default] $(tput sgr 0)" backup_path </dev/tty
         backup_path=${backup_path:-$default}
         backup_path=$(echo "$backup_path" | tr '[:upper:]' '[:lower:]')
         backup_folder=$backup_path
@@ -1026,7 +1026,7 @@ if [ "$FEDERATORAI_FILE_PATH" = "" ]; then
     else
         # Ask for input
         default="/opt"
-        read -r -p "$(tput setaf 2)Please input Federator.ai installation files save path [default: $default]: $(tput sgr 0) " save_path </dev/tty
+        read -r -p "$(tput setaf 2)Please enter the path of Federator.ai installation directory [default: $default]: $(tput sgr 0) " save_path </dev/tty
         save_path=${save_path:-$default}
         save_path=$(echo "$save_path" | tr '[:upper:]' '[:lower:]')
         save_path="$save_path/federatorai"
@@ -1056,7 +1056,7 @@ if [ "$ALAMEDASERVICE_FILE_PATH" = "" ]; then
             # Check if tag number is specified
             if [ "$specified_tag_number" = "" ]; then
                 tag_number=""
-                read -r -p "$(tput setaf 2)Please input Federator.ai Operator tag:$(tput sgr 0) " tag_number </dev/tty
+                read -r -p "$(tput setaf 2)Please enter Federator.ai Operator tag:$(tput sgr 0) " tag_number </dev/tty
             else
                 tag_number=$specified_tag_number
             fi

@@ -1702,7 +1702,7 @@ if [ "$FEDERATORAI_FILE_PATH" = "" ]; then
     else
         # Ask for input
         default="/opt"
-        read -r -p "$(tput setaf 2)Please input Federator.ai preloader-util files save path [default: $default]: $(tput sgr 0) " save_path </dev/tty
+        read -r -p "$(tput setaf 2)Please enter the path of Federator.ai preloader-util directory [default: $default]: $(tput sgr 0) " save_path </dev/tty
         save_path=${save_path:-$default}
         save_path=$(echo "$save_path" | tr '[:upper:]' '[:lower:]')
         save_path="$save_path/federatorai"
