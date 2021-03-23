@@ -39,7 +39,7 @@ get_build_tag()
     fi
     while [ "$pass" != "y" ]
     do
-        [ "${tag_number}" = "" ] && read -r -p "$(tput setaf 2)Please input Federator.ai version tag (e.g., v4.4.0): $(tput sgr 0) " tag_number </dev/tty
+        [ "${tag_number}" = "" ] && read -r -p "$(tput setaf 2)Please enter Federator.ai version tag (e.g., v4.4.0): $(tput sgr 0) " tag_number </dev/tty
         if [[ $tag_number =~ ^[v][[:digit:]]+\.[[:digit:]]+\.[0-9a-z\-]+$ ]]; then
             pass="y"
         fi
@@ -73,7 +73,7 @@ get_build_tag()
     if [ "$tag_first_digit" -ge "4" ] && [ "$tag_middle_digit" -ge "5" ]; then
         # >= 4.5
         default="/opt"
-        read -r -p "$(tput setaf 2)Please input Federator.ai files save path [default: $default]: $(tput sgr 0) " save_path </dev/tty
+        read -r -p "$(tput setaf 2)Please enter the path of Federator.ai directory [default: $default]: $(tput sgr 0) " save_path </dev/tty
         save_path=${save_path:-$default}
         save_path=$(echo "$save_path" | tr '[:upper:]' '[:lower:]')
         file_folder="$save_path/federatorai/repo/${tag_number}"
@@ -97,7 +97,7 @@ get_repo_url()
 {
     while [ "$repo_url" = "" ] # prevent 'enter' is pressed without input
     do
-        read -r -p "$(tput setaf 2)Please input private repository URL (e.g., repo.prophetservice.com/prophetstor): $(tput sgr 0) " repo_url </dev/tty
+        read -r -p "$(tput setaf 2)Please enter the URL of private repository (e.g., repo.prophetservice.com/prophetstor): $(tput sgr 0) " repo_url </dev/tty
         repo_url=$(echo "$repo_url" | tr '[:upper:]' '[:lower:]')
     done
 
