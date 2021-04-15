@@ -12,7 +12,9 @@
 #           [-c] # clean environment for preloader test
 #           [-e] # Enable preloader pod
 #           [-r] # Run preloader (normal mode: historical + current)
-#           [-o] # Run preloader (historical + ab test)
+#           [-o] # Run preloader (historical mode)
+#                # K8S: historical + ab test
+#                # VM: historical only
 #           [-f future data point (hour)] # Run preloader future mode
 #           [-d] # Disable & Remove preloader
 #           [-v] # Revert environment to normal mode
@@ -40,7 +42,9 @@ show_usage()
             [-c] # clean environment for preloader test
             [-e] # Enable preloader pod
             [-r] # Run preloader (normal mode: historical + current)
-            [-o] # Run preloader (historical + ab test)
+            [-o] # Run preloader (historical mode)
+                 # K8S: historical + ab test
+                 # VM: historical only
             [-f future data point (hour)] # Run preloader future mode
             [-d] # Disable & Remove preloader
             [-v] # Revert environment to normal mode
