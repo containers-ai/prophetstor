@@ -1,71 +1,30 @@
 #!/usr/bin/env bash
 
-#################################################################################################################
-#
-#   This script is created for demo purpose.
-#   Usage:
-#       For K8S:
-#           [-p] # Prepare environment
-#               Requirement:
-#                    [-a cluster_name] # Specify cluster name
-#           [-c] # clean environment for preloader test
-#           [-e] # Enable preloader pod
-#           [-r] # Run preloader (normal mode: historical + current)
-#           [-o] # Run preloader (historical + ab test)
-#           [-f future data point (hour)] # Run preloader future mode
-#           [-d] # Disable & Remove preloader
-#           [-v] # Revert environment to normal mode
-#           [-n nginx_prefix_name] # Specify nginx prefix name (optional)
-#       For VM:
-#           [-p] # Prepare environment
-#           [-c] # clean environment for preloader test
-#           [-e] # Enable preloader pod
-#           [-r] # Run preloader (normal mode: historical + current)
-#           [-o] # Run preloader (historical)
-#           [-f future data point (hour)] # Run preloader future mode
-#           [-d] # Disable & Remove preloader
-#           [-v] # Revert environment to normal mode
-#       [-h] # Display script usage
-#   Standalone options:
-#       For K8S:
-#           [-i] # Install Nginx
-#           [-k] # Remove Nginx
-#           [-b] # Retrigger ab test inside preloader pod
-#           [-g ab_traffic_ratio] # ab test traffic ratio (default:4000) [e.g., -g 4000]
-#           [-t replica number] # Nginx default replica number (default:5) [e.g., -t 5]
-#
-#################################################################################################################
-
 show_usage()
 {
     cat << __EOF__
 
     Usage:
-        For K8S:
+        For K8S & VM:
             [-p] # Prepare environment
-                Requirement:
-                    [-a cluster_name] # Specify cluster name
+                Optional:
+                    # Specify your local Kubernetes cluster name to install an NGINX for demo purpose.
+                    [-a cluster_name]
             [-c] # clean environment for preloader test
             [-e] # Enable preloader pod
             [-r] # Run preloader (normal mode: historical + current)
-            [-o] # Run preloader (historical + ab test)
+            [-o] # Run preloader (historical mode)
+                 # K8S: historical + ab test
+                 # VM: historical only
             [-f future data point (hour)] # Run preloader future mode
             [-d] # Disable & Remove preloader
             [-v] # Revert environment to normal mode
-            [-n nginx_prefix_name] # Specify nginx prefix name (optional)
             [-h] # Display script usage
-        For VM:
-            [-p] # Prepare environment
-            [-c] # clean environment for preloader test
-            [-e] # Enable preloader pod
-            [-r] # Run preloader (normal mode: historical + current)
-            [-o] # Run preloader (historical only)
-            [-f future data point (hour)] # Run preloader future mode
-            [-d] # Disable & Remove preloader
-            [-v] # Revert environment to normal mode
     Standalone options:
         For K8S:
-            [-i] # Install Nginx
+            [-i] # Install Nginx on local Kubernetes cluster
+                Requirement:
+                    [-a cluster_name] Specify local Kubernetes cluster name
             [-k] # Remove Nginx
             [-b] # Retrigger ab test inside preloader pod
             [-g ab_traffic_ratio] # ab test traffic ratio (default:4000) [e.g., -g 4000]
@@ -255,25 +214,41 @@ delete_all_alamedascaler()
     echo "Duration delete_all_alamedascaler = $duration" >> $debug_log
 }
 
-wait_for_cluster_status_data_ready()
+_do_cluster_status_verify()
 {
-    start=`date +%s`
-    echo -e "\n$(tput setaf 6)Checking cluster status...$(tput sgr 0)"
+    mode="$1"
+    if [ "$mode" != "vm" ] && [ "$mode" != "k8s" ]; then
+        echo -e "\n$(tput setaf 1)Error! _do_metrics_verify() mode paramter can only be either 'vm' or 'k8s'.$(tput sgr 0)"
+        leave_prog
+        exit 8
+    fi
+    echo -e "\n$(tput setaf 6)Checking cluster status ($mode)...$(tput sgr 0)"
     influxdb_pod_name="`kubectl get pods -n $install_namespace |grep "alameda-influxdb-"|awk '{print $1}'|head -1`"
     repeat_count="30"
     sleep_interval="20"
     pass="n"
     for i in $(seq 1 $repeat_count)
     do
-        if [ "$cluster_type" = "vm" ]; then
+        if [ "$mode" = "vm" ]; then
             # VM
-            kubectl exec $influxdb_pod_name -n $install_namespace -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database alameda_cluster_status -format 'csv' -execute "select * from node" 2>/dev/null
+            if [ "$(kubectl exec $influxdb_pod_name -n $install_namespace -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database alameda_cluster_status -format 'csv' -execute "select * from node where type='vm'" 2>/dev/null|sed 1d|wc -l)" -gt "0" ]; then
+                result="ok"
+            fi
         else
             # K8S
-            kubectl exec $influxdb_pod_name -n $install_namespace -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database alameda_cluster_status -execute "select * from pod" 2>/dev/null |grep -q "${alamedascaler_name}"
+            if [ "$demo_nginx_exist" = "true" ]; then
+                kubectl exec $influxdb_pod_name -n $install_namespace -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database alameda_cluster_status -execute "select * from pod" 2>/dev/null |grep -q "${alamedascaler_name}"
+                if [ "$?" = "0" ]; then
+                    result="ok"
+                fi
+            else
+                if [ "$(kubectl exec $influxdb_pod_name -n $install_namespace -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database alameda_cluster_status -format 'csv' -execute "select * from pod" 2>/dev/null|sed 1d|wc -l)" -gt "0" ]; then
+                    result="ok"
+                fi
+            fi
         fi
 
-        if [ "$?" != 0 ]; then
+        if [ "$result" != "ok" ]; then
             echo "Not ready, keep retrying cluster status..."
             sleep $sleep_interval
         else
@@ -283,18 +258,35 @@ wait_for_cluster_status_data_ready()
     done
 
     if [ "$pass" = "n" ]; then
-        if [ "$cluster_type" = "vm" ]; then
+        if [ "$mode" = "vm" ]; then
             # VM
-            echo -e "\n$(tput setaf 1)Error! Failed to get any node record in alameda_cluster_status..node$(tput sgr 0)"
+            echo -e "\n$(tput setaf 1)Error! Failed to get any vm node record in alameda_cluster_status..node$(tput sgr 0)"
         else
             # K8S
-            echo -e "\n$(tput setaf 1)Error! Failed to find alamedascaler ($alamedascaler_name) status in alameda_cluster_status..pod$(tput sgr 0)"
+            if [ "$demo_nginx_exist" = "true" ]; then
+                echo -e "\n$(tput setaf 1)Error! Failed to find alamedascaler ($alamedascaler_name) status in alameda_cluster_status..pod$(tput sgr 0)"
+            else
+                echo -e "\n$(tput setaf 1)Error! Failed to get any pod record in alameda_cluster_status..pod$(tput sgr 0)"
+            fi
         fi
         leave_prog
         exit 8
     fi
 
     echo "Done."
+}
+
+wait_for_cluster_status_data_ready()
+{
+    start=`date +%s`
+
+    if [ "$vm_enabled" = "true" ]; then
+        _do_cluster_status_verify "vm"
+    fi
+    if [ "$k8s_enabled" = "true" ]; then
+        _do_cluster_status_verify "k8s"
+    fi
+
     end=`date +%s`
     duration=$((end-start))
     echo "Duration wait_for_cluster_status_data_ready = $duration" >> $debug_log
@@ -413,15 +405,17 @@ run_preloader_command()
     fi
     echo "Checking..."
     sleep 20
-    kubectl logs -n $install_namespace $current_preloader_pod_name | grep -i "Start PreLoader agent"
+    kubectl logs -n $install_namespace $current_preloader_pod_name | grep -iq "Start PreLoader agent"
     if [ "$?" != "0" ]; then
         echo -e "\n$(tput setaf 1)Preloader pod is not running correctly. Please contact support staff$(tput sgr 0)"
         leave_prog
         exit 5
     fi
 
-    if [ "$running_mode" = "historical_only" ] && [ "$cluster_type" != "vm" ]; then
-        run_ab_test
+    if [ "$running_mode" = "historical_only" ] && [ "$k8s_enabled" = "true" ]; then
+        if [ "$demo_nginx_exist" = "true" ]; then
+            run_ab_test
+        fi
     fi
 
     wait_until_data_pump_finish 3600 60 "historical"
@@ -648,17 +642,27 @@ patch_datahub_back_to_normal()
 check_federatorai_cluster_type()
 {
     echo -e "\n$(tput setaf 6)Checking Federator.ai cluster type...$(tput sgr 0)"
-    influxdb_pod_name="`kubectl get pods -n $install_namespace |grep "alameda-influxdb-"|awk '{print $1}'|head -1`"
-    cluster_output=$(kubectl exec $influxdb_pod_name -n $install_namespace -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database alameda_cluster_status -format 'csv' -execute "select * from cluster"|tail -n +2|awk -F',' '{print $7}')
+    influxdb_pod_name="$(kubectl get pods -n $install_namespace |grep "alameda-influxdb-"|awk '{print $1}'|head -1)"
+    cluster_output="$(kubectl exec $influxdb_pod_name -n $install_namespace -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database alameda_cluster_status -format 'csv' -execute "select * from cluster"|tail -n +2|awk -F',' '{print $7}')"
+
     if [ "$(echo "$cluster_output"|grep "vm"|head -1)" != "" ]; then
-        cluster_type="vm"
-    elif [ "$(echo "$cluster_output"|grep "k8s"|head -1)" != "" ]; then
-        cluster_type="k8s"
+        vm_enabled="true"
     else
-        echo -e "\n$(tput setaf 1)Error! Failed to determine Federator.ai cluster type from (alameda_cluster_status..cluster).$(tput sgr 0)"
+        vm_enabled="false"
+    fi
+
+    if [ "$(echo "$cluster_output"|grep "k8s"|head -1)" != "" ]; then
+        k8s_enabled="true"
+    else
+        k8s_enabled="false"
+    fi
+
+    if [ "$vm_enabled" = "false" ] && [ "$k8s_enabled" = "false" ]; then
+        echo -e "\n$(tput setaf 1)Error! Failed to get cluster type from influxdb db (alameda_cluster_status) measurement (cluster).$(tput sgr 0)"
         exit 8
     fi
-    echo "cluster_type = $cluster_type"
+    echo "k8s_enabled = $k8s_enabled"
+    echo "vm_enabled = $vm_enabled"
     echo "Done"
 }
 
@@ -731,31 +735,36 @@ patch_grafana_back_to_normal()
     echo "Duration patch_grafana_back_to_normal = $duration" >> $debug_log
 }
 
-verify_metrics_exist()
+_do_metrics_verify()
 {
-    start=`date +%s`
-    echo -e "\n$(tput setaf 6)Verifying metrics in influxdb ...$(tput sgr 0)"
-    if [ "$cluster_type" = "vm" ]; then
+    mode="$1"
+    if [ "$mode" != "vm" ] && [ "$mode" != "k8s" ]; then
+        echo -e "\n$(tput setaf 1)Error! _do_metrics_verify() mode paramter can only be either 'vm' or 'k8s'.$(tput sgr 0)"
+        leave_prog
+        exit 8
+    fi
+    echo -e "\n$(tput setaf 6)Verifying $mode metrics in influxdb ...$(tput sgr 0)"
+    if [ "$mode" = "vm" ]; then
+        # VM
         metricsArray=("node_cpu" "node_memory")
     else
-        #K8S
+        # K8S
         metricsArray=("container_cpu" "container_memory" "namespace_cpu" "namespace_memory" "node_cpu" "node_memory")
     fi
-    
     metrics_required_number=`echo "${#metricsArray[@]}"`
     influxdb_pod_name="`kubectl get pods -n $install_namespace |grep "alameda-influxdb-"|awk '{print $1}'|head -1`"
     metrics_list=$(kubectl exec $influxdb_pod_name -n $install_namespace -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database alameda_metric -execute "show measurements")
     metrics_num_found="0"
     for i in $(seq 0 $((metrics_required_number-1)))
     do
-        echo $metrics_list|grep -q "${metricsArray[$i]}"
+        echo "$metrics_list"|grep -q "^${metricsArray[$i]}$"
         if [ "$?" = "0" ]; then
             metrics_num_found=$((metrics_num_found+1))
         fi
     done
 
     if [ "$metrics_num_found" -lt "$metrics_required_number" ]; then
-        echo -e "\n$(tput setaf 1)Error! metrics in alameda_metric is not complete.$(tput sgr 0)"
+        echo -e "\n$(tput setaf 1)Error! $mode metrics in alameda_metric is not complete.$(tput sgr 0)"
         echo "=============================="
         echo "Required metrics number: $metrics_required_number"
         echo "Required metrics: ${metricsArray[*]}"
@@ -768,6 +777,19 @@ verify_metrics_exist()
         exit 8
     fi
     echo "Done"
+}
+
+verify_metrics_exist()
+{
+    start=`date +%s`
+
+    if [ "$vm_enabled" = "true" ]; then
+        _do_metrics_verify "vm"
+    fi
+    if [ "$k8s_enabled" = "true" ]; then
+        _do_metrics_verify "k8s"
+    fi
+
     end=`date +%s`
     duration=$((end-start))
     echo "Duration verify_metrics_exist = $duration" >> $debug_log
@@ -800,7 +822,7 @@ new_nginx_example()
     start=`date +%s`
     echo -e "\n$(tput setaf 6)Creating a new NGINX sample pod ...$(tput sgr 0)"
 
-    if [[ "`kubectl get po -n $nginx_ns 2>/dev/null|grep -v "NAME"|grep "Running"|wc -l`" -gt "0" ]]; then
+    if [ "$demo_nginx_exist" = "true" ]; then
         echo "nginx-preloader-sample namespace and pod already exist."
     else
         if [ "$openshift_minor_version" != "" ]; then
@@ -1043,21 +1065,33 @@ get_datadog_agent_info()
     dd_cluster_name="$(kubectl get deploy $dd_cluster_agent_deploy_name -n $dd_namespace -o jsonpath='{range .spec.template.spec.containers[*]}{.env[?(@.name=="DD_CLUSTER_NAME")].value}' 2>/dev/null | awk '{print $1}')"
 }
 
-get_datasource_in_alamedaorganization()
+get_cluster_name_from_alamedascaler()
 {
-    # ##Get cluster specific data source setting
-    # data_source_type="$(kubectl get alamedaorganization -o jsonpath="{range .items[*]}{.spec.clusters[?(@.name==\"$cluster_name\")].dataSource.type}")"
-    # if [ "$data_source_type" != "" ]; then
-    #     return
-    # fi
-
-    # Get global data source setting
-    data_source_type="$(kubectl get alamedaorganization -o jsonpath='{range .items[*]}{.spec.dataSource.type}')"
-    if [ "$data_source_type" = "" ]; then
-        echo -e "\n$(tput setaf 1)Error! Failed to find global data source setting in alamedaorganization CR.$(tput sgr 0)"
-        echo -e "$(tput setaf 1)Remember to set up alamedaorganization before running preloader.$(tput sgr 0)"
+    cluster_name="$(kubectl get alamedascaler $alamedascaler_name -n $install_namespace -o jsonpath='{.spec.clusterName}')"
+    if [ "$cluster_name" = "" ]; then
+        echo -e "\n$(tput setaf 1)Error! Failed to get cluster name from alamedascaler ($alamedascaler_name).$(tput sgr 0)"
         exit 3
     fi
+}
+
+get_datasource_in_alamedaorganization()
+{
+    # Get cluster specific data source setting
+    data_source_type="$(kubectl get alamedaorganization -o jsonpath="{range .items[*]}{.spec.clusters[?(@.name==\"$cluster_name\")].dataSource.type}")"
+    if [ "$data_source_type" = "" ]; then
+        echo -e "\n$(tput setaf 1)Error! Failed to find data source of cluster ($cluster_name) in alamedaorganization CR.$(tput sgr 0)"
+        echo -e "$(tput setaf 1)Remember to configure cluster through GUI before running preloader script or check specified cluster name.$(tput sgr 0)"
+        exit 3
+    fi
+
+    # 4.5.1 has no global data source
+    # # Get global data source setting
+    # data_source_type="$(kubectl get alamedaorganization -o jsonpath='{range .items[*]}{.spec.dataSource.type}')"
+    # if [ "$data_source_type" = "" ]; then
+    #     echo -e "\n$(tput setaf 1)Error! Failed to find global data source setting in alamedaorganization CR.$(tput sgr 0)"
+    #     echo -e "$(tput setaf 1)Remember to set up alamedaorganization before running preloader.$(tput sgr 0)"
+    #     exit 3
+    # fi
 }
 
 # 4.4 will handle local cluster automatically
@@ -1097,7 +1131,7 @@ check_cluster_name_not_empty()
 add_alamedascaler_for_nginx()
 {
     start=`date +%s`
-    echo -e "\n$(tput setaf 6)Adding NGINX alamedascaler ...$(tput sgr 0)"
+    echo -e "\n$(tput setaf 6)Adding/Updating NGINX alamedascaler ...$(tput sgr 0)"
     check_cluster_name_not_empty
     nginx_alamedascaler_file="nginx_alamedascaler_file"
 
@@ -1109,9 +1143,8 @@ add_alamedascaler_for_nginx()
         kind_type="DeploymentConfig"
     fi
 
-    kubectl get alamedascaler -n ${install_namespace} 2>/dev/null|grep -q "$alamedascaler_name"
-    if [ "$?" != "0" ]; then
-        cat > ${nginx_alamedascaler_file} << __EOF__
+
+    cat > ${nginx_alamedascaler_file} << __EOF__
 apiVersion: autoscaling.containers.ai/v1alpha2
 kind: AlamedaScaler
 metadata:
@@ -1133,14 +1166,14 @@ spec:
           maxReplicas: 40
           minReplicas: 1
 __EOF__
-        kubectl apply -f ${nginx_alamedascaler_file}
-        if [ "$?" != "0" ]; then
-            echo -e "\n$(tput setaf 1)Error! Add alamedascaler for NGINX app failed.$(tput sgr 0)"
-            leave_prog
-            exit 8
-        fi
-        sleep 10
+    kubectl apply -f ${nginx_alamedascaler_file}
+    if [ "$?" != "0" ]; then
+        echo -e "\n$(tput setaf 1)Error! Add/Update alamedascaler for NGINX app failed.$(tput sgr 0)"
+        leave_prog
+        exit 8
     fi
+    sleep 10
+
     echo "Done"
     end=`date +%s`
     duration=$((end-start))
@@ -1554,21 +1587,22 @@ if [ "$install_namespace" = "" ];then
 fi
 
 check_federatorai_cluster_type
-if [ "$cluster_type" = "vm" ]; then
+if [ "$k8s_enabled" = "false" ]; then
+    # No K8S, VM only
     not_support_action_list=( install_nginx remove_nginx run_ab_from_preloader replica_num_specified enable_execution_specified cluster_name_specified traffic_ratio_specified nginx_name_specified )
     for action in "${not_support_action_list[@]}"
     do
         if [ "`echo ${!action}`" = "y" ]; then
-            echo -e "\n$(tput setaf 1)Error! Action \"$action\" is not supported when cluster_type = vm$(tput sgr 0)"
+            echo -e "\n$(tput setaf 1)Error! Action \"$action\" is not supported when only VM cluster type exist.$(tput sgr 0)"
             show_usage
             exit 3
         fi
     done
 fi
 
-if [ "$cluster_type" != "vm" ]; then
+if [ "$k8s_enabled" = "true" ]; then
     #K8S
-    if [[( "$prepare_environment" = "y" && "$cluster_name_specified" != "y" ) || ( "$install_nginx" = "y" && "$cluster_name_specified" != "y" )]]; then
+    if [ "$install_nginx" = "y" ] && [ "$cluster_name_specified" != "y" ]; then
         check_cluster_name_not_empty
     fi
 fi
@@ -1692,6 +1726,9 @@ else
     nginx_port="8081"
 fi
 alamedascaler_name="nginx-alamedascaler"
+if [ "$(kubectl get po -n $nginx_ns 2>/dev/null|grep -v "NAME"|grep "Running"|wc -l)" -gt "0" ]; then
+    demo_nginx_exist="true"
+fi
 
 debug_log="debug.log"
 
@@ -1727,7 +1764,7 @@ else
     enable_execution="true"
 fi
 
-if [ "$cluster_type" != "vm" ]; then
+if [ "$k8s_enabled" = "true" ]; then
     # K8S
     # copy preloader ab files if run historical only mode enabled
     preloader_folder="$(dirname $0)/preloader_ab_runner"
@@ -1754,10 +1791,14 @@ cd $file_folder
 echo "Receiving command '$0 $@'" >> $debug_log
 
 if [ "$prepare_environment" = "y" ]; then
-    if [ "$cluster_type" != "vm" ]; then
-        delete_all_alamedascaler
-        new_nginx_example
-        add_svc_for_nginx
+    if [ "$k8s_enabled" = "true" ]; then
+        #delete_all_alamedascaler
+        if [ "$cluster_name" != "" ]; then
+            # -a is used to specify cluster_name
+            new_nginx_example
+            add_svc_for_nginx
+            add_alamedascaler_for_nginx
+        fi
         #patch_datahub_for_preloader
         #patch_grafana_for_preloader
     fi
@@ -1774,20 +1815,23 @@ if [ "$enable_preloader" = "y" ]; then
 fi
 
 if [ "$run_ab_from_preloader" = "y" ]; then
-    run_ab_test
+    if [ "$demo_nginx_exist" = "true" ]; then
+        run_ab_test
+    fi
 fi
 
 if [ "$run_preloader_with_normal_mode" = "y" ] || [ "$run_preloader_with_historical_only" = "y" ]; then
-    if [ "$cluster_type" != "vm" ]; then
-        # K8S
-        # Move scale_down_pods into run_preloader_command method
-        #scale_down_pods
-        if [ "$run_preloader_with_normal_mode" = "y" ]; then
+    # Move scale_down_pods into run_preloader_command method
+    if [ "$run_preloader_with_normal_mode" = "y" ]; then
+        if [ "$demo_nginx_exist" = "true" ] && [ "$k8s_enabled" = "true" ]; then
             add_alamedascaler_for_nginx
-            run_preloader_command "normal"
-        else
-            # historical mode
+        fi
+        run_preloader_command "normal"
+    elif [ "$run_preloader_with_historical_only" = "y" ]; then
+        if [ "$demo_nginx_exist" = "true" ] && [ "$k8s_enabled" = "true" ]; then
+            get_cluster_name_from_alamedascaler
             get_datasource_in_alamedaorganization
+
             if [ "$data_source_type" = "datadog" ]; then
                 if [ "$enable_execution_specified" = "y" ]; then
                     enable_execution="$s_arg"
@@ -1805,15 +1849,8 @@ if [ "$run_preloader_with_normal_mode" = "y" ] || [ "$run_preloader_with_histori
                 fi
             fi
             add_alamedascaler_for_nginx
-            run_preloader_command "historical_only"
         fi
-    else
-        # VM
-        if [ "$run_preloader_with_normal_mode" = "y" ]; then
-            run_preloader_command "normal"
-        else
-            run_preloader_command "historical_only"
-        fi
+        run_preloader_command "historical_only"
     fi
     verify_metrics_exist
     scale_up_pods
@@ -1834,9 +1871,9 @@ fi
 if [ "$revert_environment" = "y" ]; then
     # scale up if any failure encounter previously or program abort
     scale_up_pods
-    if [ "$cluster_type" != "vm" ]; then
+    if [ "$k8s_enabled" = "true" ]; then
         # K8S
-        delete_all_alamedascaler
+        #delete_all_alamedascaler
         delete_nginx_example
         #patch_datahub_back_to_normal
         #patch_grafana_back_to_normal
