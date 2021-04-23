@@ -1,0 +1,23 @@
+{
+    "rest_api_full_path": "",
+    "login_account": " # <Federator.ai GUI login account>",
+    "login_password": " # <Federator.ai GUI login password>",
+    "access_token": "  # [Federator.ai GUI access_token]",
+    "resource_type": " # <controller|namespace>",
+    "iac_command": " # <script|terraform>",
+    "kubeconfig_path": " # [kubeconfig path]",
+    "planning_target": {
+        "cluster_name": "",
+        "namespace": " # required if resource_type=controller",
+        "time_interval": " # <daily|weekly|monthly>",
+        "resource_name": "",
+        "kind": "# <StatefulSet|Deployment|DeploymentConfig>  # required if resource_type=controller",
+        "min_cpu": " # [mCore]",
+        "max_cpu": " # [mCore]",
+        "cpu_headroom": " # [200|20%] # Absolute value (mCore) e.g. 200 or Percentage e.g. 20%",
+        "min_memory": " # [byte]",
+        "max_memory": " # [byte]",
+        "memory_headroom": " # [209715200|20%] # Absolute value (byte) e.g. 209715200 or Percentage e.g. 20%",
+        "trigger_condition": " # [20] # 20 means 20%"
+    }
+}
