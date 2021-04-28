@@ -1,13 +1,8 @@
 #!/usr/bin/env bash
-if [ "$BASH_VERSION" = "" ]; then
-    echo -e "\n$(tput setaf 1)Please use bash to run the script.$(tput sgr 0)" 1>&2
-    exit 6
-fi
-set -o pipefail
 
 #=========================== target config info start =========================
 target_config_info='{
-  "rest_api_full_path": "https://172.31.2.41:31011",
+  "rest_api_url": "https://172.31.2.41:31011",
   "login_account": "",
   "login_password": "",
   "access_token": "",
@@ -31,6 +26,12 @@ target_config_info='{
     }
 }'
 #=========================== target config info end ===========================
+
+if [ "$BASH_VERSION" = "" ]; then
+    echo -e "\n$(tput setaf 1)Please use bash to run the script.$(tput sgr 0)" 1>&2
+    exit 6
+fi
+set -o pipefail
 
 check_target_config()
 {
@@ -107,7 +108,7 @@ parse_value_from_target_var()
 check_rest_api_url()
 {
     show_info "$(tput setaf 6)Getting REST API URL...$(tput sgr 0)" 
-    api_url=$(parse_value_from_target_var "rest_api_full_path")
+    api_url=$(parse_value_from_target_var "rest_api_url")
 
     if [ "$api_url" = "" ]; then
         echo -e "\n$(tput setaf 1)Failed to get REST API URL from target_config_info.$(tput sgr 0)" | tee -a $debug_log 1>&2
