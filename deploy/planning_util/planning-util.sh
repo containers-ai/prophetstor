@@ -55,7 +55,7 @@ show_usage()
         $(tput setaf 2)Requirement:$(tput sgr 0)
             Modify "target_config_info" variable at the beginning of this script to specify target's info
         $(tput setaf 2)Run the script:$(tput sgr 0)
-            bash planning-util.sh
+            bash $(basename $BASH_SOURCE)
         $(tput setaf 2)Standalone options:$(tput sgr 0)
             --test-connection-only
             --dry-run-only
@@ -177,7 +177,7 @@ rest_api_check_cluster_name()
         exit 2
     fi
 
-    rest_cluster_output="$(curl -sS -k -X GET "$api_url/apis/v1/resources/clusters" -H "accept: application/json" -H "Authorization: Bearer $access_token" |tr -d '\n'|grep -o "\"data\":\[{[^}]*}"|grep -o "\"name\":[^\"]*\"[^\"]*\"")"
+    rest_cluster_output="$(curl -sS -k -X GET "$api_url/apis/v1/resources/clusters" -H "accept: application/json" -H "Authorization: Bearer $access_token" |tr -d '\n'|grep -o "\"data\":\[.*\]"|grep -o "\"name\":[^\"]*\"[^\"]*\"")"
     echo "$rest_cluster_output"|grep -q "$cluster_name"
     if [ "$?" != "0" ]; then
         echo -e "\n$(tput setaf 1)The cluster name is not found in REST API return.$(tput sgr 0)" | tee -a $debug_log 1>&2
