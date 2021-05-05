@@ -1,8 +1,0 @@
-{
-  "rest_api_full_path": "https://172.31.2.41:31011",
-  "login_account": "admin",
-  "login_password": "password",
-  "planning_targets": [
-    {"namespace": "nginx-demo1", "controller_name":"web", "controller_type": "statefulset", "time_interval": "daily", "cluster_name": "hungo-17-135"}
-  ]
-}

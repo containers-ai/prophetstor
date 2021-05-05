@@ -60,6 +60,16 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - resourcequotas
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+- apiGroups:
+  - ""
+  resources:
   - secrets
   verbs:
   - create
