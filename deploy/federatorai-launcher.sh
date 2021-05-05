@@ -39,20 +39,38 @@ get_build_tag()
     fi
     while [ "$pass" != "y" ]
     do
-        [ "${tag_number}" = "" ] && read -r -p "$(tput setaf 2)Please enter Federator.ai version tag (e.g., v4.4.0): $(tput sgr 0) " tag_number </dev/tty
-        if [[ $tag_number =~ ^[v][[:digit:]]+\.[[:digit:]]+\.[0-9a-z\-]+$ ]]; then
+        default="latest"
+        [ "${tag_number}" = "" ] && read -r -p "$(tput setaf 2)Please enter Federator.ai version tag [default: $default]: $(tput sgr 0) " tag_number </dev/tty
+        tag_number=${tag_number:-$default}
+        if [ "$tag_number" = "$default" ]; then
             pass="y"
+        else
+            if [[ $tag_number =~ ^[v][[:digit:]]+\.[[:digit:]]+\.[0-9a-z\-]+$ ]]; then
+                pass="y"
+            fi
+            # Enable SKIP_TAG_NUMBER_CHECK=1 if tag_number prefix is 'dev-' for development build
+            if [[ $tag_number =~ ^dev- ]]; then SKIP_TAG_NUMBER_CHECK=1; fi
+            # Purposely ignore error of unofficial tag_number for development build
+            if [ "${SKIP_TAG_NUMBER_CHECK}" = "1" ]; then pass="y"; fi
         fi
-        # Enable SKIP_TAG_NUMBER_CHECK=1 if tag_number prefix is 'dev-' for development build
-        if [[ $tag_number =~ ^dev- ]]; then SKIP_TAG_NUMBER_CHECK=1; fi
-        # Purposely ignore error of unofficial tag_number for development build
-        if [ "${SKIP_TAG_NUMBER_CHECK}" = "1" ]; then pass="y"; fi
+
         if [ "$pass" != "y" ]; then
             echo -e "\n$(tput setaf 1)Error! The version tag should follow the correct format (e.g., v4.2.755).$(tput sgr 0)"
             [ "${ALAMEDASERVICE_FILE_PATH}" != "" ] && exit 1
             tag_number=""
         fi
     done
+
+    if [ "$tag_number" = "$default" ]; then
+        # Get latest version from github
+        latest_tag=$(curl -s https://raw.githubusercontent.com/containers-ai/prophetstor/master/deploy/manifest/version.txt|cut -d '=' -f2)
+        if [ "$latest_tag" = "" ]; then
+            echo -e "\n$(tput setaf 1)Error! Failed to get latest build version.$(tput sgr 0)"
+            exit 3
+        else
+            tag_number=$latest_tag
+        fi
+    fi
 
     full_tag=$(echo "$tag_number"|cut -d '-' -f1)           # Delete - and after
     tag_first_digit=${full_tag%%.*}                         # Delete first dot and what follows.
