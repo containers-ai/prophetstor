@@ -1213,7 +1213,12 @@ cat >> 01*.yaml << __EOF__
     eks.amazonaws.com/role-arn: ${role_arn}
 __EOF__
 else
-    sed -i "s/:latest$/:${tag_number}/g" 03*.yaml
+    # Handle new aws operator url only case (ignore aws_mode enabled or not)
+    if [ "$ecr_url" != "" ]; then
+        sed -i "s|quay.io/prophetstor/federatorai-operator-ubi:latest|$ecr_url|g" 03*.yaml
+    else
+        sed -i "s/:latest$/:${tag_number}/g" 03*.yaml
+    fi
 fi
 
 # Specified alternative container image location
