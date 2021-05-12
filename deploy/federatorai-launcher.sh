@@ -26,6 +26,14 @@ leave_prog()
     echo -e "\n$(tput setaf 5)Downloaded files are located under $file_folder $(tput sgr 0)"
     cd $current_location > /dev/null
 }
+verify_tag()
+{
+    if [[ $tag_number =~ ^[v][[:digit:]]+\.[[:digit:]]+\.[0-9a-z\-]+$ ]]; then
+        echo "y"
+    else
+        echo "n"
+    fi
+}
 
 get_build_tag()
 {
@@ -37,15 +45,25 @@ get_build_tag()
             exit
         fi
     fi
+    default_tag="latest"
+    if [ "$ECR_URL" != "" ]; then
+        # Parse tag number from url
+        tag_number="$(echo "$ECR_URL" |rev|cut -d':' -f1|rev)"
+        if [ "$tag_number" != "$default_tag" ]; then
+            if [ "$(verify_tag)" = "n" ]; then
+                echo -e "\n$(tput setaf 1)Error! Failed to parse valid version info from env variable ECR_URL ($ECR_URL).$(tput sgr 0)"
+                exit 3
+            fi
+        fi
+    fi
     while [ "$pass" != "y" ]
     do
-        default="latest"
-        [ "${tag_number}" = "" ] && read -r -p "$(tput setaf 2)Please enter Federator.ai version tag [default: $default]: $(tput sgr 0) " tag_number </dev/tty
-        tag_number=${tag_number:-$default}
-        if [ "$tag_number" = "$default" ]; then
+        [ "${tag_number}" = "" ] && read -r -p "$(tput setaf 2)Please enter Federator.ai version tag [default: $default_tag]: $(tput sgr 0) " tag_number </dev/tty
+        tag_number=${tag_number:-$default_tag}
+        if [ "$tag_number" = "$default_tag" ]; then
             pass="y"
         else
-            if [[ $tag_number =~ ^[v][[:digit:]]+\.[[:digit:]]+\.[0-9a-z\-]+$ ]]; then
+            if [ "$(verify_tag)" = "y" ]; then
                 pass="y"
             fi
             # Enable SKIP_TAG_NUMBER_CHECK=1 if tag_number prefix is 'dev-' for development build
@@ -61,7 +79,7 @@ get_build_tag()
         fi
     done
 
-    if [ "$tag_number" = "$default" ]; then
+    if [ "$tag_number" = "$default_tag" ]; then
         # Get latest version from github
         latest_tag=$(curl -s https://raw.githubusercontent.com/containers-ai/prophetstor/master/deploy/manifest/version.txt|cut -d '=' -f2)
         if [ "$latest_tag" = "" ]; then
@@ -87,7 +105,7 @@ get_build_tag()
         echo -e "\n$(tput setaf 3)curl https://raw.githubusercontent.com/containers-ai/federatorai-operator/master/deploy/federatorai-launcher.sh |bash $(tput sgr 0)"
         exit 3
     fi
-
+    echo -e "$(tput setaf 3)Federator.ai version = $tag_number$(tput sgr 0)"
     if [ "$tag_first_digit" -ge "4" ] && [ "$tag_middle_digit" -ge "5" ]; then
         # >= 4.5
         default="/opt"
