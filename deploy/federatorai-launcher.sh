@@ -49,6 +49,7 @@ get_build_tag()
     if [ "$ECR_URL" != "" ]; then
         # Parse tag number from url
         tag_number="$(echo "$ECR_URL" |rev|cut -d':' -f1|rev)"
+        url_minus_tag="$(echo "$ECR_URL" |rev|cut -d':' -f2-|rev)"
         if [ "$tag_number" != "$default_tag" ]; then
             if [ "$(verify_tag)" = "n" ]; then
                 echo -e "\n$(tput setaf 1)Error! Failed to parse valid version info from env variable ECR_URL ($ECR_URL).$(tput sgr 0)"
@@ -360,6 +361,9 @@ go_interactive()
         if [ "$aws_mode" = "y" ]; then
             bash $scripts_folder/install.sh -t $tag_number --image-path $ECR_URL --cluster $EKS_CLUSTER --region $AWS_REGION
         else
+            if [ "$ECR_URL" != "" ]; then
+                export ECR_URL="${url_minus_tag}:${tag_number}"
+            fi
             bash $scripts_folder/install.sh -t $tag_number
         fi
     fi
