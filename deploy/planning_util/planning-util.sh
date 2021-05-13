@@ -28,7 +28,7 @@ target_config_info='{
 #=========================== target config info end ===========================
 
 if [ "$BASH_VERSION" = "" ]; then
-    echo -e "\n$(tput setaf 1)Please use bash to run the script.$(tput sgr 0)" 1>&2
+    /bin/echo -e "\n$(tput setaf 1)Please use bash to run the script.$(tput sgr 0)" 1>&2
     exit 6
 fi
 set -o pipefail
@@ -139,14 +139,14 @@ rest_api_login()
         auth_string="${login_account}:${login_password}"
         auth_cipher=$(echo -n "$auth_string"|base64)
         if [ "$auth_cipher" = "" ]; then
-            echo -e "\n$(tput setaf 1)Failed to generate base64 output of login string.$(tput sgr 0)"  | tee -a $debug_log 1>&2
+            echo -e "\n$(tput setaf 1)Failed to encode login string using base64 command.$(tput sgr 0)"  | tee -a $debug_log 1>&2
             log_prompt
             exit 2
         fi
         rest_output=$(curl -sS -k -X POST "$api_url/apis/v1/users/login" -H "accept: application/json" -H "authorization: Basic ${auth_cipher}")
         if [ "$?" != "0" ]; then
             echo -e "\n$(tput setaf 1)Failed to connect to REST API service ($api_url/apis/v1/users/login).$(tput sgr 0)" | tee -a $debug_log 1>&2
-            echo "Please check REST API IP" | tee -a $debug_log 1>&2
+            echo "Please check REST API IP/login account/login password" | tee -a $debug_log 1>&2
             log_prompt
             exit 3
         fi
@@ -181,6 +181,10 @@ rest_api_check_cluster_name()
     echo "$rest_cluster_output"|grep -q "$cluster_name"
     if [ "$?" != "0" ]; then
         echo -e "\n$(tput setaf 1)The cluster name is not found in REST API return.$(tput sgr 0)" | tee -a $debug_log 1>&2
+
+        # Only print to log to reduce event msg
+        echo -e "\n$(tput setaf 1)REST API output: $rest_cluster_output)$(tput sgr 0)" | tee -a $debug_log
+
         log_prompt
         exit 3
     fi
@@ -395,7 +399,11 @@ get_planning_from_api()
         fi
         namespace_state="$(echo $rest_output|tr -d '\n'|grep -o "\"name\":.*\"${target_namespace}.*"|grep -o "\"state\":.*\".*\""|cut -d '"' -f4)"
         if [ "$namespace_state" != "monitoring" ]; then
-            echo -e "\n$(tput setaf 1)Namespace $target_namespace state is not 'monitoring' (REST API output: $rest_output)$(tput sgr 0)" | tee -a $debug_log 1>&2
+            echo -e "\n$(tput setaf 1)Namespace $target_namespace is not in 'monitoring' state.$(tput sgr 0)" | tee -a $debug_log 1>&2
+
+            # Only print to log to reduce event msg
+            echo -e "\n$(tput setaf 1)REST API output: $rest_output)$(tput sgr 0)" | tee -a $debug_log
+
             log_prompt
             exit 1
         fi
@@ -412,9 +420,12 @@ get_planning_from_api()
     # check if return is '"plannings":[]}'
     planning_count=${#planning_all}
     if [ "$planning_all" = "" ] || [ "$planning_count" -le "15" ]; then
-        echo -e "\n$(tput setaf 1)REST API output:$(tput sgr 0)" | tee -a $debug_log 1>&2
-        echo -e "${rest_output}" | tee -a $debug_log 1>&2
-        echo -e "\n$(tput setaf 1)Planning value is empty.$(tput sgr 0)" | tee -a $debug_log 1>&2
+        echo -e "\n$(tput setaf 1)Planning value ($readable_granularity) is empty.$(tput sgr 0)" | tee -a $debug_log 1>&2
+
+        # Only print to log to reduce event msg
+        echo -e "\n$(tput setaf 1)REST API output:$(tput sgr 0)" | tee -a $debug_log
+        echo -e "${rest_output}" | tee -a $debug_log
+
         log_prompt
         exit 1
     fi
@@ -745,13 +756,10 @@ update_target_resources()
         # iac_command = terraform
         # dry_run = normal
 
-        if [ "$resource_type" = "controller" ]; then
-            variable_tf_name="${terraform_path}/federatorai_${resource_type}_${resource_name}_${target_namespace}_${cluster_name}.tf"
-            auto_tfvars_name="${terraform_path}/federatorai_${resource_type}_${resource_name}_${target_namespace}_${cluster_name}.auto.tfvars"
-        else
-            variable_tf_name="${terraform_path}/federatorai_${resource_type}_${resource_name}_${cluster_name}.tf"
-            auto_tfvars_name="${terraform_path}/federatorai_${resource_type}_${resource_name}_${cluster_name}.auto.tfvars"
-        fi
+        variable_tf_name="${terraform_path}/federatorai_variables.tf"
+        auto_tfvars_name="${terraform_path}/federatorai_recommendations.auto.tfvars"
+        auto_tfvars_previous_name="${terraform_path}/federatorai_recommendations.auto.tfvars.previous"
+
         create_variable_tf
         create_auto_tfvars
 
@@ -772,48 +780,132 @@ create_variable_tf()
     # clean up file
     > $variable_tf_name
 
-    all_metrics=( "requests_pod_cpu" "requests_pod_memory" "limits_pod_cpu" "limits_pod_memory" )
-    for metric in "${all_metrics[@]}"
-    do
-        name="$(echo $metric|sed 's/_pod//g')"
-        # request or limit
-        type="$(echo $name|cut -d '_' -f1)"
-        type="${type::-1}"
-        # cpu or memory
-        part="$(echo $name|cut -d '_' -f2)"
-        variable_name="recommended_${part}_${type}"
-        echo -e "variable \"$variable_name\"{\n  description = \"Recommended value of the $part ${type} for resource\"\n  type        = string\n}" >> $variable_tf_name
-    done
+    echo "variable \"federatorai_recommendations\" {" >> $variable_tf_name
+    echo "    description = \"Recommendations given by Federator.ai\"" >> $variable_tf_name
+    echo "    type        = map(map(map(string)))" >> $variable_tf_name
+    echo "}" >> $variable_tf_name
+
     show_info "$(tput setaf 2)tf file $(tput sgr 0)$(tput setaf 3)($variable_tf_name)$(tput sgr 0) $(tput setaf 2)is generated.$(tput sgr 0)"
 }
 
 create_auto_tfvars()
 {
-    # clean up file
-    > $auto_tfvars_name
+    if [ -f "$auto_tfvars_name" ]; then
+        mv $auto_tfvars_name $auto_tfvars_previous_name
+    fi
 
-    all_metrics=( "requests_pod_cpu" "requests_pod_memory" "limits_pod_cpu" "limits_pod_memory" )
-    for metric in "${all_metrics[@]}"
-    do
-        name="$(echo $metric|sed 's/_pod//g')"
-        # request or limit
-        type="$(echo $name|cut -d '_' -f1)"
-        type="${type::-1}"
-        # cpu or memory
-        part="$(echo $name|cut -d '_' -f2)"
-        variable_name="recommended_${part}_${type}"
-        if [ "$part" = "cpu" ]; then
-            variable_value="${!metric}m"
-        else
-            # memory
-            variable_value="${!metric}"
-        fi
+    if [ "$resource_type" = "controller" ]; then
+        resource_id="controller_${owner_reference_kind}_${resource_name}_${target_namespace}"
+    else
+        resource_id="namespace_${resource_name}"
+    fi
 
-        echo -e "$variable_name = \"$variable_value\"" >> $auto_tfvars_name
-    done
+    declare -A cluster_resource_map
+
+    # Merge previous into map first
+    if [ -f "$auto_tfvars_previous_name" ]; then
+        rec_num="0"
+        merge_tfvars "" < $auto_tfvars_previous_name
+        rm -f $auto_tfvars_previous_name > /dev/null 2>&1
+    fi
+
+    # Add Current entry
+    current_time="$(date)"
+    current_rec="#UpdateTime=\"$current_time\",recommendedCpuRequest=\"${requests_pod_cpu}m\",recommendedMemRequest=\"$requests_pod_memory\",recommendedCpuLimit=\"${limits_pod_cpu}m\",recommendedMemLimit=\"$limits_pod_memory\""
+    cluster_resource_map["federatorai_recommendations,$cluster_name,$resource_id"]="$current_rec"
+
+    # Do export
+    export_final_tfvars
+
     show_info "$(tput setaf 2)tfvars file $(tput sgr 0)$(tput setaf 3)($auto_tfvars_name)$(tput sgr 0) $(tput setaf 2)is generated.$(tput sgr 0)"
 }
 
+export_final_tfvars()
+{
+    > $auto_tfvars_name
+
+    cluster_list=$(echo "${!cluster_resource_map[@]}"|tr ' ' '\n'|awk -F',' '{print $2}'|sort|uniq)
+
+    # Generate final tfvars
+    echo "federatorai_recommendations = {" >> $auto_tfvars_name
+    for cluster in $(echo $cluster_list)
+    do
+        echo "    $cluster = {" >> $auto_tfvars_name
+        for key in "${!cluster_resource_map[@]}"
+        do
+            target_cluster=$(echo "$key"|cut -d',' -f2)
+            if [ "$target_cluster" = "$cluster" ]; then
+                resource=$(echo "$key"|cut -d',' -f3)
+                echo "        $resource = {" >> $auto_tfvars_name
+                rec_string=${cluster_resource_map[$key]}
+                update_time=$(echo $rec_string|grep -o "#UpdateTime=[^\"]*\"[^\"]*\"")
+                reccpureq=$(echo $rec_string|grep -o "recommendedCpuRequest=[^\"]*\"[^\"]*\"")
+                recmemreq=$(echo $rec_string|grep -o "recommendedMemRequest=[^\"]*\"[^\"]*\"")
+                reccpulim=$(echo $rec_string|grep -o "recommendedCpuLimit=[^\"]*\"[^\"]*\"")
+                recmemlim=$(echo $rec_string|grep -o "recommendedMemLimit=[^\"]*\"[^\"]*\"")
+                echo "            $update_time" >> $auto_tfvars_name
+                echo "            $reccpureq" >> $auto_tfvars_name
+                echo "            $recmemreq" >> $auto_tfvars_name
+                echo "            $reccpulim" >> $auto_tfvars_name
+                echo "            $recmemlim" >> $auto_tfvars_name
+                echo "        }" >> $auto_tfvars_name
+            fi
+        done
+        echo "    }" >> $auto_tfvars_name
+    done
+    echo "}" >> $auto_tfvars_name
+}
+
+merge_tfvars()
+{
+    local KEYS
+    local K
+    local V
+
+    while true
+    do
+        read LINE
+        if [ "${LINE}" = "" ]
+        then
+            return
+        fi
+
+        if [[ "$LINE" =~ "#UpdateTime" ]]; then
+            K=`echo ${LINE} | awk -F'=' '{print $1}'`
+            V=`echo ${LINE} | awk -F'=' '{print $2}'`
+        else
+            K=`echo ${LINE} | awk -F'=' '{print $1}' | tr -d '[:space:]'`
+            V=`echo ${LINE} | awk -F'=' '{print $2}' | tr -d '[:space:]'`
+        fi
+
+        if [ "${K}" = "}" ]
+        then
+            return
+        else
+            if [ "$1" = "" ]
+            then
+                KEYS="${K}"
+            else
+                KEYS="$1,${K}"
+            fi
+
+            if [ "${V}" = "{" ]
+            then
+                merge_tfvars ${KEYS}
+            else
+                rec_key=$(echo ${KEYS##*,})
+                final_rec_value_string="${final_rec_value_string}${final_rec_value_string:+,}$rec_key=$V"
+                rec_num=$(($rec_num + 1))
+                if [ "$rec_num" = "5" ]; then
+                    final_key=$(echo $KEYS|rev|cut -d',' -f2-|rev)
+                    cluster_resource_map[${final_key}]="$final_rec_value_string"
+                    rec_num="0"
+                    final_rec_value_string=""
+                fi
+            fi
+        fi
+    done
+}
 
 parse_value_from_resource()
 {
@@ -1123,8 +1215,8 @@ if [ ! -d "$file_folder" ]; then
     exit 6
 fi
 
+script_located_path=$(dirname $(readlink -f "$0"))
 if [ "$terraform_path" = "" ]; then
-    script_located_path=$(dirname $(readlink -f "$0"))
     terraform_path="$script_located_path"
 fi
 mkdir -p $terraform_path
@@ -1178,8 +1270,6 @@ if [ "$?" != "0" ];then
     log_prompt
     exit 6
 fi
-
-script_located_path=$(dirname $(readlink -f "$0"))
 
 # Check target_config_info variable
 check_target_config
