@@ -25,7 +25,8 @@ spec:
     plural: alamedaservices
     singular: alamedaservice
   scope: Namespaced
-  subresources: {}
+  subresources:
+    status: {}
   validation:
     openAPIV3Schema:
       description: AlamedaService is the Schema for the alamedaservices API
@@ -4972,6 +4973,8 @@ spec:
                   description: LastErrorMessage stores the error message that happend
                     when Federatorai-Operator handled keycode
                   type: string
+                processing:
+                  type: boolean
                 registrationData:
                   description: RegistrationData contains data needs to be sent for
                     activating keycode

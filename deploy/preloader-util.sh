@@ -1766,7 +1766,7 @@ fi
 if [ "$k8s_enabled" = "true" ]; then
     # K8S
     # copy preloader ab files if run historical only mode enabled
-    preloader_folder="$(dirname $0)/preloader_ab_runner"
+    preloader_folder="${script_located_path}/preloader_ab_runner"
     if [ "$run_preloader_with_historical_only" = "y" ] || [ "$run_ab_from_preloader" = "y" ]; then
         # Check folder exists
         [ ! -d "$preloader_folder" ] && echo -e "$(tput setaf 1)Error! Can't locate $preloader_folder folder.$(tput sgr 0)" && exit 3
