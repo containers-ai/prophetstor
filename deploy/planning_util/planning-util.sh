@@ -760,8 +760,8 @@ update_target_resources()
         auto_tfvars_name="${terraform_path}/federatorai_recommendations.auto.tfvars"
         auto_tfvars_previous_name="${terraform_path}/federatorai_recommendations.auto.tfvars.previous"
 
-        create_variable_tf
         create_auto_tfvars
+        create_variable_tf
 
         # Print final json output
         if [ "$resource_type" = "controller" ]; then
@@ -777,13 +777,24 @@ update_target_resources()
 
 create_variable_tf()
 {
-    # clean up file
-    > $variable_tf_name
-
-    echo "variable \"federatorai_recommendations\" {" >> $variable_tf_name
-    echo "    description = \"Recommendations given by Federator.ai\"" >> $variable_tf_name
-    echo "    type        = map(map(map(string)))" >> $variable_tf_name
-    echo "}" >> $variable_tf_name
+    if [ ! -f "$variable_tf_name" ]; then
+        echo "variable \"federatorai_recommendations\" {" >> $variable_tf_name
+        echo "    description = \"Recommendations given by Federator.ai\"" >> $variable_tf_name
+        echo "    type        = map(map(map(string)))" >> $variable_tf_name
+        echo "}" >> $variable_tf_name
+    fi
+    module_name="${resource_id}_${cluster_name}"
+    cat $variable_tf_name |grep -q "module \"$module_name\" {"
+    if [ "$?" != "0" ]; then
+        echo "" >> $variable_tf_name
+        echo "module \"$module_name\" {" >> $variable_tf_name
+        echo "    source  = \"prophetstor-ai/resource-provision/federatorai\"" >> $variable_tf_name
+        echo "    version = \"4.6.0\"" >> $variable_tf_name
+        echo "    federatorai_resource_id = \"${resource_id}\"" >> $variable_tf_name
+        echo "    federatorai_cluster_id = \"${cluster_name}\"" >> $variable_tf_name
+        echo "    federatorai_recommendations = var.federatorai_recommendations" >> $variable_tf_name
+        echo "}" >> $variable_tf_name
+    fi
 
     show_info "tf file ($variable_tf_name) is generated."
 }
