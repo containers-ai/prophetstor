@@ -791,7 +791,7 @@ create_variable_tf()
         echo "    source  = \"prophetstor-ai/resource-provision/federatorai\"" >> $variable_tf_name
         echo "    version = \"4.6.0\"" >> $variable_tf_name
         echo "    federatorai_resource_id = \"${resource_id}\"" >> $variable_tf_name
-        echo "    federatorai_cluster_id = \"${cluster_name}\"" >> $variable_tf_name
+        echo "    federatorai_cluster_name = \"${cluster_name}\"" >> $variable_tf_name
         echo "    federatorai_recommendations = var.federatorai_recommendations" >> $variable_tf_name
         echo "}" >> $variable_tf_name
     fi
@@ -806,9 +806,9 @@ create_auto_tfvars()
     fi
 
     if [ "$resource_type" = "controller" ]; then
-        resource_id="controller_${owner_reference_kind}_${resource_name}_${target_namespace}"
+        resource_id="federatorai_${owner_reference_kind}_${resource_name}_${target_namespace}"
     else
-        resource_id="namespace_${resource_name}"
+        resource_id="federatorai_namespace_${resource_name}"
     fi
 
     declare -A cluster_resource_map
@@ -822,7 +822,7 @@ create_auto_tfvars()
 
     # Add Current entry
     current_time="$(date)"
-    current_rec="#UpdateTime=\"$current_time\",recommendedCpuRequest=\"${requests_pod_cpu}m\",recommendedMemRequest=\"$requests_pod_memory\",recommendedCpuLimit=\"${limits_pod_cpu}m\",recommendedMemLimit=\"$limits_pod_memory\""
+    current_rec="#UpdateTime=\"$current_time\",recommended_cpu_request=\"${requests_pod_cpu}m\",recommended_memory_request=\"$requests_pod_memory\",recommended_cpu_limit=\"${limits_pod_cpu}m\",recommended_memory_limit=\"$limits_pod_memory\""
     cluster_resource_map["federatorai_recommendations,$cluster_name,$resource_id"]="$current_rec"
 
     # Do export
@@ -850,10 +850,10 @@ export_final_tfvars()
                 echo "        $resource = {" >> $auto_tfvars_name
                 rec_string=${cluster_resource_map[$key]}
                 update_time=$(echo $rec_string|grep -o "#UpdateTime=[^\"]*\"[^\"]*\"")
-                reccpureq=$(echo $rec_string|grep -o "recommendedCpuRequest=[^\"]*\"[^\"]*\"")
-                recmemreq=$(echo $rec_string|grep -o "recommendedMemRequest=[^\"]*\"[^\"]*\"")
-                reccpulim=$(echo $rec_string|grep -o "recommendedCpuLimit=[^\"]*\"[^\"]*\"")
-                recmemlim=$(echo $rec_string|grep -o "recommendedMemLimit=[^\"]*\"[^\"]*\"")
+                reccpureq=$(echo $rec_string|grep -o "recommended_cpu_request=[^\"]*\"[^\"]*\"")
+                recmemreq=$(echo $rec_string|grep -o "recommended_memory_request=[^\"]*\"[^\"]*\"")
+                reccpulim=$(echo $rec_string|grep -o "recommended_cpu_limit=[^\"]*\"[^\"]*\"")
+                recmemlim=$(echo $rec_string|grep -o "recommended_memory_limit=[^\"]*\"[^\"]*\"")
                 echo "            $update_time" >> $auto_tfvars_name
                 echo "            $reccpureq" >> $auto_tfvars_name
                 echo "            $recmemreq" >> $auto_tfvars_name
