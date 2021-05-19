@@ -5,7 +5,6 @@ target_config_info='{
   "rest_api_url": "https://172.31.2.41:31011",
   "login_account": "",
   "login_password": "",
-  "access_token": "",
   "resource_type": "controller", # controller or namespace
   "iac_command": "script", # script or terraform
   "kubeconfig_path": "", # optional # kubeconfig file path
@@ -42,7 +41,7 @@ check_target_config()
     else
         echo "-------------- config info ----------------" >> $debug_log
         # Hide password
-        echo "$target_config_info" |sed 's/"login_password.*/"login_password": *****/g'|sed 's/"access_token":.*/"access_token": *****/g' >> $debug_log
+        echo "$target_config_info" |sed 's/"login_password.*/"login_password": *****/g' >> $debug_log
         echo "-----------------------------------------------------" >> $debug_log
     fi
 }
@@ -122,8 +121,7 @@ check_rest_api_url()
 rest_api_login()
 {
     show_info "Logging into REST API..."
-    provided_token=$(parse_value_from_target_var "access_token")
-    if [ "$provided_token" = "" ]; then
+    if [ "$FEDERATORAI_ACCESS_TOKEN" = "" ]; then
         login_account=$(parse_value_from_target_var "login_account")
         if [ "$login_account" = "" ]; then
             echo -e "\nFailed to get login account from target_config_info." | tee -a $debug_log 1>&2
@@ -152,11 +150,11 @@ rest_api_login()
         fi
         access_token="$(echo $rest_output|tr -d '\n'|grep -o "\"accessToken\":[^\"]*\"[^\"]*\""|sed -E 's/".*".*"(.*)"/\1/')"
     else
-        access_token="$provided_token"
+        access_token="$FEDERATORAI_ACCESS_TOKEN"
         # Examine http response code
         token_test_http_response="$(curl -o /dev/null -sS -k -X GET "$api_url/apis/v1/resources/clusters" -w "%{http_code}" -H "accept: application/json" -H "Authorization: Bearer $access_token")"
         if [ "$token_test_http_response" != "200" ]; then
-            echo -e "\nThe access_token from target_config_info can't access the REST API service." | tee -a $debug_log 1>&2
+            echo -e "\nThe access_token can't access the REST API service." | tee -a $debug_log 1>&2
             log_prompt
             exit 3
         fi
