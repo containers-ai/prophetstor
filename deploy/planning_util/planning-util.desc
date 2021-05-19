@@ -2,7 +2,6 @@
     "rest_api_url": "",
     "login_account": " # required # Federator.ai GUI login account",
     "login_password": " # required # Federator.ai GUI login password",
-    "access_token": "  # optional # Federator.ai GUI access_token",
     "resource_type": " # required # controller|namespace",
     "iac_command": " # required # script|terraform",
     "kubeconfig_path": " # optional # kubeconfig path",

@@ -17,7 +17,7 @@
             ] 
         }}"
   ignore_errors: yes
-  loop: "{{ operator_result | community.general.json_query('json[*].name') }}"  
+  loop: "{{ operator_result | json_query('json[*].name') }}"
 
 - name: debug
   debug: msg={{ operator_list }}

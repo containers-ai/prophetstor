@@ -5,7 +5,6 @@ target_config_info='{
   "rest_api_url": "https://172.31.2.41:31011",
   "login_account": "",
   "login_password": "",
-  "access_token": "",
   "resource_type": "controller", # controller or namespace
   "iac_command": "script", # script or terraform
   "kubeconfig_path": "", # optional # kubeconfig file path
@@ -42,7 +41,7 @@ check_target_config()
     else
         echo "-------------- config info ----------------" >> $debug_log
         # Hide password
-        echo "$target_config_info" |sed 's/"login_password.*/"login_password": *****/g'|sed 's/"access_token":.*/"access_token": *****/g' >> $debug_log
+        echo "$target_config_info" |sed 's/"login_password.*/"login_password": *****/g' >> $debug_log
         echo "-----------------------------------------------------" >> $debug_log
     fi
 }
@@ -122,8 +121,7 @@ check_rest_api_url()
 rest_api_login()
 {
     show_info "Logging into REST API..."
-    provided_token=$(parse_value_from_target_var "access_token")
-    if [ "$provided_token" = "" ]; then
+    if [ "$FEDERATORAI_ACCESS_TOKEN" = "" ]; then
         login_account=$(parse_value_from_target_var "login_account")
         if [ "$login_account" = "" ]; then
             echo -e "\nFailed to get login account from target_config_info." | tee -a $debug_log 1>&2
@@ -152,11 +150,11 @@ rest_api_login()
         fi
         access_token="$(echo $rest_output|tr -d '\n'|grep -o "\"accessToken\":[^\"]*\"[^\"]*\""|sed -E 's/".*".*"(.*)"/\1/')"
     else
-        access_token="$provided_token"
+        access_token="$FEDERATORAI_ACCESS_TOKEN"
         # Examine http response code
         token_test_http_response="$(curl -o /dev/null -sS -k -X GET "$api_url/apis/v1/resources/clusters" -w "%{http_code}" -H "accept: application/json" -H "Authorization: Bearer $access_token")"
         if [ "$token_test_http_response" != "200" ]; then
-            echo -e "\nThe access_token from target_config_info can't access the REST API service." | tee -a $debug_log 1>&2
+            echo -e "\nThe access_token can't access the REST API service." | tee -a $debug_log 1>&2
             log_prompt
             exit 3
         fi
@@ -791,7 +789,7 @@ create_variable_tf()
         echo "    source  = \"prophetstor-ai/resource-provision/federatorai\"" >> $variable_tf_name
         echo "    version = \"4.6.0\"" >> $variable_tf_name
         echo "    federatorai_resource_id = \"${resource_id}\"" >> $variable_tf_name
-        echo "    federatorai_cluster_id = \"${cluster_name}\"" >> $variable_tf_name
+        echo "    federatorai_cluster_name = \"${cluster_name}\"" >> $variable_tf_name
         echo "    federatorai_recommendations = var.federatorai_recommendations" >> $variable_tf_name
         echo "}" >> $variable_tf_name
     fi
@@ -806,9 +804,9 @@ create_auto_tfvars()
     fi
 
     if [ "$resource_type" = "controller" ]; then
-        resource_id="controller_${owner_reference_kind}_${resource_name}_${target_namespace}"
+        resource_id="federatorai_${owner_reference_kind}_${resource_name}_${target_namespace}"
     else
-        resource_id="namespace_${resource_name}"
+        resource_id="federatorai_namespace_${resource_name}"
     fi
 
     declare -A cluster_resource_map
@@ -822,7 +820,7 @@ create_auto_tfvars()
 
     # Add Current entry
     current_time="$(date)"
-    current_rec="#UpdateTime=\"$current_time\",recommendedCpuRequest=\"${requests_pod_cpu}m\",recommendedMemRequest=\"$requests_pod_memory\",recommendedCpuLimit=\"${limits_pod_cpu}m\",recommendedMemLimit=\"$limits_pod_memory\""
+    current_rec="#UpdateTime=\"$current_time\",recommended_cpu_request=\"${requests_pod_cpu}m\",recommended_memory_request=\"$requests_pod_memory\",recommended_cpu_limit=\"${limits_pod_cpu}m\",recommended_memory_limit=\"$limits_pod_memory\""
     cluster_resource_map["federatorai_recommendations,$cluster_name,$resource_id"]="$current_rec"
 
     # Do export
@@ -850,10 +848,10 @@ export_final_tfvars()
                 echo "        $resource = {" >> $auto_tfvars_name
                 rec_string=${cluster_resource_map[$key]}
                 update_time=$(echo $rec_string|grep -o "#UpdateTime=[^\"]*\"[^\"]*\"")
-                reccpureq=$(echo $rec_string|grep -o "recommendedCpuRequest=[^\"]*\"[^\"]*\"")
-                recmemreq=$(echo $rec_string|grep -o "recommendedMemRequest=[^\"]*\"[^\"]*\"")
-                reccpulim=$(echo $rec_string|grep -o "recommendedCpuLimit=[^\"]*\"[^\"]*\"")
-                recmemlim=$(echo $rec_string|grep -o "recommendedMemLimit=[^\"]*\"[^\"]*\"")
+                reccpureq=$(echo $rec_string|grep -o "recommended_cpu_request=[^\"]*\"[^\"]*\"")
+                recmemreq=$(echo $rec_string|grep -o "recommended_memory_request=[^\"]*\"[^\"]*\"")
+                reccpulim=$(echo $rec_string|grep -o "recommended_cpu_limit=[^\"]*\"[^\"]*\"")
+                recmemlim=$(echo $rec_string|grep -o "recommended_memory_limit=[^\"]*\"[^\"]*\"")
                 echo "            $update_time" >> $auto_tfvars_name
                 echo "            $reccpureq" >> $auto_tfvars_name
                 echo "            $recmemreq" >> $auto_tfvars_name
