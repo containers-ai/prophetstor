@@ -1379,7 +1379,7 @@ if [ "$ALAMEDASERVICE_FILE_PATH" = "" ]; then
                 if [ "$storage_type" = "ephemeral" ]; then
                     echo "$(tput setaf 3)Are you sure you want to use ephemeral storage?$(tput sgr 0)"
                     echo "$(tput setaf 3)Any data on ephemeral storage will be LOST after Federator.ai pods are restarted!$(tput sgr 0)"
-                    read -r -p "$(tput setaf 3)Please enter any keys to re-configure storage type, or type 'ephemeral' in UPPERCASE to confirm: $(tput sgr 0)" confirm_storage </dev/tty
+                    read -r -p "$(tput setaf 3)Please enter any key to re-configure storage type, or type 'ephemeral' in UPPERCASE to confirm: $(tput sgr 0)" confirm_storage </dev/tty
                     if [ "$confirm_storage" = "EPHEMERAL" ]; then
                         break
                     else
