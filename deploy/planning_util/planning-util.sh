@@ -28,7 +28,7 @@ target_config_info='{
 
 if [ "$BASH_VERSION" = "" ]; then
     err_code="6"
-    /bin/echo -e "{\n  \"reason\": \"Please use bash to run the script.\",\n  \"error_code\": \"$err_code\"\n}"
+    /bin/echo -e "{\n  \"reason\": \"Please use bash to run the script.\",\n  \"error_code\": $err_code\n}"
     exit $err_code
 fi
 set -o pipefail
@@ -68,7 +68,7 @@ __EOF__
 show_info()
 {
     if [ "$verbose_mode" = "y" ]; then
-        tee -a $debug_log  << __EOF__
+        tee -a $debug_log 1>&2 << __EOF__
 $*
 __EOF__
     else
@@ -79,7 +79,7 @@ __EOF__
 
 show_error()
 {
-    echo -e "{\n  \"reason\": \"$1\",\n  \"error_code\": \"$2\",\n  \"log_file\": \"$debug_log\"\n}" | tee -a $debug_log
+    echo -e "{\n  \"reason\": \"$1\",\n  \"error_code\": $2,\n  \"log_file\": \"$debug_log\"\n}" | tee -a $debug_log
 }
 
 show_detail_to_stderr()
@@ -193,8 +193,9 @@ rest_api_check_cluster_name()
     echo "$rest_cluster_output"|grep -q "$cluster_name"
     if [ "$?" != "0" ]; then
         err_code="3"
-        show_error "The cluster name is not found in REST API return." $err_code
+        show_error "The cluster name ($cluster_name) is not found in REST API return." $err_code
         show_detail_to_stderr "REST API output: $rest_output"
+        show_detail_to_stderr "Clusters list: $rest_cluster_output"
         exit $err_code
     fi
 
