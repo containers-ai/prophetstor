@@ -189,13 +189,11 @@ rest_api_check_cluster_name()
         show_error "Failed to get clusters info using REST API (Command: $exec_cmd)" $err_code
         exit $err_code
     fi
-    rest_cluster_output="$(echo "$rest_output" |tr -d '\n'|grep -o "\"data\":\[.*\]"|grep -o "\"name\":[^\"]*\"[^\"]*\"")"
-    echo "$rest_cluster_output"|grep -q "$cluster_name"
+    echo "$rest_output" |grep -q "\"name\":\"$cluster_name\""
     if [ "$?" != "0" ]; then
         err_code="3"
         show_error "The cluster name ($cluster_name) is not found in REST API return." $err_code
         show_detail_to_stderr "REST API output: $rest_output"
-        show_detail_to_stderr "Clusters list: $rest_cluster_output"
         exit $err_code
     fi
 
