@@ -730,7 +730,7 @@ update_target_resources()
             execution_time="$(date -u)"
             if [ "$resource_type" = "namespace" ]; then
                 # Clean other quotas
-                all_quotas=$(kubectl -n $target_namespace get quota -o name|cut -d '/' -f2)
+                all_quotas=$($kube_cmd -n $target_namespace get quota -o name|cut -d '/' -f2)
                 for quota in $(echo "$all_quotas")
                 do
                     $kube_cmd -n $target_namespace patch quota $quota --type json --patch "[ { \"op\" : \"remove\" , \"path\" : \"/spec/hard/limits.cpu\"}]" >/dev/null 2>&1
@@ -1251,26 +1251,61 @@ echo "================================== New Round =============================
 echo "Receiving command: '$0 $@'" >> $debug_log
 echo "Receiving time: `date -u`" >> $debug_log
 
-type kubectl > /dev/null 2>&1
-if [ "$?" != "0" ];then
-    err_code="6"
-    show_error "kubectl command is needed for this tool." $err_code
-    exit $err_code
-fi
+# Check target_config_info variable
+check_target_config
+
+# Get resource type
+resource_type=$(parse_value_from_target_var "resource_type")
+resource_type="$(echo "$resource_type" | tr '[:upper:]' '[:lower:]')"
+
+# Parse config info
+get_info_from_config
 
 # Get kubeconfig path
 kubeconfig_path=$(parse_value_from_target_var "kubeconfig_path")
 
-if [ "$kubeconfig_path" = "" ]; then
-    kube_cmd="kubectl"
+if [ "$resource_type" = "controller" ] && [ "$owner_reference_kind" = "deploymentconfig" ]; then
+    if [ "$kubeconfig_path" = "" ]; then
+        kube_cmd="oc"
+        verify_cmd="kubectl"
+    else
+        kube_cmd="oc --kubeconfig $kubeconfig_path"
+        verify_cmd="kubectl --kubeconfig $kubeconfig_path"
+    fi
+    cmd_type="oc"
 else
-    kube_cmd="kubectl --kubeconfig $kubeconfig_path"
+    if [ "$kubeconfig_path" = "" ]; then
+        kube_cmd="kubectl"
+    else
+        kube_cmd="kubectl --kubeconfig $kubeconfig_path"
+    fi
+    cmd_type="kubectl"
 fi
 
-$kube_cmd version|grep -q "^Server"
+type $cmd_type > /dev/null 2>&1
 if [ "$?" != "0" ];then
     err_code="6"
-    show_error "Failed to get Kubernetes server info through kubectl cmd. Please login first or check your kubeconfig_path config value." $err_code
+    show_error "$cmd_type command is needed for this tool." $err_code
+    exit $err_code
+fi
+
+if [ "$cmd_type" = "oc" ]; then
+    # kubectl must exist too
+    type kubectl > /dev/null 2>&1
+    if [ "$?" != "0" ];then
+        err_code="6"
+        show_error "kubectl command is needed for this tool." $err_code
+        exit $err_code
+    fi
+    # Still use kubectl version to verify server connection
+    $verify_cmd version|grep -q "^Server"
+else
+    $kube_cmd version|grep -q "^Server"
+fi
+
+if [ "$?" != "0" ];then
+    err_code="6"
+    show_error "Failed to get Kubernetes server info through $cmd_type cmd. Please login first or check your kubeconfig_path config value." $err_code
     exit $err_code
 fi
 
@@ -1288,9 +1323,6 @@ if [ "$?" != "0" ];then
     exit $err_code
 fi
 
-# Check target_config_info variable
-check_target_config
-
 connection_test
 if [ "$do_test_connection" = "y" ]; then
     echo -e "{\n  \"connection_test\": \"passed\",\n  \"log_file\": \"$debug_log\"\n}" | tee -a $debug_log
@@ -1299,16 +1331,12 @@ fi
 
 rest_api_check_cluster_name
 
-# Get resource type
-resource_type=$(parse_value_from_target_var "resource_type")
-resource_type="$(echo "$resource_type" | tr '[:upper:]' '[:lower:]')"
+
 
 if [ "$resource_type" = "controller" ];then
-    get_info_from_config
     get_controller_resources_from_kubecmd "before"
     get_planning_from_api
 elif [ "$resource_type" = "namespace" ]; then
-    get_info_from_config
     get_namespace_quota_from_kubecmd "before"
     get_planning_from_api
 else
