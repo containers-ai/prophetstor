@@ -347,8 +347,7 @@ run_ab_test()
     fi
 
     # Modify parameters
-    nginx_ip=$(kubectl -n $nginx_ns get svc|grep "${nginx_name}"|awk '{print $3}')
-    [ "$nginx_ip" = "" ] && echo -e "$(tput setaf 1)Error! Can't get svc ip of namespace $nginx_ns$(tput sgr 0)" && return
+    nginx_ip="${nginx_name}.${nginx_ns}"
 
     sed -i "s/SVC_IP=.*/SVC_IP=${nginx_ip}/g" $preloader_folder/generate_loads.sh
     sed -i "s/SVC_PORT=.*/SVC_PORT=${nginx_port}/g" $preloader_folder/generate_loads.sh
@@ -1767,7 +1766,7 @@ fi
 if [ "$k8s_enabled" = "true" ]; then
     # K8S
     # copy preloader ab files if run historical only mode enabled
-    preloader_folder="$(dirname $0)/preloader_ab_runner"
+    preloader_folder="${script_located_path}/preloader_ab_runner"
     if [ "$run_preloader_with_historical_only" = "y" ] || [ "$run_ab_from_preloader" = "y" ]; then
         # Check folder exists
         [ ! -d "$preloader_folder" ] && echo -e "$(tput setaf 1)Error! Can't locate $preloader_folder folder.$(tput sgr 0)" && exit 3

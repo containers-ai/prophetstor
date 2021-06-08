@@ -16,7 +16,7 @@
               item
             ] 
         }}"
-  loop: "{{ operator_result | community.general.json_query('json[*].name') }}"
+  loop: "{{ operator_result | json_query('json[*].name') }}"
 
 - name: debug
   debug: msg={{ operator_list }}
@@ -139,12 +139,19 @@
     name: "federatorai-operator"
   when: (previous_alameda_namespace != "")
 
-# Apply yamls
-- name: Apply operator yamls
+# Apply yamls (except 03)
+- name: Apply operator yamls execpt 03
   community.kubernetes.k8s:
     state: present
     src: "{{ item.path }}"
+  when: item.path != yaml_3_name.files[0].path
   loop: "{{ yaml_all_names.files| sort(attribute='path') }}"
+
+# Apply 03 yaml
+- name: Apply 03 operator yaml
+  community.kubernetes.k8s:
+    state: present
+    src: "{{ yaml_3_name.files[0].path }}"
 
 # Fresh install
 - name: Check Federator.ai operator pod become ready (Fresh install)
