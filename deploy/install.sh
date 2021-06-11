@@ -1564,6 +1564,9 @@ __EOF__
         - ReadWriteOnce
   alamedaInfluxdb:
     resources:
+      limits:
+        cpu: 4000m
+        memory: 18000Mi
       requests:
         cpu: 500m
         memory: 500Mi
@@ -1599,6 +1602,9 @@ __EOF__
         memory: 500Mi
   alamedaInfluxdb:
     resources:
+      limits:
+        cpu: 4000m
+        memory: 18000Mi
       requests:
         cpu: 500m
         memory: 500Mi
