@@ -1376,6 +1376,17 @@ if [ "$ALAMEDASERVICE_FILE_PATH" = "" ]; then
                 echo "$(tput setaf 127)Which storage type you would like to use? ephemeral or persistent?"
                 read -r -p "[default: $default]: $(tput sgr 0)" storage_type </dev/tty
                 storage_type=${storage_type:-$default}
+                if [ "$storage_type" = "ephemeral" ]; then
+                    echo "$(tput setaf 3)Are you sure you want to use ephemeral storage?$(tput sgr 0)"
+                    echo "$(tput setaf 3)Any data on ephemeral storage will be LOST after Federator.ai pods are restarted!$(tput sgr 0)"
+                    read -r -p "$(tput setaf 3)Please enter any key to re-configure storage type, or type 'ephemeral' in UPPERCASE to confirm: $(tput sgr 0)" confirm_storage </dev/tty
+                    if [ "$confirm_storage" = "EPHEMERAL" ]; then
+                        break
+                    else
+                        storage_type=""
+                        continue
+                    fi
+                fi
             done
 
             if [[ "$storage_type" == "persistent" ]]; then
@@ -1553,6 +1564,9 @@ __EOF__
         - ReadWriteOnce
   alamedaInfluxdb:
     resources:
+      limits:
+        cpu: 4000m
+        memory: 18000Mi
       requests:
         cpu: 500m
         memory: 500Mi
@@ -1588,6 +1602,9 @@ __EOF__
         memory: 500Mi
   alamedaInfluxdb:
     resources:
+      limits:
+        cpu: 4000m
+        memory: 18000Mi
       requests:
         cpu: 500m
         memory: 500Mi

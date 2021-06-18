@@ -4,6 +4,8 @@ metadata:
   name: my-alamedaservice
   namespace: federatorai
 spec:
+  keycode:
+    codeNumber: ""
   version: latest               ## for Federator.ai components
   imageLocation: quay.io/prophetstor
   storages:                     ## see following details for where it is used in each component

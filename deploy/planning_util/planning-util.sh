@@ -27,17 +27,18 @@ target_config_info='{
 #=========================== target config info end ===========================
 
 if [ "$BASH_VERSION" = "" ]; then
-    /bin/echo -e "\nPlease use bash to run the script." 1>&2
-    exit 6
+    err_code="6"
+    /bin/echo -e "{\n  \"reason\": \"Please use bash to run the script.\",\n  \"error_code\": $err_code\n}"
+    exit $err_code
 fi
 set -o pipefail
 
 check_target_config()
 {
     if [ -z "$target_config_info" ]; then
-        echo -e "\ntarget_config_info is empty." | tee -a $debug_log 1>&2
-        log_prompt
-        exit 2
+        err_code="2"
+        show_error "target_config_info variable is not defined." $err_code
+        exit $err_code
     else
         echo "-------------- config info ----------------" >> $debug_log
         # Hide password
@@ -67,7 +68,7 @@ __EOF__
 show_info()
 {
     if [ "$verbose_mode" = "y" ]; then
-        tee -a $debug_log  << __EOF__
+        tee -a $debug_log 1>&2 << __EOF__
 $*
 __EOF__
     else
@@ -76,20 +77,26 @@ __EOF__
     return 0
 }
 
-log_prompt()
+show_error()
 {
-    if [ "$debug_log" != "/dev/null" ]; then
-        echo -e "\nPlease refer to the logfile $debug_log for details. "
+    echo -e "{\n  \"reason\": \"$1\",\n  \"error_code\": $2,\n  \"log_file\": \"$debug_log\"\n}" | tee -a $debug_log
+}
+
+show_detail_to_stderr()
+{
+    echo "$*" >> $debug_log
+    if [ "$detail_to_stderr" = "y" ]; then
+        echo "$*" 1>&2
     fi
 }
 
 check_user_token()
 {
     if [ "$access_token" = "null" ] || [ "$access_token" = "" ]; then
-        echo -e "\nFailed to get login token from REST API." | tee -a $debug_log 1>&2
-        echo "Please check login account and login password." | tee -a $debug_log 1>&2
-        log_prompt
-        exit 2
+        err_code="2"
+        show_error "Failed to get login token from REST API." $err_code 
+        show_detail_to_stderr "Please check login account and login password."
+        exit $err_code
     fi
 }
 
@@ -97,9 +104,9 @@ parse_value_from_target_var()
 {
     target_string="$1"
     if [ -z "$target_string" ]; then
-        echo -e "\nparse_value_from_target_var() target_string parameter can't be empty." | tee -a $debug_log 1>&2
-        log_prompt
-        exit 2
+        err_code="2"
+        show_error "parse_value_from_target_var() target_string parameter can't be empty." $err_code
+        exit $err_code
     fi
     echo "$target_config_info"|tr -d '\n'|grep -o "\"$target_string\":[^\"]*\"[^\"]*\""|sed -E 's/".*".*"(.*)"/\1/'
 }
@@ -110,9 +117,9 @@ check_rest_api_url()
     api_url=$(parse_value_from_target_var "rest_api_url")
 
     if [ "$api_url" = "" ]; then
-        echo -e "\nFailed to get REST API URL from target_config_info." | tee -a $debug_log 1>&2
-        log_prompt
-        exit 2
+        err_code="2"
+        show_error "Failed to get REST API URL from target_config_info." $err_code
+        exit $err_code
     fi
     show_info "REST API URL = $api_url"
     show_info "Done."
@@ -124,29 +131,29 @@ rest_api_login()
     if [ "$FEDERATORAI_ACCESS_TOKEN" = "" ]; then
         login_account=$(parse_value_from_target_var "login_account")
         if [ "$login_account" = "" ]; then
-            echo -e "\nFailed to get login account from target_config_info." | tee -a $debug_log 1>&2
-            log_prompt
-            exit 2
+            err_code="2"
+            show_error "Failed to get login account from target_config_info." $err_code
+            exit $err_code
         fi
         login_password=$(parse_value_from_target_var "login_password")
         if [ "$login_password" = "" ]; then
-            echo -e "\nFailed to get login password from target_config_info." | tee -a $debug_log 1>&2
-            log_prompt
-            exit 2
+            err_code="2"
+            show_error "Failed to get login password from target_config_info." $err_code
+            exit $err_code
         fi
         auth_string="${login_account}:${login_password}"
         auth_cipher=$(echo -n "$auth_string"|base64)
         if [ "$auth_cipher" = "" ]; then
-            echo -e "\nFailed to encode login string using base64 command."  | tee -a $debug_log 1>&2
-            log_prompt
-            exit 2
+            err_code="2"
+            show_error "Failed to encode login string using base64 command." $err_code
+            exit $err_code
         fi
         rest_output=$(curl -sS -k -X POST "$api_url/apis/v1/users/login" -H "accept: application/json" -H "authorization: Basic ${auth_cipher}")
         if [ "$?" != "0" ]; then
-            echo -e "\nFailed to connect to REST API service ($api_url/apis/v1/users/login)." | tee -a $debug_log 1>&2
-            echo "Please check REST API IP/login account/login password" | tee -a $debug_log 1>&2
-            log_prompt
-            exit 3
+            err_code="3"
+            show_error "Failed to connect to REST API service ($api_url/apis/v1/users/login)" $err_code
+            show_detail_to_stderr "Please check REST API IP/login account/login password"
+            exit $err_code
         fi
         access_token="$(echo $rest_output|tr -d '\n'|grep -o "\"accessToken\":[^\"]*\"[^\"]*\""|sed -E 's/".*".*"(.*)"/\1/')"
     else
@@ -154,9 +161,9 @@ rest_api_login()
         # Examine http response code
         token_test_http_response="$(curl -o /dev/null -sS -k -X GET "$api_url/apis/v1/resources/clusters" -w "%{http_code}" -H "accept: application/json" -H "Authorization: Bearer $access_token")"
         if [ "$token_test_http_response" != "200" ]; then
-            echo -e "\nThe access_token can't access the REST API service." | tee -a $debug_log 1>&2
-            log_prompt
-            exit 3
+            err_code="3"
+            show_error "The access_token can't access the REST API service." $err_code
+            exit $err_code
         fi
     fi
 
@@ -170,21 +177,24 @@ rest_api_check_cluster_name()
     show_info "Getting the cluster name of the planning target ..."
     cluster_name=$(parse_value_from_target_var "cluster_name")
     if [ "$cluster_name" = "" ]; then
-        echo -e "\nFailed to get cluster name of the planning target from target_config_info." | tee -a $debug_log 1>&2
-        log_prompt
-        exit 2
+        err_code="2"
+        show_error "Failed to get cluster name of the planning target from target_config_info." $err_code
+        exit $err_code
     fi
 
-    rest_cluster_output="$(curl -sS -k -X GET "$api_url/apis/v1/resources/clusters" -H "accept: application/json" -H "Authorization: Bearer $access_token" |tr -d '\n'|grep -o "\"data\":\[.*\]"|grep -o "\"name\":[^\"]*\"[^\"]*\"")"
-    echo "$rest_cluster_output"|grep -q "$cluster_name"
+    exec_cmd="curl -sS -k -X GET \"$api_url/apis/v1/resources/clusters\" -H \"accept: application/json\" -H \"Authorization: Bearer $access_token\""
+    rest_output=$(eval $exec_cmd)
     if [ "$?" != "0" ]; then
-        echo -e "\nThe cluster name is not found in REST API return." | tee -a $debug_log 1>&2
-
-        # Only print to log to reduce event msg
-        echo -e "\nREST API output: $rest_cluster_output)" | tee -a $debug_log
-
-        log_prompt
-        exit 3
+        err_code="3"
+        show_error "Failed to get clusters info using REST API (Command: $exec_cmd)" $err_code
+        exit $err_code
+    fi
+    echo "$rest_output" |grep -q "\"name\":\"$cluster_name\""
+    if [ "$?" != "0" ]; then
+        err_code="3"
+        show_error "The cluster name ($cluster_name) is not found in REST API return." $err_code
+        show_detail_to_stderr "REST API output: $rest_output"
+        exit $err_code
     fi
 
     show_info "cluster_name = $cluster_name"
@@ -197,31 +207,31 @@ get_info_from_config()
 
     resource_name=$(parse_value_from_target_var "resource_name")
     if [ "$resource_name" = "" ]; then
-        echo -e "\nFailed to get resource name of the planning target from target_config_info." | tee -a $debug_log 1>&2
-        log_prompt
-        exit 2
+        err_code="2"
+        show_error "Failed to get resource name of the planning target from target_config_info." $err_code
+        exit $err_code
     fi
 
     if [ "$resource_type" = "controller" ]; then
         owner_reference_kind=$(parse_value_from_target_var "kind")
         if [ "$owner_reference_kind" = "" ]; then
-            echo -e "\nFailed to get controller kind of the planning target from target_config_info." | tee -a $debug_log 1>&2
-            log_prompt
-            exit 2
+            err_code="2"
+            show_error "Failed to get controller kind of the planning target from target_config_info." $err_code
+            exit $err_code
         fi
 
         owner_reference_kind="$(echo "$owner_reference_kind" | tr '[:upper:]' '[:lower:]')"
         if [ "$owner_reference_kind" = "statefulset" ] && [ "$owner_reference_kind" = "deployment" ] && [ "$owner_reference_kind" = "deploymentconfig" ]; then
-            echo -e "\nOnly support controller type equals Statefulset/Deployment/DeploymentConfig." | tee -a $debug_log 1>&2
-            log_prompt
-            exit 2
+            err_code="2"
+            show_error "Only support controller type equals Statefulset/Deployment/DeploymentConfig." $err_code
+            exit $err_code
         fi
 
         target_namespace=$(parse_value_from_target_var "namespace")
         if [ "$target_namespace" = "" ]; then
-            echo -e "\nFailed to get namespace of the planning target from target_config_info." | tee -a $debug_log 1>&2
-            log_prompt
-            exit 2
+            err_code="2"
+            show_error "Failed to get namespace of the planning target from target_config_info." $err_code
+            exit $err_code
         fi
     else
         # resource_type = namespace
@@ -232,21 +242,21 @@ get_info_from_config()
     iac_command=$(parse_value_from_target_var "iac_command")
     iac_command="$(echo "$iac_command" | tr '[:upper:]' '[:lower:]')"
     if [ "$iac_command" = "" ]; then
-        echo -e "\nFailed to get iac_command from target_config_info." | tee -a $debug_log 1>&2
-        log_prompt
-        exit 2
+        err_code="2"
+        show_error "Failed to get iac_command from target_config_info." $err_code
+        exit $err_code
     elif [ "$iac_command" != "script" ] && [ "$iac_command" != "terraform" ]; then
-        echo -e "\nOnly support iac_command equals 'script' or 'terraform'." | tee -a $debug_log 1>&2
-        log_prompt
-        exit 2
+        err_code="2"
+        show_error "Only support iac_command equals 'script' or 'terraform'." $err_code
+        exit $err_code
     fi
 
     readable_granularity=$(parse_value_from_target_var "time_interval")
     readable_granularity="$(echo "$readable_granularity" | tr '[:upper:]' '[:lower:]')"
     if [ "$readable_granularity" = "" ]; then
-        echo -e "\nFailed to get time interval of the planning target from target_config_info." | tee -a $debug_log 1>&2
-        log_prompt
-        exit 2
+        err_code="2"
+        show_error "Failed to get time interval of the planning target from target_config_info." $err_code
+        exit $err_code
     fi
 
     min_cpu=$(parse_value_from_target_var "min_cpu")
@@ -306,9 +316,9 @@ get_info_from_config()
     elif [ "$readable_granularity" = "monthly" ]; then
         granularity="86400"
     else
-        echo -e "\nOnly support planning time interval equals daily/weekly/monthly." | tee -a $debug_log 1>&2
-        log_prompt
-        exit 2
+        err_code="2"
+        show_error "Only support planning time interval equals daily/weekly/monthly." $err_code
+        exit $err_code
     fi
 
     show_info "Cluster name = $cluster_name"
@@ -335,25 +345,25 @@ parse_value_from_planning()
     target_field="$1"
     target_resource="$2"
     if [ -z "$target_field" ]; then
-        echo -e "\nparse_value_from_planning() target_field parameter can't be empty." | tee -a $debug_log 1>&2
-        log_prompt
-        exit 3
+        err_code="3"
+        show_error "parse_value_from_planning() target_field parameter can't be empty." $err_code
+        exit $err_code
     elif [ -z "$target_resource" ]; then
-        echo -e "\nparse_value_from_planning() target_resource parameter can't be empty." | tee -a $debug_log 1>&2
-        log_prompt
-        exit 3
+        err_code="3"
+        show_error "parse_value_from_planning() target_resource parameter can't be empty." $err_code
+        exit $err_code
     fi
 
     if [ "$target_field" != "limitPlannings" ] && [ "$target_field" != "requestPlannings" ]; then
-        echo -e "\nparse_value_from_planning() target_field can only be either 'limitPlannings' and 'requestPlannings'." | tee -a $debug_log 1>&2
-        log_prompt
-        exit 3
+        err_code="3"
+        show_error "parse_value_from_planning() target_field can only be either 'limitPlannings' and 'requestPlannings'." $err_code
+        exit $err_code
     fi
 
     if [ "$target_resource" != "CPU_MILLICORES_USAGE" ] && [ "$target_resource" != "MEMORY_BYTES_USAGE" ]; then
-        echo -e "\nparse_value_from_planning() target_field can only be either 'CPU_MILLICORES_USAGE' and 'MEMORY_BYTES_USAGE'." | tee -a $debug_log 1>&2
-        log_prompt
-        exit 3
+        err_code="3"
+        show_error "parse_value_from_planning() target_field can only be either 'CPU_MILLICORES_USAGE' and 'MEMORY_BYTES_USAGE'." $err_code
+        exit $err_code
     fi
 
     echo "$planning_all"|grep -o "\"$target_field\":[^{]*{[^}]*}[^}]*}"|grep -o "\"$target_resource\":[^\[]*\[[^]]*"|grep -o '"numValue":[^"]*"[^"]*"'|cut -d '"' -f4
@@ -391,41 +401,34 @@ get_planning_from_api()
         exec_cmd="curl -sS -k -X GET \"$api_url/apis/v1/resources/clusters/$cluster_name/namespaces?names=$target_namespace\" -H \"accept: application/json\" -H \"Authorization: Bearer $access_token\""
         rest_output=$(eval $exec_cmd)
         if [ "$?" != "0" ]; then
-            echo -e "\nFailed to get namespace $target_namespace resource info using REST API (Command: $exec_cmd)" | tee -a $debug_log 1>&2
-            log_prompt
-            exit 3
+            err_code="3"
+            show_error "Failed to get namespace $target_namespace resource info using REST API (Command: $exec_cmd)" $err_code
+            exit $err_code
         fi
         namespace_state="$(echo $rest_output|tr -d '\n'|grep -o "\"name\":.*\"${target_namespace}.*"|grep -o "\"state\":.*\".*\""|cut -d '"' -f4)"
         if [ "$namespace_state" != "monitoring" ]; then
-            echo -e "\nNamespace $target_namespace is not in 'monitoring' state." | tee -a $debug_log 1>&2
-
-            # Only print to log to reduce event msg
-            echo -e "\nREST API output: $rest_output)" | tee -a $debug_log
-
-            log_prompt
-            exit 1
+            err_code="1"
+            show_error "Namespace $target_namespace is not in 'monitoring' state." $err_code
+            show_detail_to_stderr "REST API output: $rest_output"
+            exit $err_code
         fi
         exec_cmd="curl -sS -k -X GET \"$api_url/apis/v1/plannings/clusters/$cluster_name/namespaces/$target_namespace?granularity=$granularity&type=$type&limit=1&order=asc&startTime=$interval_start_time&endTime=$interval_end_time\" -H \"accept: application/json\" -H \"Authorization: Bearer $access_token\""
     fi
 
     rest_output=$(eval $exec_cmd)
     if [ "$?" != "0" ]; then
-        echo -e "\nFailed to get planning value of $resource_type using REST API (Command: $exec_cmd)" | tee -a $debug_log 1>&2
-        log_prompt
-        exit 3
+        err_code="3"
+        show_error "Failed to get planning value of $resource_type using REST API (Command: $exec_cmd)" $err_code
+        exit $err_code
     fi
     planning_all="$(echo $rest_output|tr -d '\n'|grep -o "\"plannings\":.*")"
     # check if return is '"plannings":[]}'
     planning_count=${#planning_all}
     if [ "$planning_all" = "" ] || [ "$planning_count" -le "15" ]; then
-        echo -e "\nPlanning value ($readable_granularity) is empty." | tee -a $debug_log 1>&2
-
-        # Only print to log to reduce event msg
-        echo -e "\nREST API output:" | tee -a $debug_log
-        echo -e "${rest_output}" | tee -a $debug_log
-
-        log_prompt
-        exit 1
+        err_code="1"
+        show_error "Planning value ($readable_granularity) is empty." $err_code
+        show_detail_to_stderr "REST API output: ${rest_output}"
+        exit $err_code
     fi
 
     limits_pod_cpu=$(parse_value_from_planning "limitPlannings" "CPU_MILLICORES_USAGE")
@@ -437,21 +440,21 @@ get_planning_from_api()
         replica_number="$($kube_cmd get $owner_reference_kind $resource_name -n $target_namespace -o json|tr -d '\n'|grep -o "\"spec\":.*"|grep -o "\"replicas\":[^,]*[0-9]*"|head -1|cut -d ':' -f2|xargs)"
 
         if [ "$replica_number" = "" ]; then
-            echo -e "\nFailed to get replica number from controller ($resource_name) in ns $target_namespace" | tee -a $debug_log 1>&2
-            log_prompt
-            exit 4
+            err_code="4"
+            show_error "Failed to get replica number from controller ($resource_name) in ns $target_namespace" $err_code
+            exit $err_code
         fi
 
         case $replica_number in
-            ''|*[!0-9]*) echo -e "\nReplica number needs to be an integer." | tee -a $debug_log 1>&2 && exit 4 ;;
+            ''|*[!0-9]*) err_code="4" && show_error "Replica number needs to be an integer." $err_code && exit $err_code ;;
             *) ;;
         esac
 
         show_info "Controller replica number = $replica_number"
         if [ "$replica_number" = "0" ]; then
-            echo -e "\nReplica number is zero." | tee -a $debug_log 1>&2
-            log_prompt
-            exit 4
+            err_code="4"
+            show_error "Replica number is zero." $err_code
+            exit $err_code
         fi
 
         # Round up the result (planning / replica)
@@ -469,14 +472,14 @@ get_planning_from_api()
     show_info "-----------------------------------------------------"
 
     if [ "$limits_pod_cpu" = "" ] || [ "$requests_pod_cpu" = "" ] || [ "$limits_pod_memory" = "" ] || [ "$requests_pod_memory" = "" ]; then
+        err_code="3"
         if [ "$resource_type" = "controller" ]; then
-            echo -e "\nFailed to get controller ($resource_name) planning. Missing value." | tee -a $debug_log 1>&2
+            show_error "Failed to get controller ($resource_name) planning. Missing value." $err_code
         else
             # namespace
-            echo -e "\nFailed to get namespace ($target_namespace) planning. Missing value." | tee -a $debug_log 1>&2
+            show_error "Failed to get namespace ($target_namespace) planning. Missing value." $err_code
         fi
-        log_prompt
-        exit 3
+        exit $err_code
     fi
 
     show_info "Done."
@@ -548,10 +551,10 @@ compare_trigger_condition_with_difference()
     show_info "comp_result=${result}%, trigger_condition=${trigger_condition}%"
     if [ "$trigger_condition" -le "$result" ]; then
         trigger_result="y"
-        show_info "$(echo "$before"|rev |cut -d '_' -f2-|rev) meet the trigger condition."
+        show_info "$(echo "$before"|awk -F'_' '{print $1"_"$2}') meet the trigger condition."
     else
         trigger_result="n"
-        show_info "$(echo "$before"|rev |cut -d '_' -f2-|rev) will be skipped."
+        show_info "$(echo "$before"|awk -F'_' '{print $1"_"$2}') will be skipped."
     fi
 }
 
@@ -615,17 +618,17 @@ update_target_resources()
 {
     mode=$1
     if [ "$mode" = "" ]; then
-        echo -e "\nupdate_target_resources() mode parameter can't be empty." | tee -a $debug_log 1>&2
-        log_prompt
-        exit 3
+        err_code="3"
+        show_error "update_target_resources() mode parameter can't be empty." $err_code
+        exit $err_code
     fi
 
     show_info "Updateing $resource_type resources..."
 
     if [ "$limits_pod_cpu" = "" ] || [ "$requests_pod_cpu" = "" ] || [ "$limits_pod_memory" = "" ] || [ "$requests_pod_memory" = "" ]; then
-        echo -e "\nMissing planning values." | tee -a $debug_log 1>&2
-        log_prompt
-        exit 3
+        err_code="3"
+        show_error "Missing planning values." $err_code
+        exit $err_code
     fi
 
     show_info "Calculating min/max/headroom ..."
@@ -727,7 +730,7 @@ update_target_resources()
             execution_time="$(date -u)"
             if [ "$resource_type" = "namespace" ]; then
                 # Clean other quotas
-                all_quotas=$(kubectl -n $target_namespace get quota -o name|cut -d '/' -f2)
+                all_quotas=$($kube_cmd -n $target_namespace get quota -o name|cut -d '/' -f2)
                 for quota in $(echo "$all_quotas")
                 do
                     $kube_cmd -n $target_namespace patch quota $quota --type json --patch "[ { \"op\" : \"remove\" , \"path\" : \"/spec/hard/limits.cpu\"}]" >/dev/null 2>&1
@@ -741,13 +744,13 @@ update_target_resources()
 
             eval $exec_cmd 3>&1 1>&2 2>&3 1>>$debug_log | tee -a $debug_log
             if [ "${PIPESTATUS[0]}" != "0" ]; then
+                err_code="5"
                 if [ "$resource_type" = "controller" ]; then
-                    echo -e "\nFailed to update resources for $owner_reference_kind $resource_name" | tee -a $debug_log 1>&2
+                    show_error "Failed to update resources for $owner_reference_kind $resource_name" $err_code
                 else
-                    echo -e "\nFailed to update quota for namespace $target_namespace" | tee -a $debug_log 1>&2
+                    show_error "Failed to update quota for namespace $target_namespace" $err_code
                 fi
-                log_prompt
-                exit 5
+                exit $err_code
             fi
         fi
     else
@@ -921,25 +924,25 @@ parse_value_from_resource()
     target_field="$1"
     target_resource="$2"
     if [ -z "$target_field" ]; then
-        echo -e "\nparse_value_from_resource() target_field parameter can't be empty." | tee -a $debug_log 1>&2
-        log_prompt
-        exit 3
+        err_code="3"
+        show_error "parse_value_from_resource() target_field parameter can't be empty." $err_code
+        exit $err_code
     elif [ -z "$target_resource" ]; then
-        echo -e "\nparse_value_from_resource() target_resource parameter can't be empty." | tee -a $debug_log 1>&2
-        log_prompt
-        exit 3
+        err_code="3"
+        show_error "parse_value_from_resource() target_resource parameter can't be empty." $err_code
+        exit $err_code
     fi
 
     if [ "$target_field" != "limits" ] && [ "$target_field" != "requests" ]; then
-        echo -e "\nparse_value_from_resource() target_field can only be either 'limits' and 'requests'." | tee -a $debug_log 1>&2
-        log_prompt
-        exit 3
+        err_code="3"
+        show_error "parse_value_from_resource() target_field can only be either 'limits' and 'requests'." $err_code
+        exit $err_code
     fi
 
     if [ "$target_resource" != "cpu" ] && [ "$target_resource" != "memory" ]; then
-        echo -e "\nparse_value_from_resource() target_field can only be either 'cpu' and 'memory'." | tee -a $debug_log 1>&2
-        log_prompt
-        exit 3
+        err_code="3"
+        show_error "parse_value_from_resource() target_field can only be either 'cpu' and 'memory'." $err_code
+        exit $err_code
     fi
 
     echo "$resources"|grep -o "\"$target_field\":[^{]*{[^}]*}"|grep -o "\"$target_resource\":[^\"]*\"[^\"]*\""|cut -d '"' -f4
@@ -950,25 +953,25 @@ parse_value_from_quota()
     target_field="$1"
     target_resource="$2"
     if [ -z "$target_field" ]; then
-        echo -e "\nparse_value_from_quota() target_field parameter can't be empty." | tee -a $debug_log 1>&2
-        log_prompt
-        exit 3
+        err_code="3"
+        show_error "parse_value_from_quota() target_field parameter can't be empty." $err_code
+        exit $err_code
     elif [ -z "$target_resource" ]; then
-        echo -e "\nparse_value_from_quota() target_resource parameter can't be empty." | tee -a $debug_log 1>&2
-        log_prompt
-        exit 3
+        err_code="3"
+        show_error "parse_value_from_quota() target_resource parameter can't be empty." $err_code
+        exit $err_code
     fi
 
     if [ "$target_field" != "limits" ] && [ "$target_field" != "requests" ]; then
-        echo -e "\nparse_value_from_quota() target_field can only be either 'limits' and 'requests'." | tee -a $debug_log 1>&2
-        log_prompt
-        exit 3
+        err_code="3"
+        show_error "parse_value_from_quota() target_field can only be either 'limits' and 'requests'." $err_code
+        exit $err_code
     fi
 
     if [ "$target_resource" != "cpu" ] && [ "$target_resource" != "memory" ]; then
-        echo -e "\nparse_value_from_quota() target_field can only be either 'cpu' and 'memory'." | tee -a $debug_log 1>&2
-        log_prompt
-        exit 3
+        err_code="3"
+        show_error "parse_value_from_quota() target_field can only be either 'cpu' and 'memory'." $err_code
+        exit $err_code
     fi
 
     echo "$quotas"|grep -o "\"$target_field.$target_resource\":[^\"]*\"[^\"]*\""|cut -d '"' -f4
@@ -978,9 +981,9 @@ get_namespace_quota_from_kubecmd()
 {
     mode=$1
     if [ "$mode" = "" ]; then
-        echo -e "\nget_namespace_quota_from_kubecmd() mode parameter can't be empty." | tee -a $debug_log 1>&2
-        log_prompt
-        exit 4
+        err_code="4"
+        show_error "get_namespace_quota_from_kubecmd() mode parameter can't be empty." $err_code
+        exit $err_code
     fi
 
     quota_name="${target_namespace}.federator.ai"
@@ -1073,9 +1076,9 @@ get_controller_resources_from_kubecmd()
 {
     mode=$1
     if [ "$mode" = "" ]; then
-        echo -e "\nget_controller_resources_from_kubecmd() mode parameter can't be empty." | tee -a $debug_log 1>&2
-        log_prompt
-        exit 4
+        err_code="4"
+        show_error "get_controller_resources_from_kubecmd() mode parameter can't be empty." $err_code
+        exit $err_code
     fi
 
     show_info "Getting current controller resources..."
@@ -1159,27 +1162,30 @@ while getopts "h-:" o; do
                 log-name)
                     log_name="${!OPTIND}"; OPTIND=$(( $OPTIND + 1 ))
                     if [ "$log_name" = "" ]; then
-                        echo -e "\nMissing --${OPTARG} value"
-                        show_usage
-                        exit 6
+                        err_code="6"
+                        show_error "Missing --${OPTARG} value" $err_code
+                        exit $err_code
                     fi
                     ;;
                 terraform-path)
                     terraform_path="${!OPTIND}"; OPTIND=$(( $OPTIND + 1 ))
                     if [ "$terraform_path" = "" ]; then
-                        echo -e "\nMissing --${OPTARG} value"
-                        show_usage
-                        exit 6
+                        err_code="6"
+                        show_error "Missing --${OPTARG} value" $err_code
+                        exit $err_code
                     fi
+                    ;;
+                detail-to-stderr)
+                    detail_to_stderr="y"
                     ;;
                 help)
                     show_usage
                     exit 0
                     ;;
                 *)
-                    echo -e "\nUnknown option --${OPTARG}"
-                    show_usage
-                    exit 6
+                    err_code="6"
+                    show_error "Unknown option --${OPTARG}" $err_code
+                    exit $err_code
                     ;;
             esac;;
         h)
@@ -1187,9 +1193,9 @@ while getopts "h-:" o; do
             exit 0
             ;;
         *)
-            echo -e "\nWrong parameter."
-            show_usage
-            exit 6
+            err_code="6"
+            show_error "Wrong parameter." $err_code
+            exit $err_code
             ;;
     esac
 done
@@ -1220,8 +1226,9 @@ fi
 
 mkdir -p $file_folder
 if [ ! -d "$file_folder" ]; then
-    echo -e "\nFailed to create folder ($file_folder) to save Federator.ai planning-util files."
-    exit 6
+    err_code="6"
+    "Failed to create folder ($file_folder) to save Federator.ai planning-util files."
+    exit $err_code
 fi
 
 script_located_path=$(dirname $(readlink -f "$0"))
@@ -1230,8 +1237,9 @@ if [ "$terraform_path" = "" ]; then
 fi
 mkdir -p $terraform_path
 if [ ! -d "$terraform_path" ]; then
-    echo -e "\nFailed to create terraform folder ($terraform_path) to save Federator.ai planning-util files."
-    exit 6
+    err_code="6"
+    show_error "Failed to create terraform folder ($terraform_path) to save Federator.ai planning-util files." $err_code
+    exit $err_code
 fi
 
 current_location=`pwd`
@@ -1243,71 +1251,98 @@ echo "================================== New Round =============================
 echo "Receiving command: '$0 $@'" >> $debug_log
 echo "Receiving time: `date -u`" >> $debug_log
 
-type kubectl > /dev/null 2>&1
-if [ "$?" != "0" ];then
-    echo -e "\n\"kubectl\" command is needed for this tool." | tee -a $debug_log 1>&2
-    log_prompt
-    exit 6
-fi
-
-# Get kubeconfig path
-kubeconfig_path=$(parse_value_from_target_var "kubeconfig_path")
-
-if [ "$kubeconfig_path" = "" ]; then
-    kube_cmd="kubectl"
-else
-    kube_cmd="kubectl --kubeconfig $kubeconfig_path"
-fi
-
-$kube_cmd version|grep -q "^Server"
-if [ "$?" != "0" ];then
-    echo -e "\nFailed to get Kubernetes server info through kubectl cmd. Please login first or check your kubeconfig_path config value." | tee -a $debug_log 1>&2
-    log_prompt
-    exit 6
-fi
-
-type curl > /dev/null 2>&1
-if [ "$?" != "0" ];then
-    echo -e "\n\"curl\" command is needed for this tool." | tee -a $debug_log 1>&2
-    log_prompt
-    exit 6
-fi
-
-type base64 > /dev/null 2>&1
-if [ "$?" != "0" ];then
-    echo -e "\n\"base64\" command is needed for this tool." | tee -a $debug_log 1>&2
-    log_prompt
-    exit 6
-fi
-
 # Check target_config_info variable
 check_target_config
-
-connection_test
-if [ "$do_test_connection" = "y" ]; then
-    echo -e "\nDone. Connection test is passed." | tee -a $debug_log
-    log_prompt
-    exit 0
-fi
-
-rest_api_check_cluster_name
 
 # Get resource type
 resource_type=$(parse_value_from_target_var "resource_type")
 resource_type="$(echo "$resource_type" | tr '[:upper:]' '[:lower:]')"
 
+# Parse config info
+get_info_from_config
+
+# Get kubeconfig path
+kubeconfig_path=$(parse_value_from_target_var "kubeconfig_path")
+
+if [ "$resource_type" = "controller" ] && [ "$owner_reference_kind" = "deploymentconfig" ]; then
+    if [ "$kubeconfig_path" = "" ]; then
+        kube_cmd="oc"
+        verify_cmd="kubectl"
+    else
+        kube_cmd="oc --kubeconfig $kubeconfig_path"
+        verify_cmd="kubectl --kubeconfig $kubeconfig_path"
+    fi
+    cmd_type="oc"
+else
+    if [ "$kubeconfig_path" = "" ]; then
+        kube_cmd="kubectl"
+    else
+        kube_cmd="kubectl --kubeconfig $kubeconfig_path"
+    fi
+    cmd_type="kubectl"
+fi
+
+type $cmd_type > /dev/null 2>&1
+if [ "$?" != "0" ];then
+    err_code="6"
+    show_error "$cmd_type command is needed for this tool." $err_code
+    exit $err_code
+fi
+
+if [ "$cmd_type" = "oc" ]; then
+    # kubectl must exist too
+    type kubectl > /dev/null 2>&1
+    if [ "$?" != "0" ];then
+        err_code="6"
+        show_error "kubectl command is needed for this tool." $err_code
+        exit $err_code
+    fi
+    # Still use kubectl version to verify server connection
+    $verify_cmd version|grep -q "^Server"
+else
+    $kube_cmd version|grep -q "^Server"
+fi
+
+if [ "$?" != "0" ];then
+    err_code="6"
+    show_error "Failed to get Kubernetes server info through $cmd_type cmd. Please login first or check your kubeconfig_path config value." $err_code
+    exit $err_code
+fi
+
+type curl > /dev/null 2>&1
+if [ "$?" != "0" ];then
+    err_code="6"
+    show_error "curl command is needed for this tool." $err_code
+    exit $err_code
+fi
+
+type base64 > /dev/null 2>&1
+if [ "$?" != "0" ];then
+    err_code="6"
+    show_error "base64 command is needed for this tool." $err_code
+    exit $err_code
+fi
+
+connection_test
+if [ "$do_test_connection" = "y" ]; then
+    echo -e "{\n  \"connection_test\": \"passed\",\n  \"log_file\": \"$debug_log\"\n}" | tee -a $debug_log
+    exit 0
+fi
+
+rest_api_check_cluster_name
+
+
+
 if [ "$resource_type" = "controller" ];then
-    get_info_from_config
     get_controller_resources_from_kubecmd "before"
     get_planning_from_api
 elif [ "$resource_type" = "namespace" ]; then
-    get_info_from_config
     get_namespace_quota_from_kubecmd "before"
     get_planning_from_api
 else
-    echo -e "\nOnly support 'mode' equals controller or namespace." | tee -a $debug_log 1>&2
-    log_prompt
-    exit 3
+    err_code="3"
+    show_error "Only support resource_type equals 'controller' or 'namespace'." $err_code
+    exit $err_code
 fi
 
 if [ "$do_dry_run" = "y" ]; then
