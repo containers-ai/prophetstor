@@ -46,6 +46,7 @@ get_build_tag()
         fi
     fi
     default_tag="latest"
+    datadog_tag="datadog"
     if [ "$ECR_URL" != "" ]; then
         # Parse tag number from url
         tag_number="$(echo "$ECR_URL" |rev|cut -d':' -f1|rev)"
@@ -61,7 +62,7 @@ get_build_tag()
     do
         [ "${tag_number}" = "" ] && read -r -p "$(tput setaf 2)Please enter Federator.ai version tag [default: $default_tag]: $(tput sgr 0) " tag_number </dev/tty
         tag_number=${tag_number:-$default_tag}
-        if [ "$tag_number" = "$default_tag" ]; then
+        if [ "$tag_number" = "$default_tag" ] || [ "$tag_number" = "$datadog_tag" ]; then
             pass="y"
         else
             if [ "$(verify_tag)" = "y" ]; then
@@ -81,7 +82,7 @@ get_build_tag()
     done
 
     if [ "$tag_number" = "$default_tag" ]; then
-        # Get latest version from github
+        # Get latest version from github prophetstor project
         latest_tag=$(curl -s https://raw.githubusercontent.com/containers-ai/prophetstor/master/deploy/manifest/version.txt|cut -d '=' -f2)
         if [ "$latest_tag" = "" ]; then
             echo -e "\n$(tput setaf 1)Error! Failed to get latest build version.$(tput sgr 0)"
@@ -89,6 +90,18 @@ get_build_tag()
         else
             tag_number=$latest_tag
         fi
+    elif [ "$tag_number" = "$datadog_tag" ]; then
+        # Get latest version from github datadog project
+        latest_tag=$(curl -s https://raw.githubusercontent.com/containers-ai/datadog/master/deploy/manifest/version.txt|cut -d '=' -f2)
+        if [ "$latest_tag" = "" ]; then
+            echo -e "\n$(tput setaf 1)Error! Failed to get latest build version.$(tput sgr 0)"
+            exit 3
+        else
+            tag_number=$latest_tag
+        fi
+        # export tag for datadog launcher
+        export tag_number="$tag_number"
+        exec bash -c "curl -sS https://raw.githubusercontent.com/containers-ai/datadog/master/deploy/federatorai-launcher.sh|bash"
     fi
 
     full_tag=$(echo "$tag_number"|cut -d '-' -f1)           # Delete - and after
