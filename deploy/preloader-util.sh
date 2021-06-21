@@ -396,7 +396,13 @@ run_preloader_command()
         kubectl exec -n $install_namespace $current_preloader_pod_name -- /opt/alameda/federatorai-agent/bin/transmitter loadhistoryonly --state=true
     fi
 
-    kubectl exec -n $install_namespace $current_preloader_pod_name -- /opt/alameda/federatorai-agent/bin/transmitter enable
+    if [ "$disable_all_node_metrics" = "y" ]; then
+        echo -e "$(tput setaf 6)Disable load on empty node.$(tput sgr 0)"
+        kubectl exec -n $install_namespace $current_preloader_pod_name -- /opt/alameda/federatorai-agent/bin/transmitter enable --state=true --DisableLoadAllNodeMetrics=true
+    else
+        kubectl exec -n $install_namespace $current_preloader_pod_name -- /opt/alameda/federatorai-agent/bin/transmitter enable
+    fi
+
     if [ "$?" != "0" ]; then
         echo -e "\n$(tput setaf 1)Error in executing preloader enable command.$(tput sgr 0)"
         leave_prog
@@ -1502,7 +1508,7 @@ if [ "$#" -eq "0" ]; then
     exit
 fi
 
-while getopts "f:n:t:s:x:g:cdehikprvoba:" o; do
+while getopts "f:n:t:s:x:g:cjdehikprvoba:" o; do
     case "${o}" in
         p)
             prepare_environment="y"
@@ -1512,6 +1518,9 @@ while getopts "f:n:t:s:x:g:cdehikprvoba:" o; do
             ;;
         k)
             remove_nginx="y"
+            ;;
+        j)
+            disable_all_node_metrics="y"
             ;;
         c)
             clean_environment="y"
