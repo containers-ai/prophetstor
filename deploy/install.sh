@@ -967,7 +967,7 @@ if [ "$offline_mode_enabled" != "y" ]; then
 fi
 
 previous_alameda_namespace="`kubectl get pods --all-namespaces |grep "alameda-ai-"|awk '{print $1}'|head -1`"
-previous_tag="`kubectl get pods -n $previous_alameda_namespace -o custom-columns=NAME:.metadata.name,IMAGE:.spec.containers[*].image 2>/dev/null| grep datahub | head -1 |awk -F'/' '{print $NF}'| cut -d ':' -f2`"
+previous_tag="`kubectl get alamedaservices -n $previous_alameda_namespace -o custom-columns=VERSION:.spec.version 2>/dev/null|grep -v VERSION|head -1`"
 previous_alamedaservice="`kubectl get alamedaservice -n $previous_alameda_namespace -o custom-columns=NAME:.metadata.name 2>/dev/null|grep -v NAME|head -1`"
 
 # Read alamedaservice file option only work in fresh installation.
@@ -1129,7 +1129,7 @@ fi
 
 if [ "$need_upgrade" = "y" ];then
     source_full_tag=$(echo "$previous_tag"|cut -d '-' -f1)
-    if [ "$source_full_tag" = "dev" ]; then
+    if [[ $source_full_tag =~ ^[^v].* ]]; then
         source_tag_first_digit=""
         source_tag_middle_digit=""
         source_tag_last_digit=""
@@ -1139,11 +1139,10 @@ if [ "$need_upgrade" = "y" ];then
         source_tag_middle_digit=${source_full_tag##$source_tag_first_digit.}
         source_tag_middle_digit=${source_tag_middle_digit%%.$source_tag_last_digit}
         source_tag_first_digit=$(echo $source_tag_first_digit|cut -d 'v' -f2)
-
     fi
 
     target_full_tag=$(echo "$tag_number"|cut -d '-' -f1)
-    if [ "$target_full_tag" = "dev" ]; then
+    if [[ $target_full_tag =~ ^[^v].* ]]; then
         target_tag_first_digit=""
         target_tag_middle_digit=""
         target_tag_last_digit=""

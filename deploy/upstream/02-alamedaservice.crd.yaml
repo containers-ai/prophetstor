@@ -4813,18 +4813,6 @@ spec:
                       type: boolean
                   type: object
               type: object
-            keycode:
-              description: KeycodeSpec contains data for keycode check
-              properties:
-                codeNumber:
-                  description: CodeNumber provides user to apply keycode to Federator.ai
-                  type: string
-                signatureData:
-                  description: SignatureData provides user to apply signature data
-                  type: string
-              required:
-              - codeNumber
-              type: object
             platform:
               enum:
               - openshift3.9
@@ -4931,71 +4919,10 @@ spec:
             version:
               type: string
           required:
-          - keycode
           - version
           type: object
         status:
           description: AlamedaServiceStatus defines the observed state of AlamedaService
-          properties:
-            conditions:
-              items:
-                properties:
-                  message:
-                    type: string
-                  paused:
-                    description: Represents whether any actions on the underlaying
-                      managed objects are being performed. Only delete actions will
-                      be performed.
-                    type: boolean
-                required:
-                - message
-                - paused
-                type: object
-              type: array
-            crdversion:
-              properties:
-                crdname:
-                  type: string
-                scalerversion:
-                  type: string
-              required:
-              - crdname
-              - scalerversion
-              type: object
-            keycodeStatus:
-              description: KeycodeStatus contains current keycode information
-              properties:
-                codeNumber:
-                  description: CodeNumber represents the last keycode user successfully
-                    applied
-                  type: string
-                lastErrorMessage:
-                  description: LastErrorMessage stores the error message that happend
-                    when Federatorai-Operator handled keycode
-                  type: string
-                processing:
-                  type: boolean
-                registrationData:
-                  description: RegistrationData contains data needs to be sent for
-                    activating keycode
-                  type: string
-                state:
-                  description: State represents the state of keycode processing
-                  type: string
-                summary:
-                  description: Summary stores the summary of the keycode
-                  type: string
-              required:
-              - codeNumber
-              - lastErrorMessage
-              - registrationData
-              - state
-              - summary
-              type: object
-          required:
-          - conditions
-          - crdversion
-          - keycodeStatus
           type: object
       type: object
   version: v1alpha1
