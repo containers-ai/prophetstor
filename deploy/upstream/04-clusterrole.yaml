@@ -183,15 +183,6 @@ rules:
   verbs:
   - '*'
 - apiGroups:
-  - extensions
-  - policy
-  resourceNames:
-  - federatorai-alameda-weave-scope
-  resources:
-  - podsecuritypolicies
-  verbs:
-  - use
-- apiGroups:
   - monitoring.coreos.com
   resources:
   - prometheuses

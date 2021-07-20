@@ -76,14 +76,6 @@ rules:
   verbs:
   - '*'
 - apiGroups:
-  - extensions
-  resourceNames:
-  - federatorai-alameda-weave-scope
-  resources:
-  - podsecuritypolicies
-  verbs:
-  - use
-- apiGroups:
   - monitoring.coreos.com
   resources:
   - servicemonitors
