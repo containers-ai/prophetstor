@@ -79,15 +79,6 @@
           value: "{{ log_allowance }}"
   when: storage_type == "persistent"
 
-# Add content in alamedaservice file
-- name: Add GPU/VPA info in alamedaservice file
-  blockinfile: 
-    dest: "{{ default_yaml_files_base_path }}/{{ federatorai_version }}/{{ alamedaservice_sample_file }}" 
-    insertafter: EOF
-    marker: "## {mark} gpu/vpa"
-    block: |2
-        enableGPU: false
-
 # Add service exposures
 - name: Add service exposures info in alamedaservice file if necessary
   blockinfile: 
