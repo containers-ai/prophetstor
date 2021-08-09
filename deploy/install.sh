@@ -43,9 +43,8 @@ pods_ready()
   [[ "$#" == 0 ]] && return 0
 
   namespace="$1"
-
   kubectl get pod -n $namespace \
-    -o=jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.conditions[?(@.type=="Ready")].status}{"\t"}{.status.phase}{"\t"}{.status.reason}{"\n"}{end}' \
+    '-o=go-template={{range .items}}{{.metadata.name}}{{"\t"}}{{range .status.conditions}}{{if eq .type "Ready"}}{{.status}}{{"\t"}}{{end}}{{end}}{{.status.phase}}{{"\t"}}{{if .status.reason}}{{.status.reason}}{{end}}{{"\n"}}{{end}}' \
       | while read name status phase reason _junk; do
           if [ "$status" != "True" ]; then
             msg="Waiting for pod $name in namespace $namespace to be ready."
