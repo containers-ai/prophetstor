@@ -9,7 +9,7 @@ show_usage()
             [-p] # Prepare environment
                 Optional:
                     # Specify your local Kubernetes cluster name to install an NGINX for demo purpose.
-                    [-a cluster_name]
+                    [-a <cluster_name> -u <username>:<password>]
             [-c] # clean environment for preloader test
             [-e] # Enable preloader pod
             [-r] # Run preloader (normal mode: historical + current)
@@ -24,8 +24,8 @@ show_usage()
         For K8S:
             [-i] # Install Nginx on local Kubernetes cluster
                 Requirement:
-                    [-a cluster_name] Specify local Kubernetes cluster name
-                    [-u username:password] Server user and password (e.g. -u admin:password)
+                    [-a <cluster_name> -u <username>:<password>]
+                    Specify local Kubernetes cluster name and Federator.ai username/password
             [-k] # Remove Nginx
             [-b] # Retrigger ab test inside preloader pod
             [-g ab_traffic_ratio] # ab test traffic ratio (default:4000) [e.g., -g 4000]
@@ -1586,7 +1586,7 @@ while getopts "f:n:t:s:x:g:cjdehikprvoba:u:" o; do
             ;;
         a)
             cluster_name_specified="y"
-            a_arg=${OPTARG}
+            cluster_name="${OPTARG}"
             ;;
         # x)
         #     autoscaling_specified="y"
@@ -1661,6 +1661,13 @@ if [ "$k8s_enabled" = "true" ]; then
     fi
 fi
 
+# argument '-a' must co-exists with '-u'
+if [ "${cluster_name_specified}" = "y" -a "${auth_user_pass_specified}" != "y" ]; then
+    echo -e "\n$(tput setaf 1)Error! Missing '-u' argument.$(tput sgr 0)"
+    show_usage
+    exit 3
+fi
+
 if [ "${auth_user_pass_specified}" = "y" ]; then
     auth_username="`echo \"${u_arg}\" | xargs | tr ':' ' ' | awk '{print $1}'`"
     len="`echo \"${auth_username}:\" | wc -m`"
@@ -1668,7 +1675,6 @@ if [ "${auth_user_pass_specified}" = "y" ]; then
 fi
 
 if [ "$cluster_name_specified" = "y" ]; then
-    cluster_name="$a_arg"
     check_cluster_name_not_empty
 
     # check data source
