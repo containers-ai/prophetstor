@@ -33,11 +33,6 @@
 #   --region <space> AWS region
 #################################################################################################################
 
-is_pod_ready()
-{
-  [[ "$(kubectl get po "$1" -n "$2" -o 'jsonpath={.status.conditions[?(@.type=="Ready")].status}')" == 'True' ]]
-}
-
 pods_ready()
 {
   [[ "$#" == 0 ]] && return 0
@@ -208,7 +203,7 @@ wait_until_single_pod_become_ready()
                 return 0
             fi
         done <<< "$(kubectl get pod -n $namespace \
-        -o=jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.conditions[?(@.type=="Ready")].status}{"\t"}{.status.phase}{"\t"}{.spec.containers[*].image}{"\t"}{.status.reason}{"\n"}{end}' \
+        '-o=go-template={{range .items}}{{.metadata.name}}{{"\t"}}{{range .status.conditions}}{{if eq .type "Ready"}}{{.status}}{{"\t"}}{{end}}{{end}}{{.status.phase}}{{"\t"}}{{range .spec.containers}}{{.image}}{{end}}{{"\t"}}{{if .status.reason}}{{.status.reason}}{{end}}{{"\n"}}{{end}}' \
         | grep "$pod_name" |grep "$tag_number")"
 
         sleep "$interval"
