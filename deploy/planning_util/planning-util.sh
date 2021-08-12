@@ -563,25 +563,25 @@ check_trigger_condition_on_all_metrics()
     show_info "Verifying trigger condition..."
     if [ "$trigger_condition" != "" ]; then
         if [ "$limit_cpu_before" != "N/A" ]; then
-            compare_trigger_condition_with_difference "limit_cpu_before" "limits_pod_cpu"
+            compare_trigger_condition_with_difference "limit_cpu_before_converted" "limits_pod_cpu"
             do_limit_cpu="$trigger_result"
         else
             do_limit_cpu="y"
         fi
         if [ "$limit_memory_before" != "N/A" ]; then
-            compare_trigger_condition_with_difference "limit_memory_before" "limits_pod_memory"
+            compare_trigger_condition_with_difference "limit_memory_before_converted" "limits_pod_memory"
             do_limit_memory="$trigger_result"
         else
             do_limit_memory="y"
         fi
         if [ "$request_cpu_before" != "N/A" ]; then
-            compare_trigger_condition_with_difference "request_cpu_before" "requests_pod_cpu"
+            compare_trigger_condition_with_difference "request_cpu_before_converted" "requests_pod_cpu"
             do_request_cpu="$trigger_result"
         else
             do_request_cpu="y"
         fi
         if [ "$request_memory_before" != "N/A" ]; then
-            compare_trigger_condition_with_difference "request_memory_before" "requests_pod_memory"
+            compare_trigger_condition_with_difference "request_memory_before_converted" "requests_pod_memory"
             do_request_memory="$trigger_result"
         else
             do_request_memory="y"
@@ -919,6 +919,88 @@ merge_tfvars()
     done
 }
 
+convert_cpu_unit_to_bytes()
+{
+    unit="$1"
+    result=$(echo "$unit"|awk '
+    /^[0-9.]+$/ {
+      print $0 * 1000
+      exit
+    }
+    /^[0-9.]+m$/ {
+      match($0, /^[0-9.]+/)
+      mynumber = substr($0,RSTART,RLENGTH)
+      print mynumber
+      exit
+    }
+    // {
+      print -1
+    }
+    ')
+    echo $result
+}
+
+convert_memory_unit_to_bytes()
+{
+    unit="$1"
+    result=$(echo "$unit"|awk '
+    /^[0-9.]+e$/ {
+      print -1
+      exit
+    }
+    /^[0-9]+$/ {
+      print $0
+      exit
+    }
+    /^[0-9.]+[a-zA-Z]+$/ {
+      IGNORECASE = 1;
+      match($0, /^[0-9.]+/)
+      myunit = substr($0,RLENGTH+1,length($0))
+      mynumber = substr($0,RSTART,RLENGTH)
+      #print mynumber,myunit
+      if (myunit == "E")
+        print mynumber * 1000 * 1000 * 1000 * 1000 * 1000 * 1000
+      else if (myunit == "P")
+        print mynumber * 1000 * 1000 * 1000 * 1000 * 1000
+      else if (myunit == "T")
+        print mynumber * 1000 * 1000 * 1000 * 1000
+      else if (myunit == "G")
+        print mynumber * 1000 * 1000 * 1000
+      else if (myunit == "M")
+        print mynumber * 1000 * 1000
+      else if (myunit == "K")
+        print mynumber * 1000
+      else if (myunit == "Ei"||myunit == "EiB")
+        print mynumber * 1024 * 1024 * 1024 * 1024 * 1024 * 1024
+      else if (myunit == "Pi"||myunit == "PiB")
+        print mynumber * 1024 * 1024 * 1024 * 1024 * 1024
+      else if (myunit == "Ti"||myunit == "TiB")
+        print mynumber * 1024 * 1024 * 1024 * 1024
+      else if (myunit == "Gi"||myunit == "GiB")
+        print mynumber * 1024 * 1024 * 1024
+      else if (myunit == "Mi"||myunit == "MiB")
+        print mynumber * 1024 * 1024
+      else if (myunit == "Ki"||myunit == "KiB")
+        print mynumber * 1024
+      else
+        print -1
+      exit
+    }
+    /^[0-9.]+[eE][0-9]+$/ {
+      IGNORECASE = 1;
+      match($0, /^[0-9.]+/)
+      myexponumber = substr($0,RLENGTH+2,length($0))
+      mynumber = substr($0,RSTART,RLENGTH)
+      print mynumber * 10 ^ myexponumber
+      exit
+    }
+    // {
+      print -1
+    }
+    ')
+    echo $result
+}
+
 parse_value_from_resource()
 {
     target_field="$1"
@@ -1090,13 +1172,29 @@ get_controller_resources_from_kubecmd()
     if [ "$mode" = "before" ]; then
         show_info "----------------- Before execution ------------------"
         limit_cpu_before=$(parse_value_from_resource "limits" "cpu")
-        [ "$limit_cpu_before" = "" ] && limit_cpu_before="N/A"
+        if [ "$limit_cpu_before" = "" ]; then
+            limit_cpu_before="N/A"
+        else
+            limit_cpu_before_converted=$(convert_cpu_unit_to_bytes "$limit_cpu_before")
+        fi
         limit_memory_before=$(parse_value_from_resource "limits" "memory")
-        [ "$limit_memory_before" = "" ] && limit_memory_before="N/A"
+        if [ "$limit_memory_before" = "" ]; then
+            limit_memory_before="N/A"
+        else
+            limit_memory_before_converted=$(convert_memory_unit_to_bytes "$limit_memory_before")
+        fi
         request_cpu_before=$(parse_value_from_resource "requests" "cpu")
-        [ "$request_cpu_before" = "" ] && request_cpu_before="N/A"
+        if [ "$request_cpu_before" = "" ]; then
+            request_cpu_before="N/A"
+        else
+            request_cpu_before_converted=$(convert_cpu_unit_to_bytes "$request_cpu_before")
+        fi
         request_memory_before=$(parse_value_from_resource "requests" "memory")
-        [ "$request_memory_before" = "" ] && request_memory_before="N/A"
+        if [ "$request_memory_before" = "" ]; then
+            request_memory_before="N/A"
+        else
+            request_memory_before_converted=$(convert_memory_unit_to_bytes "$request_memory_before")
+        fi
         show_info "limits:"
         show_info "  cpu: $limit_cpu_before"
         show_info "  memory: $limit_memory_before"
@@ -1313,6 +1411,13 @@ type curl > /dev/null 2>&1
 if [ "$?" != "0" ];then
     err_code="6"
     show_error "curl command is needed for this tool." $err_code
+    exit $err_code
+fi
+
+type awk > /dev/null 2>&1
+if [ "$?" != "0" ];then
+    err_code="6"
+    show_error "awk command is needed for this tool." $err_code
     exit $err_code
 fi
 
