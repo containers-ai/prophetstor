@@ -1406,6 +1406,8 @@ enable_preloader_in_alamedaservice()
     if [ "$current_preloader_pod_name" != "" ]; then
         echo -e "\n$(tput setaf 6)Skip preloader installation due to preloader pod exists.$(tput sgr 0)"
         echo -e "Deleting preloader pod to renew the pod state..."
+        # Delete previous agent.log to prevent pump status checking error.
+        kubectl -n $install_namespace exec $current_preloader_pod_name -- rm -f /var/log/alameda/agent.log >/dev/null 2>&1
         kubectl delete pod -n $install_namespace $current_preloader_pod_name
         if [ "$?" != "0" ]; then
             echo -e "\n$(tput setaf 1)Error in deleting preloader pod.$(tput sgr 0)"
