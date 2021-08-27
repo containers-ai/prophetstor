@@ -1027,7 +1027,7 @@ parse_value_from_resource()
         exit $err_code
     fi
 
-    echo "$resources"|grep -o "\"$target_field\":[^{]*{[^}]*}"|grep -o "\"$target_resource\":[^\"]*\"[^\"]*\""|cut -d '"' -f4
+    echo "$resources"|grep -o "\"$target_field\":[^{]*{[^}]*}"|grep -o "\"$target_resource\":[^\"]*\"[^\"]*\""|cut -d '"' -f4|head -1
 }
 
 parse_value_from_quota()
