@@ -952,8 +952,7 @@ convert_memory_unit_to_bytes()
       print $0
       exit
     }
-    /^[0-9.]+[a-zA-Z]+$/ {
-      IGNORECASE = 1;
+    /^[0-9.]+[EPTGMkKi]+$/ {
       match($0, /^[0-9.]+/)
       myunit = substr($0,RLENGTH+1,length($0))
       mynumber = substr($0,RSTART,RLENGTH)
@@ -968,7 +967,7 @@ convert_memory_unit_to_bytes()
         print mynumber * 1000 * 1000 * 1000
       else if (myunit == "M")
         print mynumber * 1000 * 1000
-      else if (myunit == "K")
+      else if (myunit == "k")
         print mynumber * 1000
       else if (myunit == "Ei"||myunit == "EiB")
         print mynumber * 1024 * 1024 * 1024 * 1024 * 1024 * 1024
@@ -992,6 +991,13 @@ convert_memory_unit_to_bytes()
       myexponumber = substr($0,RLENGTH+2,length($0))
       mynumber = substr($0,RSTART,RLENGTH)
       print mynumber * 10 ^ myexponumber
+      exit
+    }
+    /^[0-9.]+[m]+$/ {
+      match($0, /^[0-9.]+/)
+      myunit = substr($0,RLENGTH+1,length($0))
+      mynumber = substr($0,RSTART,RLENGTH)
+      printf "%.3f",mynumber /1000
       exit
     }
     // {
