@@ -1,0 +1,254 @@
+# Download alamedaservice file
+- name: Download alamedaservice file
+  get_url:
+    url: "https://raw.githubusercontent.com/containers-ai/prophetstor/{{ federatorai_version }}/deploy/example/{{ alamedaservice_sample_file }}"
+    dest: "{{ default_yaml_files_base_path }}/{{ federatorai_version }}/{{ alamedaservice_sample_file }}"
+    mode: 0755
+    force: yes
+
+# Download cr files
+- name: Download cr files
+  get_url:
+    url: "https://raw.githubusercontent.com/containers-ai/prophetstor/{{ federatorai_version }}/deploy/example/{{ item }}"
+    dest: "{{ default_yaml_files_base_path }}/{{ federatorai_version }}/{{ item }}"
+    mode: 0755
+    force: yes
+  loop: "{{ cr_files }}"
+
+# Download cr files
+- name: Download alamedascaler files
+  get_url:
+    url: "https://raw.githubusercontent.com/containers-ai/prophetstor/{{ federatorai_version }}/deploy/example/{{ item.pool }}/{{ item.name }}"
+    dest: "{{ default_yaml_files_base_path }}/{{ federatorai_version }}/{{ item.dest }}"
+    mode: 0755
+    force: yes
+  loop:
+    - { pool: 'kafka', name: 'alamedascaler.yaml', dest: 'alamedascaler_kafka.yaml' }
+    - { pool: 'nginx', name: 'alamedascaler.yaml', dest: 'alamedascaler_nginx.yaml' }
+    - { pool: 'redis', name: 'alamedascaler.yaml', dest: 'alamedascaler_generic.yaml' }
+
+# Replace imagelocation info in alamedaservice file
+- name: Replace image location in alamedaservice file
+  replace:
+    dest: "{{ default_yaml_files_base_path }}/{{ federatorai_version }}/{{ alamedaservice_sample_file }}"
+    regexp: "imageLocation: .*"
+    replace: "imageLocation: {{ image_url_prefix }}"
+  when: (enable_private_repo == "y") and (image_url_prefix != "")
+
+# Replace version info in alamedaservice file
+- name: Replace version info in alamedaservice file
+  replace: 
+    dest: "{{ default_yaml_files_base_path }}/{{ federatorai_version }}/{{ alamedaservice_sample_file }}" 
+    regexp: "version: latest"
+    replace: "version: {{ federatorai_version }}"
+
+# Replace ns info in alamedaservice file
+- name: Replace namespace in alamedaservice file
+  replace: 
+    dest: "{{ default_yaml_files_base_path }}/{{ federatorai_version }}/{{ alamedaservice_sample_file }}" 
+    regexp: "namespace: federatorai" 
+    replace: "namespace: {{ installed_namespace }}"
+
+# Remove content in alamedaservice file
+- name: Remove content in alamedaservice file
+  shell: "sed -i '/- usage:/,+10d' {{ default_yaml_files_base_path }}/{{ federatorai_version }}/{{ alamedaservice_sample_file }}"
+  args:
+    warn: no
+  when: storage_type == "persistent"
+
+# Calculate log allowance
+- name: Get log_allowance
+  set_fact:
+     log_allowance: "{{ (log_storage_size *1024*1024*1024*90/100)|int|abs }}"
+
+# Add content in alamedaservice file
+- name: Add pvc storgae info in alamedaservice file if necessary
+  blockinfile: 
+    dest: "{{ default_yaml_files_base_path }}/{{ federatorai_version }}/{{ alamedaservice_sample_file }}" 
+    insertafter: "  storages:"
+    marker: "## {mark} pvc info"
+    block: |2
+          - usage: log
+            type: pvc
+            size: {{ log_storage_size }}Gi
+            class: {{ storage_class_name }}
+            accessModes:
+              - ReadWriteOnce
+        env:
+        - name: FEDERATORAI_MAXIMUM_LOG_SIZE
+          value: "{{ log_allowance }}"
+  when: storage_type == "persistent"
+
+# Add service exposures
+- name: Add service exposures info in alamedaservice file if necessary
+  blockinfile: 
+    dest: "{{ default_yaml_files_base_path }}/{{ federatorai_version }}/{{ alamedaservice_sample_file }}" 
+    marker: "## {mark} exposures info"
+    block: |2
+        serviceExposures:
+          - name: federatorai-dashboard-frontend
+            nodePort:
+              ports:
+                - nodePort: {{ dashboard_frontend_node_port }}
+                  port: 9001
+            type: NodePort
+          - name: federatorai-rest
+            nodePort:
+              ports:
+                - nodePort: {{ rest_api_node_port }}
+                  port: 5056
+            type: NodePort
+  when: (openshift_env == "n") and (expose_dashboard_and_rest_api_services == "y")
+
+# Add limits/requests of pods
+- name: Add resource requirements info in alamedaservice file if necessary
+  blockinfile: 
+    dest: "{{ default_yaml_files_base_path }}/{{ federatorai_version }}/{{ alamedaservice_sample_file }}" 
+    marker: "## {mark} resource requirements info"
+    block: |2
+        resources:
+          limits:
+            cpu: 4000m
+            memory: 8000Mi
+          requests:
+            cpu: 100m
+            memory: 100Mi
+        alamedaDatahub:
+          resources:
+            requests:
+              cpu: 100m
+              memory: 500Mi
+        alamedaNotifier:
+          resources:
+            requests:
+              cpu: 50m
+              memory: 100Mi
+        alamedaOperator:
+          resources:
+            requests:
+              cpu: 100m
+              memory: 250Mi
+        alamedaRabbitMQ:
+          resources:
+            requests:
+              cpu: 100m
+              memory: 250Mi
+        federatoraiRest:
+          resources:
+            requests:
+              cpu: 50m
+              memory: 100Mi
+  when: (enable_resource_requirement == "y")
+
+- name: Add influxdb and alamedaAi resource requirements info in alamedaservice file if necessary
+  blockinfile: 
+    dest: "{{ default_yaml_files_base_path }}/{{ federatorai_version }}/{{ alamedaservice_sample_file }}" 
+    marker: "## {mark} influxdb (persistent) resource requirements info"
+    block: |2
+        alamedaInfluxdb:
+          resources:
+            requests:
+              cpu: 500m
+              memory: 500Mi
+          storages:
+          - usage: data
+            type: pvc
+            size: {{ influxdb_storage_size }}Gi
+            class: {{ storage_class_name }}
+            accessModes:
+              - ReadWriteOnce
+        alamedaAi:
+          resources:
+            limits:
+              cpu: 8000m
+              memory: 8000Mi
+            requests:
+              cpu: 2000m
+              memory: 500Mi
+          storages:
+          - usage: data
+            type: pvc
+            size: {{ ai_engine_size }}Gi
+            class: {{ storage_class_name }}
+            accessModes:
+              - ReadWriteOnce
+        fedemeterInfluxdb:
+          resources:
+            requests:
+              cpu: 500m
+              memory: 500Mi
+          storages:
+          - usage: data
+            type: pvc
+            size: 10Gi
+            class: {{ storage_class_name }}
+            accessModes:
+              - ReadWriteOnce
+  when: (enable_resource_requirement == "y") and (storage_type == "persistent")
+
+- name: Add influxdb and alamedaAi resource requirements info in alamedaservice file if necessary
+  blockinfile: 
+    dest: "{{ default_yaml_files_base_path }}/{{ federatorai_version }}/{{ alamedaservice_sample_file }}" 
+    marker: "## {mark} influxdb (ephemeral) resource requirements info"
+    block: |2
+        alamedaInfluxdb:
+          resources:
+            requests:
+              cpu: 500m
+              memory: 500Mi
+        alamedaAi:
+          resources:
+            limits:
+              cpu: 8000m
+              memory: 8000Mi
+            requests:
+              cpu: 2000m
+              memory: 500Mi
+        fedemeterInfluxdb:
+          resources:
+            requests:
+              cpu: 500m
+              memory: 500Mi
+  when: (enable_resource_requirement == "y") and (storage_type == "ephemeral")
+
+- name: Add influxdb and alamedaAi resource requirements info in alamedaservice file if necessary
+  blockinfile: 
+    dest: "{{ default_yaml_files_base_path }}/{{ federatorai_version }}/{{ alamedaservice_sample_file }}" 
+    marker: "## {mark} influxdb info"
+    block: |2
+        alamedaInfluxdb:
+          storages:
+          - usage: data
+            type: pvc
+            size: {{ influxdb_storage_size }}Gi
+            class: {{ storage_class_name }}
+            accessModes:
+              - ReadWriteOnce
+        alamedaAi:
+          storages:
+          - usage: data
+            type: pvc
+            size: {{ ai_engine_size }}Gi
+            class: {{ storage_class_name }}
+            accessModes:
+              - ReadWriteOnce
+        fedemeterInfluxdb:
+          storages:
+          - usage: data
+            type: pvc
+            size: 10Gi
+            class: {{ storage_class_name }}
+            accessModes:
+              - ReadWriteOnce
+  when: (enable_resource_requirement != "y") and (storage_type == "persistent")
+
+# Apply yamls
+- name: Apply alamedaservice yaml
+  community.kubernetes.k8s:
+    state: present
+    src: "{{ default_yaml_files_base_path }}/{{ federatorai_version }}/{{ alamedaservice_sample_file }}" 
+
+- name: Check Federator.ai pods become ready
+  vars:
+      pod_number: 16
+  include: check_pods_status.yaml

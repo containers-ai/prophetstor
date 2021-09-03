@@ -1,0 +1,22 @@
+{
+    "rest_api_url": "",
+    "login_account": " # required # Federator.ai GUI login account",
+    "login_password": " # required # Federator.ai GUI login password",
+    "resource_type": " # required # controller|namespace",
+    "iac_command": " # required # script|terraform",
+    "kubeconfig_path": " # optional # kubeconfig path",
+    "planning_target": {
+        "cluster_name": " # required",
+        "namespace": " # required if resource_type=controller",
+        "time_interval": " # required # daily|weekly|monthly",
+        "resource_name": " # required",
+        "kind": " # required if resource_type=controller # StatefulSet|Deployment|DeploymentConfig",
+        "min_cpu": " # optional # mCore",
+        "max_cpu": " # optional # mCore",
+        "cpu_headroom": " # optional # 200|20% # Absolute value (mCore) e.g. 200 or Percentage e.g. 20%",
+        "min_memory": " # optional # byte",
+        "max_memory": " # optional # byte",
+        "memory_headroom": " # optional # 209715200|20% # Absolute value (byte) e.g. 209715200 or Percentage e.g. 20%",
+        "trigger_condition": " # optional # 20 # 20 means 20%"
+    }
+}

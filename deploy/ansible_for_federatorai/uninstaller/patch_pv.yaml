@@ -1,0 +1,30 @@
+- name: Get all persistent volumes
+  community.kubernetes.k8s_info:
+    kind: PersistentVolume
+  register: pv_all_list
+
+- name: Parse Federator.ai PV list
+  set_fact:
+    pv_list: "{{ pv_all_list |to_json | from_json| json_query(query) }}"
+  vars:
+    query: "resources[?contains(spec.claimRef.namespace, '{{ previous_alameda_namespace }}')].metadata.name"
+
+- name: Set PV policy var
+  set_fact:
+    pv_policy: "{% if preserve_pv == 'y' %}{{ 'Retain' }}{% else %}{{ 'Delete' }}{% endif %}"
+
+- debug:
+    var: pv_list
+
+- name: Patch pv reclaim policy of every Federator.ai PV
+  community.kubernetes.k8s:
+    merge_type: merge
+    definition:
+      apiVersion: v1
+      kind: PersistentVolume
+      metadata:
+        name: "{{ item }}"
+        namespace: "{{ previous_alameda_namespace }}"
+      spec: 
+        persistentVolumeReclaimPolicy: "{{ pv_policy }}"
+  loop: "{{ pv_list }}"

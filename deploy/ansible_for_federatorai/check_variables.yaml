@@ -1,0 +1,65 @@
+# Check all mandatory variables are not empty
+
+- name: Check all mandatory variables are not empty
+  fail: msg="Certain variable inside user_variable.yaml {{ item }} is empty"
+  when: item == ""
+  loop:
+  # user variables
+    - "{{ federatorai_version }}"
+    - "{{ installed_namespace }}"
+    - "{{ openshift_env }}"
+    - "{{ enable_resource_requirement }}"
+    - "{{ enable_private_repo }}"
+    - "{{ storage_type }}"
+    # - "{{ need_update_secret }}"
+    # - "{{ apply_cluster_alamedascaler }}"
+  # default variables
+    - "{{ default_yaml_files_base_path }}"
+    - "{{ alamedaservice_sample_file }}"
+    - "{{ cr_files }}"
+    - "{{ alamedascaler_sample_file }}"
+    - "{{ scaler_pool }}"
+    - "{{ rest_api_node_port }}"
+    - "{{ dashboard_frontend_node_port }}"
+    - "{{ data_adapter_secret_name }}"
+    - "{{ data_adapter_deploy_name }}"
+    - "{{ default_cluster_alamedascaler_name }}"
+
+# Check if enable_private_repo == "y"
+- name: Check image_url_prefix variable
+  fail: msg="image_url_prefix variable inside user_variable.yaml is empty"
+  when: enable_private_repo == "y" and item == ""
+  loop:
+    - "{{ image_url_prefix }}"
+
+# Check if storage_type == "persistent"
+- name: Check persistent variables
+  fail: msg="persistent variable inside user_variable.yaml is empty"
+  when: storage_type == "persistent" and item == ""
+  loop:
+    - "{{ log_storage_size }}"
+    - "{{ ai_engine_size }}"
+    - "{{ influxdb_storage_size }}"
+    - "{{ storage_class_name }}"
+
+# Check if openshift_env == "n"
+- name: Check expose variable
+  fail: msg="expose variable inside user_variable.yaml is empty"
+  when: openshift_env == "n" and item == ""
+  loop:
+    - "{{ expose_dashboard_and_rest_api_services }}"
+
+# Check if need_update_secret == "y"
+# - name: Check datadog secrets
+#   fail: msg="datadog secret variable inside user_variable.yaml is empty"
+#   when: need_update_secret == "y" and item == ""
+#   loop:
+#     - "{{ datadog_api_key }}"
+#     - "{{ datadog_application_key }}"
+
+# Check if apply_cluster_alamedascaler == "y"
+# - name: Check cluster name variable
+#   fail: msg="cluster name variable inside user_variable.yaml is empty"
+#   when: apply_cluster_alamedascaler == "y" and item == ""
+#   loop:
+#     - "{{ dd_cluster_name }}"

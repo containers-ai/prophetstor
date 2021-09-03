@@ -1,0 +1,12 @@
+- name: Waiting for Federator.ai namespace get delete
+  community.kubernetes.k8s_info:
+    kind: Namespace
+    name: "{{ previous_alameda_namespace }}"
+  register: ready_list
+  until: ready_list |to_json | from_json| json_query("resources[*]")|length == 0
+  retries: 60
+  delay: 30
+
+- name: Display namespace resources
+  debug:
+    var: "ready_list"

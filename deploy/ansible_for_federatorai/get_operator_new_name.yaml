@@ -1,0 +1,35 @@
+- name: Getting new federatorai operator new name during upgrade.
+  block:
+  - name: Increment the retry count (Max 30)
+    set_fact:
+      retry_count: "{{ 1 if retry_count is undefined else retry_count | int + 1 }}"
+  - debug:
+      msg: "Round {{ retry_count }}"
+  - name: kubernetes get operator pod info
+    community.kubernetes.k8s_info:
+      kind: Pod
+    register: pod_list
+  - name: Parse operator pod info
+    set_fact:
+      previous_operator_pod: "{{ pod_list |to_json | from_json| json_query(query) }}"
+    vars:
+      query: "resources[?contains(spec.containers[0].image, 'federatorai-operator-ubi:{{ federatorai_version }}')].metadata.name"
+  - name: Check and set previous_operator_pod variable
+    set_fact:
+      previous_operator_pod: "{% if previous_operator_pod | length > 0 %}{{ previous_operator_pod[0] }}{% else %}{{ '' }}{% endif %}"
+    failed_when: previous_operator_pod == ""
+
+  rescue:
+    - fail:
+        msg: Maximum 30 retries of getting federatorai operator new name reached. Failed.
+      when: retry_count | int == 31
+
+    - debug:
+        msg: "Failed to get new federatorai operator name, sleep and retry."
+
+    - name: Sleep for 30 seconds and retry
+      wait_for:
+        timeout: 30
+      delegate_to: localhost
+
+    - include_tasks: get_operator_new_name.yaml

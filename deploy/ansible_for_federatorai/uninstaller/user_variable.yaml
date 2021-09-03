@@ -1,0 +1,5 @@
+###### ephemeral or persistent
+storage_type: "" # ephemeral/persistent
+
+###### Below info will be used when storage_type is persistent
+preserve_pv: "y"

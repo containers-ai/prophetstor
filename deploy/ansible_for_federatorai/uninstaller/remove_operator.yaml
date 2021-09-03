@@ -1,0 +1,91 @@
+# Get operator file list
+- name: Get operator file list
+  uri:
+    url: "https://api.github.com/repos/containers-ai/prophetstor/contents/deploy/upstream?ref={{ federatorai_version }}"
+    method: GET
+    return_content: yes
+  register: operator_result
+
+- set_fact:
+    operator_list: []
+
+- name: Create operator yamls file list
+  set_fact:
+    operator_list: "{{ operator_list+ 
+            [
+              item
+            ] 
+        }}"
+  ignore_errors: yes
+  loop: "{{ operator_result | json_query('json[*].name') }}"
+
+- name: debug
+  debug: msg={{ operator_list }}
+
+# Clean up old contents inside version folder
+- name: Find old contents inside version folder
+  find:
+    paths: "{{ default_yaml_files_base_path }}/{{ federatorai_version }}"
+    patterns: "*.yaml"
+  register: files_to_delete
+
+- name: Clean up files inside version folder
+  file:
+    path: "{{ item.path }}"
+    state: absent
+  with_items: "{{ files_to_delete.files }}"
+
+# Create version folder
+- name: Create version folder
+  file:
+    path: "{{ default_yaml_files_base_path }}/{{ federatorai_version }}"
+    state: directory
+
+# Download all files
+- name: Download all yamls
+  get_url:
+    url: "https://raw.githubusercontent.com/containers-ai/prophetstor/{{ federatorai_version }}/deploy/upstream/{{ item }}"
+    dest: "{{ default_yaml_files_base_path }}/{{ federatorai_version }}/{{ item }}"
+    mode: 0755
+    force: yes
+  loop: "{{ operator_list }}"
+
+# Replace namespace in 00 yaml
+- name: Find 00 files
+  find:
+    paths: "{{ default_yaml_files_base_path }}/{{ federatorai_version }}"
+    patterns: "^00-.*.yaml$"
+    file_type: "file"
+    use_regex: yes
+  register: yaml_0_name
+- name: Replace ns in 00 yaml
+  replace: 
+    path: "{{ yaml_0_name.files[0].path }}"
+    regexp: "name: federatorai" 
+    replace: "name: {{ previous_alameda_namespace }}"
+
+# Replace namespace in all yamls
+- name: Find all yaml files
+  find:
+    paths: "{{ default_yaml_files_base_path }}/{{ federatorai_version }}"
+    patterns: ".*.yaml$"
+    file_type: "file"
+    use_regex: yes
+  register: yaml_all_names
+- name: Replace ns in all yamls
+  replace: 
+    path: "{{ item.path }}"
+    regexp: "namespace: federatorai" 
+    replace: "namespace: {{ previous_alameda_namespace }}"
+  loop: "{{ yaml_all_names.files }}"
+
+# Delete yamls
+
+- name: Delete operator yamls
+  community.kubernetes.k8s:
+    state: absent
+    src: "{{ item.path }}"
+  loop: "{{ yaml_all_names.files| sort(attribute='path',reverse=true) }}"
+
+- name: Check Federator.ai namespace status
+  include: check_ns_status.yaml

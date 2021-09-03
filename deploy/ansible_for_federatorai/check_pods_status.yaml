@@ -1,0 +1,21 @@
+# - name: Search for all Pods
+#   community.kubernetes.k8s_info:
+#     kind: Pod
+#     namespace: "{{ installed_namespace }}"
+#     # delay: 2
+#     # retries: 50
+#   register: output_info
+#     #until: output_info.resources | json_query('[*].status.conditions[?reason==`NewReplicaSetAvailable`][].status') | select ('match','True') | list | length == 1
+
+
+- name: Waiting for Federator.ai pod(s) become ready
+  community.kubernetes.k8s_info:
+    kind: Pod
+    namespace: "{{ installed_namespace }}"
+  register: ready_list
+  until: ready_list |to_json | from_json| json_query("resources[?status.containerStatuses[0].ready == `true`].status.containerStatuses[0].ready")|length > pod_number and ready_list |to_json | from_json| json_query("resources[?status.containerStatuses[0].ready == `false`].status.containerStatuses[0].ready")|length == 0
+  retries: 60
+  delay: 30
+
+- debug:
+    var: "ready_list |to_json | from_json| json_query('{\"pod_name\": resources[*].metadata.name, \"ready\": resources[*].status.containerStatuses[0].ready}')"

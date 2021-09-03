@@ -1,0 +1,37 @@
+# Check if previous Federator.ai installed
+- name: Get Pods info (also connection test)
+  community.kubernetes.k8s_info:
+    kind: Pod
+  register: pod_list
+
+- name: Parse pods info
+  set_fact:
+    previous_alameda_namespace: "{{ pod_list |to_json | from_json| json_query(\"resources[?contains(metadata.name, 'alameda-ai-')].metadata.namespace\") }}"
+
+- name: Set previous_alameda_namespace variable
+  set_fact:
+    previous_alameda_namespace: "{% if previous_alameda_namespace | length > 0 %}{{ previous_alameda_namespace[0] }}{% else %}{{ '' }}{% endif %}"
+
+- name: Debug - previous_alameda_namespace
+  debug:
+    var: previous_alameda_namespace
+
+- name: Get previous installed Federator.ai alamedaservice info
+  community.kubernetes.k8s_info:
+    kind: AlamedaService
+    api_version: federatorai.containers.ai/v1alpha1
+    namespace: "{{ previous_alameda_namespace }}"
+  register: alamedaservice_list
+  when: previous_alameda_namespace != ""
+
+- name: Parse alamedaservice info
+  set_fact:
+    previous_alamedaservice_name: "{{ alamedaservice_list |to_json | from_json| json_query(\"resources[?contains(kind, 'AlamedaService')].metadata.name\") }}"
+
+- name: Set previous_alamedaservice_name variable
+  set_fact:
+    previous_alamedaservice_name: "{% if previous_alamedaservice_name | length > 0 %}{{ previous_alamedaservice_name[0] }}{% else %}{{ '' }}{% endif %}"
+
+- name: Debug - previous_alamedaservice_name
+  debug:
+    var: previous_alamedaservice_name

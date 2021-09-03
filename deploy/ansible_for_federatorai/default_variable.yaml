@@ -1,0 +1,20 @@
+default_yaml_files_base_path: /opt/federatorai/ansible/installation
+alamedaservice_sample_file: "alamedaservice_sample.yaml"
+cr_files:
+ - "alamedadetection.yaml"
+ - "alamedanotificationchannel.yaml"
+ - "alamedanotificationtopic.yaml"
+
+alamedascaler_sample_file: "alamedascaler.yaml"
+scaler_pool:
+ - "kafka"
+ - "nginx"
+ - "redis"
+
+rest_api_node_port: "31011"
+dashboard_frontend_node_port: "31012"
+
+data_adapter_secret_name: "federatorai-data-adapter-secret"
+data_adapter_deploy_name: "federatorai-data-adapter"
+
+default_cluster_alamedascaler_name: "clusterscaler"

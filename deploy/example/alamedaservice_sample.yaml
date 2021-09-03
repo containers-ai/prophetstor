@@ -1,0 +1,17 @@
+apiVersion: federatorai.containers.ai/v1alpha1
+kind: AlamedaService
+metadata:
+  name: my-alamedaservice
+  namespace: federatorai
+spec:
+  version: latest               ## for Federator.ai components
+  imageLocation: quay.io/prophetstor
+  storages:                     ## see following details for where it is used in each component
+    - usage: log                ## storage setting for log
+      type: ephemeral           ## ephemeral means emptyDir{}
+    - usage: data
+      type: ephemeral
+#    - usage: data               ## storage setting for data
+#      type: pvc                 ## pvc means PersistentVolumeClaim
+#      size: 10Gi                ## mandatory when type=pvc
+#      class: "normal"           ## mandatory when type=pvc

@@ -1,0 +1,24 @@
+# Check if previous Federator.ai installed
+- name: Patch alamedaservice
+  community.kubernetes.k8s:
+    merge_type: merge
+    definition:
+      apiVersion: federatorai.containers.ai/v1alpha1
+      kind: AlamedaService
+      metadata:
+        name: "{{ previous_alamedaservice_name }}"
+        namespace: "{{ previous_alameda_namespace }}"
+      spec: 
+        version: "{{ federatorai_version }}"
+
+- name: Sleep for 60 seconds after patch version
+  wait_for:
+    timeout: 60
+  delegate_to: localhost
+
+- name: Check Federator.ai operator pod become ready
+  vars:
+      pod_number: 16
+  include: check_pods_status.yaml
+
+        

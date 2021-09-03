@@ -1,0 +1,32 @@
+###########################
+# For Ansible Control Node
+###########################
+
+Prerequisite
+1. Install Ansible
+https://docs.ansible.com/ansible/latest/installation_guide/intro_installation.html
+
+2. Install collection "community.kubernetes"
+root@node1740:~# ansible-galaxy collection install community.kubernetes
+
+3. Install python & pip
+https://www.python.org/downloads/
+
+4. Install OpenShift python client
+root@node1740:~# pip3 install openshift
+
+5. Download Ansible playbook for Federator.ai
+
+6. Modify user_variable.yaml file for customizing needed info.
+
+###########################
+# Run Federator.ai playbook
+###########################
+
+1. Clone project
+2. Get into Ansible playbook folder
+root@node1740:~# cd deploy/ansible_for_federatorai
+3. Export K8S_AUTH_KUBECONFIG to specify kubeconfig file path for Ansible collection (community.kubernetes) to use.
+root@node1740:~# export K8S_AUTH_KUBECONFIG=/root/.kube/config.135
+4. Run Ansible playbook
+root@node1740:~/ansible_for_federatorai# ansible-playbook federtorai_installation.yaml

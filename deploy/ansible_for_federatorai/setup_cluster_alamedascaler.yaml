@@ -1,0 +1,11 @@
+- name: Add alamedascaler for monitoring cluster only
+  community.kubernetes.k8s:
+    definition:
+      apiVersion: autoscaling.containers.ai/v1alpha2
+      kind: AlamedaScaler
+      metadata:
+        name: "{{ default_cluster_alamedascaler_name }}"
+        namespace: "{{ installed_namespace }}"
+      spec:
+        clusterName: "{{ dd_cluster_name }}"
+  when: ( apply_cluster_alamedascaler == "y" ) and ( dd_cluster_name != "" )
