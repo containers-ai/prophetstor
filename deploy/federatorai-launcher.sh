@@ -310,7 +310,16 @@ download_files()
 
     # Copy operator yamls
     mkdir -p $operator_folder
-    cp $tgz_folder_name/deploy/upstream/* $operator_folder
+    if [ "$tag_first_digit" -ge "4" ] && [ "$tag_middle_digit" -ge "7" ]; then
+        # >= 4.7
+        # copy upstream-1.15 and upstream
+        mkdir -p $operator_folder/upstream
+        cp $tgz_folder_name/deploy/upstream/* $operator_folder/upstream
+        mkdir -p $operator_folder/upstream-1.15
+        cp $tgz_folder_name/deploy/upstream-1.15/* $operator_folder/upstream-1.15
+    else
+        cp $tgz_folder_name/deploy/upstream/* $operator_folder
+    fi
 
     # Clean up
     rm -rf $tgz_folder_name
