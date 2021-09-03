@@ -1154,6 +1154,15 @@ if [ "$need_upgrade" = "y" ];then
     fi
 fi
 
+default_minimal_k8s_version_minor="16"
+k8s_version=$(kubectl version --short | grep -Po 'Server Version: v\K[0-9]+.[0-9]+')
+k8s_version_major=$(echo $k8s_version | cut -d. -f1)
+k8s_version_minor=$(echo $k8s_version | cut -d. -f2)
+upstream_folder_name="upstream"
+if [ "$k8s_version_major" = "1" ] && [ $k8s_version_minor -gt 10 ] && \
+    [ $k8s_version_minor -lt $default_minimal_k8s_version_minor ]; then
+    upstream_folder_name="upstream-1.15"
+fi
 if [ "$offline_mode_enabled" != "y" ]; then
     echo -e "\n$(tput setaf 2)Downloading ${tag_number} tgz file ...$(tput sgr 0)"
     tgz_name="${tag_number}.tar.gz"
@@ -1175,16 +1184,7 @@ if [ "$offline_mode_enabled" != "y" ]; then
         exit 3
     fi
 
-    default_minimal_k8s_version_minor="16"
-    k8s_version=$(kubectl version --short | grep -Po 'Server Version: v\K[0-9]+.[0-9]+')
-    k8s_version_major=$(echo $k8s_version | cut -d. -f1)
-    k8s_version_minor=$(echo $k8s_version | cut -d. -f2)
-    if [ "$k8s_version_major" = "1" ] && [ $k8s_version_minor -gt 10 ] && \
-        [ $k8s_version_minor -lt $default_minimal_k8s_version_minor ]; then
-        cp $tgz_folder_name/deploy/upstream-1.15/* .
-    else
-        cp $tgz_folder_name/deploy/upstream/* .
-    fi
+    cp $tgz_folder_name/deploy/$upstream_folder_name/* .
 
     if [[ "`ls [00-11]*.yaml 2>/dev/null|wc -l`" -lt "12" ]]; then
         echo -e "\n$(tput setaf 1)Abort, operator files number is less than 12.$(tput sgr 0)"
@@ -1195,12 +1195,12 @@ else
     # Offline Mode
     # Copy Federator.ai operator 00-11 yamls
     echo "Copying Federator.ai operator yamls ..."
-    if [[ "`ls ${script_located_path}/../operator/[0-9]*yaml 2>/dev/null|wc -l`" -lt "12" ]]; then
+    if [[ "`ls ${script_located_path}/../operator/$upstream_folder_name/[0-9]*yaml 2>/dev/null|wc -l`" -lt "12" ]]; then
         echo -e "\n$(tput setaf 1)Error! Failed to locate all Federator.ai operator yaml files$(tput sgr 0)"
         echo "Please make sure you extract the offline install package and execute install.sh under scripts folder  "
         exit 1
     fi
-    cp ${script_located_path}/../operator/[0-9]*yaml .
+    cp ${script_located_path}/../operator/$upstream_folder_name/[0-9]*yaml .
     echo "Done"
 fi
 
