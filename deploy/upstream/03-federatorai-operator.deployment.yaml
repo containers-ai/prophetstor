@@ -9,10 +9,7 @@ metadata:
 spec:
   replicas: 1
   strategy:
-    rollingUpdate:
-      maxSurge: 1
-      maxUnavailable: 0
-    type: RollingUpdate
+    type: Recreate
   selector:
     matchLabels:
       name: federatorai-operator
@@ -74,7 +71,7 @@ spec:
             - name: DISABLE_OPERAND_RESOURCE_PROTECTION
               value: "false"
             - name: DEFAULT_KEYCODE
-              value: "HIG3J-LCK2F-HOLHE-7G6HZ-TN3LW-E453A"
+              value: "FFSFM-RGBTF-F7I7O-UFKPM-LL6VI-QVFNQ"
           readinessProbe:
             failureThreshold: 20
             httpGet:

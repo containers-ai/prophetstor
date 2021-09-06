@@ -33,19 +33,13 @@
 #   --region <space> AWS region
 #################################################################################################################
 
-is_pod_ready()
-{
-  [[ "$(kubectl get po "$1" -n "$2" -o 'jsonpath={.status.conditions[?(@.type=="Ready")].status}')" == 'True' ]]
-}
-
 pods_ready()
 {
   [[ "$#" == 0 ]] && return 0
 
   namespace="$1"
-
   kubectl get pod -n $namespace \
-    -o=jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.conditions[?(@.type=="Ready")].status}{"\t"}{.status.phase}{"\t"}{.status.reason}{"\n"}{end}' \
+    '-o=go-template={{range .items}}{{.metadata.name}}{{"\t"}}{{range .status.conditions}}{{if eq .type "Ready"}}{{.status}}{{"\t"}}{{end}}{{end}}{{.status.phase}}{{"\t"}}{{if .status.reason}}{{.status.reason}}{{end}}{{"\n"}}{{end}}' \
       | while read name status phase reason _junk; do
           if [ "$status" != "True" ]; then
             msg="Waiting for pod $name in namespace $namespace to be ready."
@@ -209,7 +203,7 @@ wait_until_single_pod_become_ready()
                 return 0
             fi
         done <<< "$(kubectl get pod -n $namespace \
-        -o=jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.conditions[?(@.type=="Ready")].status}{"\t"}{.status.phase}{"\t"}{.spec.containers[*].image}{"\t"}{.status.reason}{"\n"}{end}' \
+        '-o=go-template={{range .items}}{{.metadata.name}}{{"\t"}}{{range .status.conditions}}{{if eq .type "Ready"}}{{.status}}{{"\t"}}{{end}}{{end}}{{.status.phase}}{{"\t"}}{{range .spec.containers}}{{.image}}{{end}}{{"\t"}}{{if .status.reason}}{{.status.reason}}{{end}}{{"\n"}}{{end}}' \
         | grep "$pod_name" |grep "$tag_number")"
 
         sleep "$interval"
@@ -313,8 +307,17 @@ wait_until_cr_ready()
   local namespace="$3"
 
   for ((i=0; i<$period; i+=$interval)); do
-    # check if cr created
-    if [ "`kubectl get alamedaorganization default --no-headers -o custom-columns=Name:.metadata.name -n $namespace 2>/dev/null`" = "default" ]; then
+    # check if cr data is filled
+    pass="y"
+    tenancy_cluster="$(kubectl exec alameda-influxdb-0 -n $namespace -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database alameda_config -execute "select * from tenancy_cluster where global_config='true'"|tail -n+4)"
+    if [ "$tenancy_cluster" = "" ]; then
+        pass="n"
+    fi
+    tenancy_organization=$(kubectl exec alameda-influxdb-0 -n $namespace -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database alameda_config -execute "select * from tenancy_organization"|tail -n+4)
+    if [ "$tenancy_organization" = "" ]; then
+        pass="n"
+    fi
+    if [ "$pass" = "y" ]; then
         echo -e "\nThe default alamedaorganization under namespace $namespace is ready."
         return 0
     else
@@ -1589,6 +1592,18 @@ __EOF__
       class: ${storage_class}
       accessModes:
         - ReadWriteOnce
+  federatoraiPostgreSQL:
+    resources:
+      requests:
+        cpu: 500m
+        memory: 500Mi
+    storages:
+    - usage: data
+      type: pvc
+      size: 10Gi
+      class: ${storage_class}
+      accessModes:
+        - ReadWriteOnce
 __EOF__
         elif [ "${ENABLE_RESOURCE_REQUIREMENT}" = "y" ] && [ "$storage_type" = "ephemeral" ]; then
             cat >> ${alamedaservice_example} << __EOF__
@@ -1613,6 +1628,11 @@ __EOF__
       requests:
         cpu: 500m
         memory: 500Mi
+  federatoraiPostgreSQL:
+    resources:
+      requests:
+        cpu: 500m
+        memory: 500Mi
 __EOF__
         elif [ "${ENABLE_RESOURCE_REQUIREMENT}" != "y" ] && [ "$storage_type" = "persistent" ]; then
             cat >> ${alamedaservice_example} << __EOF__
@@ -1633,6 +1653,14 @@ __EOF__
       accessModes:
         - ReadWriteOnce
   fedemeterInfluxdb:
+    storages:
+    - usage: data
+      type: pvc
+      size: 10Gi
+      class: ${storage_class}
+      accessModes:
+        - ReadWriteOnce
+  federatoraiPostgreSQL:
     storages:
     - usage: data
       type: pvc

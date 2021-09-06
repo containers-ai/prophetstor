@@ -311,10 +311,15 @@ refine_preloader_variables_with_alamedaservice()
 "
     fi
     if [ "${PRELOADER_PRELOAD_UNIT}" != "" ]; then
+            if [ "${PRELOADER_PRELOAD_UNIT}" != "day" ]; then
+                echo -e "\n$(tput setaf 1)Error! _do_metrics_verify() Only PRELOADER_PRELOAD_UNIT='day' is supported.$(tput sgr 0)"
+                leave_prog
+                exit 1
+            fi
         echo -e "Setting variable PRELOADER_PRELOAD_UNIT='${PRELOADER_PRELOAD_UNIT}'"
         _env_list="${_env_list}
     - name: PRELOADER_PRELOADER_PRELOAD_UNIT
-      value: \"${PRELOADER_PRELOAD_UNIT}\"    # "month"/"day"/"hour"/"minute"
+      value: \"${PRELOADER_PRELOAD_UNIT}\"    # "day"
 "
     fi
     if [ "${_env_list}" != "" ]; then
@@ -396,7 +401,13 @@ run_preloader_command()
         kubectl exec -n $install_namespace $current_preloader_pod_name -- /opt/alameda/federatorai-agent/bin/transmitter loadhistoryonly --state=true
     fi
 
-    kubectl exec -n $install_namespace $current_preloader_pod_name -- /opt/alameda/federatorai-agent/bin/transmitter enable
+    if [ "$disable_all_node_metrics" = "y" ]; then
+        echo -e "$(tput setaf 6)Disable load on empty node.$(tput sgr 0)"
+        kubectl exec -n $install_namespace $current_preloader_pod_name -- /opt/alameda/federatorai-agent/bin/transmitter enable --state=true --DisableLoadAllNodeMetrics=true
+    else
+        kubectl exec -n $install_namespace $current_preloader_pod_name -- /opt/alameda/federatorai-agent/bin/transmitter enable
+    fi
+
     if [ "$?" != "0" ]; then
         echo -e "\n$(tput setaf 1)Error in executing preloader enable command.$(tput sgr 0)"
         leave_prog
@@ -417,7 +428,7 @@ run_preloader_command()
         fi
     fi
 
-    wait_until_data_pump_finish 3600 60 "historical"
+    wait_until_data_pump_finish 7200 120 "historical"
     echo "Done."
     end=`date +%s`
     duration=$((end-start))
@@ -642,7 +653,7 @@ check_federatorai_cluster_type()
 {
     echo -e "\n$(tput setaf 6)Checking Federator.ai cluster type...$(tput sgr 0)"
     influxdb_pod_name="$(kubectl get pods -n $install_namespace |grep "alameda-influxdb-"|awk '{print $1}'|head -1)"
-    cluster_output="$(kubectl exec $influxdb_pod_name -n $install_namespace -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database alameda_cluster_status -format 'csv' -execute "select * from cluster"|tail -n +2|awk -F',' '{print $7}')"
+    cluster_output="$(kubectl exec $influxdb_pod_name -n $install_namespace -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database alameda_cluster_status -format 'csv' -execute "select * from cluster"|tail -n+2|awk -F',' '{print $9}')"
 
     if [ "$(echo "$cluster_output"|grep "vm"|head -1)" != "" ]; then
         vm_enabled="true"
@@ -743,38 +754,105 @@ _do_metrics_verify()
         exit 8
     fi
     echo -e "\n$(tput setaf 6)Verifying $mode metrics in influxdb ...$(tput sgr 0)"
+    influxdb_pod_name="`kubectl get pods -n $install_namespace |grep "alameda-influxdb-"|awk '{print $1}'|head -1`"
+    verification_result="true"
     if [ "$mode" = "vm" ]; then
         # VM
-        metricsArray=("node_cpu" "node_memory")
+        # metricsArray=("node_cpu" "node_memory")
+        # metrics_required_number=`echo "${#metricsArray[@]}"`
+        # metrics_list=$(kubectl exec $influxdb_pod_name -n $install_namespace -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database alameda_metric -execute "show measurements")
+        # metrics_num_found="0"
+        # for i in $(seq 0 $((metrics_required_number-1)))
+        # do
+        #     echo "$metrics_list"|grep -q "^${metricsArray[$i]}$"
+        #     if [ "$?" = "0" ]; then
+        #         metrics_num_found=$((metrics_num_found+1))
+        #     fi
+        # done
+        echo -e "\n$(tput setaf 2)Note!! Temporarily skip vm metrics check.\n$(tput sgr 0)"
     else
         # K8S
-        metricsArray=("container_cpu" "container_memory" "namespace_cpu" "namespace_memory" "node_cpu" "node_memory")
-    fi
-    metrics_required_number=`echo "${#metricsArray[@]}"`
-    influxdb_pod_name="`kubectl get pods -n $install_namespace |grep "alameda-influxdb-"|awk '{print $1}'|head -1`"
-    metrics_list=$(kubectl exec $influxdb_pod_name -n $install_namespace -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database alameda_metric -execute "show measurements")
-    metrics_num_found="0"
-    for i in $(seq 0 $((metrics_required_number-1)))
-    do
-        echo "$metrics_list"|grep -q "^${metricsArray[$i]}$"
-        if [ "$?" = "0" ]; then
-            metrics_num_found=$((metrics_num_found+1))
+        containerMeasurementsArray=("container_0" "container_1" "container_2")
+        namespaceMeasurementsArray=("namespace_0" "namespace_1" "namespace_2")
+        nodeMeasurementsArray=("node_0" "node_1" "node_2")
+        if [ "${PRELOADER_PRELOAD_COUNT}" = "" ]; then
+            verify_before_time_range="110d"    # default pump 120d, so we verify data before 110d
+        else
+            if [ "${PRELOADER_PRELOAD_COUNT}" -ge 11 ]; then
+                verify_before_time_range="`expr ${PRELOADER_PRELOAD_COUNT} - 10`d"
+            else
+                verify_before_time_range="0d"
+            fi
         fi
-    done
 
-    if [ "$metrics_num_found" -lt "$metrics_required_number" ]; then
-        echo -e "\n$(tput setaf 1)Error! $mode metrics in alameda_metric is not complete.$(tput sgr 0)"
-        echo "=============================="
-        echo "Required metrics number: $metrics_required_number"
-        echo "Required metrics: ${metricsArray[*]}"
-        echo "=============================="
-        echo "Required metrics found = $metrics_num_found"
-        echo "Current metrics:"
-        echo "$metrics_list"
-        echo "=============================="
-        leave_prog
-        exit 8
+        total_num="0"
+        all_id_list=""
+        for measurement in "${containerMeasurementsArray[@]}"
+        do
+            unique_id_list=$(kubectl -n $install_namespace exec $influxdb_pod_name -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database metric_instance_workload_le3599 -execute "select * from $measurement where time < now() - ${verify_before_time_range} order by time asc limit 100"|tail -n+4|grep -o " builtin-[^ ]*"|sed 's/^ *//g'|sort|uniq)
+            if [ "$unique_id_list" != "" ]; then
+                unique_id_num=$(echo "$unique_id_list"|wc -l)
+                total_num=$((total_num+unique_id_num))
+                if [ "$all_id_list" = "" ]; then
+                    all_id_list="$unique_id_list"
+                else
+                    all_id_list="$all_id_list"$'\n'"$unique_id_list"
+                fi
+            fi
+        done
+        if [ "$total_num" -lt "2" ]; then
+            verification_result="false"
+            echo -e "$(tput setaf 1)Error! Missing container built-in metric ID.$(tput sgr 0)"
+            echo -e "Container ID exist in the system:\n$all_id_list"
+        fi
+
+        total_num="0"
+        all_id_list=""
+        for measurement in "${namespaceMeasurementsArray[@]}"
+        do
+            unique_id_list=$(kubectl -n $install_namespace exec $influxdb_pod_name -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database metric_instance_workload_le3599 -execute "select * from $measurement where time < now() - ${verify_before_time_range} order by time asc limit 100"|tail -n+4|grep -o " builtin-[^ ]*"|sed 's/^ *//g'|sort|uniq)
+            if [ "$unique_id_list" != "" ]; then
+                unique_id_num=$(echo "$unique_id_list"|wc -l)
+                total_num=$((total_num+unique_id_num))
+                if [ "$all_id_list" = "" ]; then
+                    all_id_list="$unique_id_list"
+                else
+                    all_id_list="$all_id_list"$'\n'"$unique_id_list"
+                fi
+            fi
+        done
+        if [ "$total_num" -lt "2" ]; then
+            verification_result="false"
+            echo -e "$(tput setaf 1)Error! Missing namespace built-in metric ID.$(tput sgr 0)"
+            echo -e "Namespace ID exist in the system:\n$all_id_list"
+        fi
+
+        total_num="0"
+        all_id_list=""
+        for measurement in "${nodeMeasurementsArray[@]}"
+        do
+            unique_id_list=$(kubectl -n $install_namespace exec $influxdb_pod_name -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database metric_instance_workload_le3599 -execute "select * from $measurement where time < now() - ${verify_before_time_range} order by time asc limit 100"|tail -n+4|grep -o " builtin-[^ ]*"|sed 's/^ *//g'|sort|uniq)
+            if [ "$unique_id_list" != "" ]; then
+                unique_id_num=$(echo "$unique_id_list"|wc -l)
+                total_num=$((total_num+unique_id_num))
+                if [ "$all_id_list" = "" ]; then
+                    all_id_list="$unique_id_list"
+                else
+                    all_id_list="$all_id_list"$'\n'"$unique_id_list"
+                fi
+            fi
+        done
+        if [ "$total_num" -lt "2" ]; then
+            verification_result="false"
+            echo -e "$(tput setaf 1)Error! Missing node built-in metric ID.$(tput sgr 0)"
+            echo -e "Node ID exist in the system:\n$all_id_list"
+        fi
+        if [ "$verification_result" != "true" ]; then
+            leave_prog
+            exit 8
+        fi
     fi
+
     echo "Done"
 }
 
@@ -1164,6 +1242,7 @@ spec:
         hpaParameters:
           maxReplicas: 40
           minReplicas: 1
+    correlationAnalysis: disable
 __EOF__
     kubectl apply -f ${nginx_alamedascaler_file}
     if [ "$?" != "0" ]; then
@@ -1249,6 +1328,41 @@ cleanup_influxdb_preloader_related_contents()
     end=`date +%s`
     duration=$((end-start))
     echo "Duration cleanup_influxdb_preloader_related_contents = $duration" >> $debug_log
+    cleanup_influxdb_3er_metrics
+}
+
+cleanup_influxdb_3er_metrics(){
+    start=`date +%s`
+    echo -e "\n$(tput setaf 6)Cleaning old influxdb 3er preloader metrics records ...$(tput sgr 0)"
+    influxdb_pod_name="`kubectl get pods -n $install_namespace |grep "alameda-influxdb-"|awk '{print $1}'|head -1`"
+
+    target_databases=( metric_instance_workload_le3599 metric_instance_workload_le21599 metric_instance_workload_le86399
+    metric_instance_workload_ge86400 metric_instance_prediction_le3599 metric_instance_prediction_le21599
+    metric_instance_prediction_le86399 metric_instance_prediction_ge86400 metric_instance_recommendation_le3599
+    metric_instance_recommendation_le21599 metric_instance_recommendation_le86399 metric_instance_recommendation_ge86400
+    metric_instance_planning_le3599 metric_instance_planning_le21599 metric_instance_planning_le86399
+    metric_instance_planning_ge86400)
+    for db in "${target_databases[@]}"
+    do
+        measurement_list="`kubectl exec $influxdb_pod_name -n $install_namespace -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database $db -execute "show measurements" 2>&1 |tail -n+4`"
+        echo "database=$db"
+        # prepare sql command
+        m_list=""
+        for measurement in `echo $measurement_list`
+        do
+            m_list="${m_list} ${measurement}"
+            sql_cmd="${sql_cmd}drop measurement $measurement;"
+        done
+        if [ "${m_list}" != "" ]; then
+            echo "cleaning up measurements: ${m_list}"
+            kubectl exec $influxdb_pod_name -n $install_namespace -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database $db -execute "${sql_cmd}" | grep -v "^$"
+        fi
+    done
+
+    echo "Done."
+    end=`date +%s`
+    duration=$((end-start))
+    echo "Duration cleanup_influxdb_3er_metrics = $duration" >> $debug_log
 }
 
 check_prediction_status()
@@ -1365,6 +1479,8 @@ enable_preloader_in_alamedaservice()
     if [ "$current_preloader_pod_name" != "" ]; then
         echo -e "\n$(tput setaf 6)Skip preloader installation due to preloader pod exists.$(tput sgr 0)"
         echo -e "Deleting preloader pod to renew the pod state..."
+        # Delete previous agent.log to prevent pump status checking error.
+        kubectl -n $install_namespace exec $current_preloader_pod_name -- rm -f /var/log/alameda/agent.log >/dev/null 2>&1
         kubectl delete pod -n $install_namespace $current_preloader_pod_name
         if [ "$?" != "0" ]; then
             echo -e "\n$(tput setaf 1)Error in deleting preloader pod.$(tput sgr 0)"
@@ -1502,7 +1618,7 @@ if [ "$#" -eq "0" ]; then
     exit
 fi
 
-while getopts "f:n:t:s:x:g:cdehikprvoba:" o; do
+while getopts "f:n:t:s:x:g:cjdehikprvoyba:" o; do
     case "${o}" in
         p)
             prepare_environment="y"
@@ -1512,6 +1628,9 @@ while getopts "f:n:t:s:x:g:cdehikprvoba:" o; do
             ;;
         k)
             remove_nginx="y"
+            ;;
+        j)
+            disable_all_node_metrics="y"
             ;;
         c)
             clean_environment="y"
@@ -1548,6 +1667,9 @@ while getopts "f:n:t:s:x:g:cdehikprvoba:" o; do
         #     autoscaling_specified="y"
         #     x_arg=${OPTARG}
         #     ;;
+        y)
+            data_verification_enabled="y"
+            ;;
         g)
             traffic_ratio_specified="y"
             g_arg=${OPTARG}
@@ -1690,7 +1812,11 @@ fi
 # else
 #     autoscaling_method="hpa"
 # fi
-autoscaling_method="hpa"
+if [ "$data_verification_enabled" = "y" ]; then
+    autoscaling_method="predictOnly"
+else
+    autoscaling_method="hpa"
+fi
 
 if [ "$nginx_name_specified" = "y" ]; then
     nginx_name=$n_arg
