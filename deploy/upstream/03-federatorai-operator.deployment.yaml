@@ -73,6 +73,8 @@ spec:
               value: "federatorai-operator"
             - name: DISABLE_OPERAND_RESOURCE_PROTECTION
               value: "false"
+            - name: DEFAULT_KEYCODE
+              value: "FFSFM-RGBTF-F7I7O-UFKPM-LL6VI-QVFNQ"
           readinessProbe:
             failureThreshold: 20
             httpGet:

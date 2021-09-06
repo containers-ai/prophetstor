@@ -960,8 +960,8 @@ if [ "$offline_mode_enabled" != "y" ]; then
     fi
 fi
 
-previous_alameda_namespace="`kubectl get alamedaservice --all-namespaces 2>/dev/null|tail -1|awk '{print $1}'`"
-previous_tag="`kubectl get alamedaservices -n $previous_alameda_namespace -o custom-columns=VERSION:.spec.version 2>/dev/null|grep -v VERSION|head -1`"
+previous_alameda_namespace="`kubectl get pods --all-namespaces |grep "alameda-ai-"|awk '{print $1}'|head -1`"
+previous_tag="`kubectl get pods -n $previous_alameda_namespace -o custom-columns=NAME:.metadata.name,IMAGE:.spec.containers[*].image 2>/dev/null| grep datahub | head -1 |awk -F'/' '{print $NF}'| cut -d ':' -f2`"
 previous_alamedaservice="`kubectl get alamedaservice -n $previous_alameda_namespace -o custom-columns=NAME:.metadata.name 2>/dev/null|grep -v NAME|head -1`"
 
 # Read alamedaservice file option only work in fresh installation.
@@ -1123,7 +1123,7 @@ fi
 
 if [ "$need_upgrade" = "y" ];then
     source_full_tag=$(echo "$previous_tag"|cut -d '-' -f1)
-    if [[ $source_full_tag =~ ^[^v].* ]]; then
+    if [ "$source_full_tag" = "dev" ]; then
         source_tag_first_digit=""
         source_tag_middle_digit=""
         source_tag_last_digit=""
@@ -1133,10 +1133,11 @@ if [ "$need_upgrade" = "y" ];then
         source_tag_middle_digit=${source_full_tag##$source_tag_first_digit.}
         source_tag_middle_digit=${source_tag_middle_digit%%.$source_tag_last_digit}
         source_tag_first_digit=$(echo $source_tag_first_digit|cut -d 'v' -f2)
+
     fi
 
     target_full_tag=$(echo "$tag_number"|cut -d '-' -f1)
-    if [[ $target_full_tag =~ ^[^v].* ]]; then
+    if [ "$target_full_tag" = "dev" ]; then
         target_tag_first_digit=""
         target_tag_middle_digit=""
         target_tag_last_digit=""
@@ -1175,16 +1176,7 @@ if [ "$offline_mode_enabled" != "y" ]; then
         exit 3
     fi
 
-    default_minimal_k8s_version_minor="16"
-    k8s_version=$(kubectl version --short | grep -Po 'Server Version: v\K[0-9]+.[0-9]+')
-    k8s_version_major=$(echo $k8s_version | cut -d. -f1)
-    k8s_version_minor=$(echo $k8s_version | cut -d. -f2)
-    if [ "$k8s_version_major" = "1" ] && [ $k8s_version_minor -gt 10 ] && \
-        [ $k8s_version_minor -lt $default_minimal_k8s_version_minor ]; then
-        cp $tgz_folder_name/deploy/upstream-1.15/* .
-    else
-        cp $tgz_folder_name/deploy/upstream/* .
-    fi
+    cp $tgz_folder_name/deploy/upstream/* .
 
     if [[ "`ls [00-11]*.yaml 2>/dev/null|wc -l`" -lt "12" ]]; then
         echo -e "\n$(tput setaf 1)Abort, operator files number is less than 12.$(tput sgr 0)"
@@ -1274,39 +1266,37 @@ if [ "$need_upgrade" = "y" ];then
 
 fi
 
-for yaml_fn in `ls [0-9]*.yaml | sort -n`; do
-    case "$yaml_fn" in
-    *03-*)
-        later_yaml="$yaml_fn"
-        echo "Delay applying $yaml_fn"
-        continue
-        ;;
-    esac
-    echo "Applying ${yaml_fn}..."
-    kubectl apply -f ${yaml_fn}
+if [ "$need_upgrade" = "y" ];then
+    for yaml_fn in `ls [0-9]*.yaml | sort -n`; do
+        case "$yaml_fn" in
+        *03-*)
+          later_yaml="$yaml_fn"
+          echo "Delay applying $yaml_fn"
+          continue
+          ;;
+        esac
+        echo "Applying ${yaml_fn}..."
+        kubectl apply -f ${yaml_fn}
+        if [ "$?" != "0" ]; then
+            echo -e "\n$(tput setaf 1)Error in applying yaml file ${yaml_fn}.$(tput sgr 0)"
+            exit 8
+        fi
+    done
+    echo "Applying ${later_yaml}..."
+    kubectl apply -f ${later_yaml}
     if [ "$?" != "0" ]; then
-        echo -e "\n$(tput setaf 1)Error in applying yaml file ${yaml_fn}.$(tput sgr 0)"
+        echo -e "\n$(tput setaf 1)Error in applying yaml file ${later_yaml}.$(tput sgr 0)"
         exit 8
     fi
-done
-
-if [ "$need_upgrade" != "y" ];then
-    # In need_upgrade = y case, deployment of federatorai-operator has been deleted before applying yamls
-    # Delete federatorai-operator pod with same tag_number as 03 yaml to prevent certificate erased issue.
-    while read _namespace _podname _junk; do
-        pod_tag=$(kubectl -n ${_namespace} exec ${_podname} 2>/dev/null -- cat /opt/alameda/federatorai-operator/etc/version.txt |grep TAG|cut -d'=' -f2)
-        if [ "$tag_number" = "$pod_tag" ]; then
-            echo "Deleting pod (${_podname}) before applying ${later_yaml}..."
-            kubectl -n ${_namespace} delete pod ${_podname} >/dev/null 2>&1
+else
+    for yaml_fn in `ls [0-9]*.yaml | sort -n`; do
+        echo "Applying ${yaml_fn}..."
+        kubectl apply -f ${yaml_fn}
+        if [ "$?" != "0" ]; then
+            echo -e "\n$(tput setaf 1)Error in applying yaml file ${yaml_fn}.$(tput sgr 0)"
+            exit 8
         fi
-    done <<< "$(kubectl get pods --all-namespaces |grep ' federatorai-operator-')"
-fi
-
-echo "Applying ${later_yaml}..."
-kubectl apply -f ${later_yaml}
-if [ "$?" != "0" ]; then
-    echo -e "\n$(tput setaf 1)Error in applying yaml file ${later_yaml}.$(tput sgr 0)"
-    exit 8
+    done
 fi
 
 if [ "$need_upgrade" != "y" ];then
@@ -1487,6 +1477,11 @@ __EOF__
 __EOF__
         fi
 
+        # enableGPU: false
+        cat >> ${alamedaservice_example} << __EOF__
+  enableGPU: false
+__EOF__
+
         if [ "$openshift_minor_version" = "" ]; then #k8s
             if [ "$expose_service" = "y" ] || [ "$expose_service" = "Y" ]; then
                 cat >> ${alamedaservice_example} << __EOF__
@@ -1588,6 +1583,18 @@ __EOF__
       class: ${storage_class}
       accessModes:
         - ReadWriteOnce
+  federatoraiPostgreSQL:
+    resources:
+      requests:
+        cpu: 500m
+        memory: 500Mi
+    storages:
+    - usage: data
+      type: pvc
+      size: 10Gi
+      class: ${storage_class}
+      accessModes:
+        - ReadWriteOnce
 __EOF__
         elif [ "${ENABLE_RESOURCE_REQUIREMENT}" = "y" ] && [ "$storage_type" = "ephemeral" ]; then
             cat >> ${alamedaservice_example} << __EOF__
@@ -1612,6 +1619,11 @@ __EOF__
       requests:
         cpu: 500m
         memory: 500Mi
+  federatoraiPostgreSQL:
+    resources:
+      requests:
+        cpu: 500m
+        memory: 500Mi
 __EOF__
         elif [ "${ENABLE_RESOURCE_REQUIREMENT}" != "y" ] && [ "$storage_type" = "persistent" ]; then
             cat >> ${alamedaservice_example} << __EOF__
@@ -1632,6 +1644,14 @@ __EOF__
       accessModes:
         - ReadWriteOnce
   fedemeterInfluxdb:
+    storages:
+    - usage: data
+      type: pvc
+      size: 10Gi
+      class: ${storage_class}
+      accessModes:
+        - ReadWriteOnce
+  federatoraiPostgreSQL:
     storages:
     - usage: data
       type: pvc
