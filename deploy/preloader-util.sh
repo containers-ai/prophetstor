@@ -9,7 +9,7 @@ show_usage()
             [-p] # Prepare environment
                 Optional:
                     # Specify your local Kubernetes cluster name to install an NGINX for demo purpose.
-                    [-a cluster_name]
+                    [-a <cluster_name> -u <username>:<password>]
             [-c] # clean environment for preloader test
             [-e] # Enable preloader pod
             [-r] # Run preloader (normal mode: historical + current)
@@ -24,7 +24,8 @@ show_usage()
         For K8S:
             [-i] # Install Nginx on local Kubernetes cluster
                 Requirement:
-                    [-a cluster_name] Specify local Kubernetes cluster name
+                    [-a <cluster_name> -u <username>:<password>] 
+                    Specify local Kubernetes cluster name and Federator.ai username/password
             [-k] # Remove Nginx
             [-b] # Retrigger ab test inside preloader pod
             [-g ab_traffic_ratio] # ab test traffic ratio (default:4000) [e.g., -g 4000]
@@ -184,34 +185,6 @@ get_current_executor_name()
 {
     current_executor_pod_name="`kubectl get pods -n $install_namespace |grep "alameda-executor-"|awk '{print $1}'|head -1`"
     echo "current_executor_pod_name = $current_executor_pod_name"
-}
-
-delete_all_alamedascaler()
-{
-    start=`date +%s`
-    echo -e "\n$(tput setaf 6)Deleting old alamedascaler if necessary...$(tput sgr 0)"
-    while read _scaler_name _cluster_name _scaler_ns
-    do
-        if [ "$_scaler_name" = "" ] || [ "$_cluster_name" = "" ] || [ "$_scaler_ns" = "" ]; then
-           continue
-        fi
-
-        if [ "$_scaler_name" = "$_cluster_name" ]; then
-            # Ignore cluster-only alamedascaler
-            continue
-        fi
-
-        kubectl delete alamedascaler $_scaler_name -n $_scaler_ns
-        if [ "$?" != "0" ]; then
-            echo -e "\n$(tput setaf 1)Error in deleting old alamedascaler named $_scaler_name in ns $_scaler_ns.$(tput sgr 0)"
-            leave_prog
-            exit 8
-        fi
-    done <<< "$(kubectl get alamedascaler --all-namespaces --output jsonpath='{range .items[*]}{.metadata.name}{" "}{.spec.clusterName}{" "}{.metadata.namespace}{"\n"}' 2>/dev/null)"
-    echo "Done"
-    end=`date +%s`
-    duration=$((end-start))
-    echo "Duration delete_all_alamedascaler = $duration" >> $debug_log
 }
 
 _do_cluster_status_verify()
@@ -1144,9 +1117,9 @@ get_datadog_agent_info()
 
 get_cluster_name_from_alamedascaler()
 {
-    cluster_name="$(kubectl get alamedascaler $alamedascaler_name -n $install_namespace -o jsonpath='{.spec.clusterName}')"
+    cluster_name=$(kubectl exec alameda-influxdb-0 -n ${install_namespace} -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database alameda_target -execute "select resource_k8s_min_replicas,cluster_name from controller where \"alameda_scaler_name\"='$alamedascaler_name' and \"namespace\"='$nginx_ns' and \"kind\"='$kind_name'"|tail -n+4|awk '{print $3}'|head -1)
     if [ "$cluster_name" = "" ]; then
-        echo -e "\n$(tput setaf 1)Error! Failed to get cluster name from alamedascaler ($alamedascaler_name).$(tput sgr 0)"
+        echo -e "\n$(tput setaf 1)Error! Failed to get cluster name in alameda_target..controller by alamedascaler ($alamedascaler_name).$(tput sgr 0)"
         exit 3
     fi
 }
@@ -1154,21 +1127,12 @@ get_cluster_name_from_alamedascaler()
 get_datasource_in_alamedaorganization()
 {
     # Get cluster specific data source setting
-    data_source_type="$(kubectl get alamedaorganization -o jsonpath="{range .items[*]}{.spec.clusters[?(@.name==\"$cluster_name\")].dataSource.type}")"
+    data_source_type=$(kubectl exec alameda-influxdb-0 -n ${install_namespace} -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database alameda_config -execute "select data_source from tenancy_cluster where \"name\"='$cluster_name' and \"global_config\"='false' and \"type\"='k8s'"|tail -n+4|awk '{print $2}'|head -1)
     if [ "$data_source_type" = "" ]; then
-        echo -e "\n$(tput setaf 1)Error! Failed to find data source of cluster ($cluster_name) in alamedaorganization CR.$(tput sgr 0)"
+        echo -e "\n$(tput setaf 1)Error! Failed to find data source of cluster ($cluster_name) in alameda_config..tenancy_cluster$(tput sgr 0)"
         echo -e "$(tput setaf 1)Remember to configure cluster through GUI before running preloader script or check specified cluster name.$(tput sgr 0)"
         exit 3
     fi
-
-    # 4.5.1 has no global data source
-    # # Get global data source setting
-    # data_source_type="$(kubectl get alamedaorganization -o jsonpath='{range .items[*]}{.spec.dataSource.type}')"
-    # if [ "$data_source_type" = "" ]; then
-    #     echo -e "\n$(tput setaf 1)Error! Failed to find global data source setting in alamedaorganization CR.$(tput sgr 0)"
-    #     echo -e "$(tput setaf 1)Remember to set up alamedaorganization before running preloader.$(tput sgr 0)"
-    #     exit 3
-    # fi
 }
 
 # 4.4 will handle local cluster automatically
@@ -1198,64 +1162,100 @@ check_cluster_name_not_empty()
 {
     if [ "$cluster_name" = "" ]; then
         echo -e "\n$(tput setaf 1)Error! Cluster name can't be empty. Use option '-a' to specify cluster name$(tput sgr 0)"
-        echo -e "$(tput setaf 1)You can look up cluster name info by following command: $(tput sgr 0)"
-        echo -e "$(tput setaf 1)kubectl -n <Federator.ai namespace> get alamedascaler$(tput sgr 0)"
         show_usage
         exit 3
     fi
 }
 
-add_alamedascaler_for_nginx()
+check_needed_commands()
 {
-    start=`date +%s`
-    echo -e "\n$(tput setaf 6)Adding/Updating NGINX alamedascaler ...$(tput sgr 0)"
-    check_cluster_name_not_empty
-    nginx_alamedascaler_file="nginx_alamedascaler_file"
-
-    if [ "$openshift_minor_version" = "" ]; then
-        # K8S
-        kind_type="Deployment"
-    else
-        # OpenShift
-        kind_type="DeploymentConfig"
-    fi
-
-
-    cat > ${nginx_alamedascaler_file} << __EOF__
-apiVersion: autoscaling.containers.ai/v1alpha2
-kind: AlamedaScaler
-metadata:
-    name: ${alamedascaler_name}
-    namespace: ${install_namespace}
-spec:
-    clusterName: ${cluster_name}
-    controllers:
-    - type: generic
-      enableExecution: ${enable_execution}
-      scaling: ${autoscaling_method}
-      evictable: true
-      generic:
-        target:
-          namespace: ${nginx_ns}
-          name: ${nginx_name}
-          kind: ${kind_type}
-        hpaParameters:
-          maxReplicas: 40
-          minReplicas: 1
-    correlationAnalysis: disable
-__EOF__
-    kubectl apply -f ${nginx_alamedascaler_file}
-    if [ "$?" != "0" ]; then
-        echo -e "\n$(tput setaf 1)Error! Add/Update alamedascaler for NGINX app failed.$(tput sgr 0)"
+    type jq > /dev/null 2>&1
+    if [ "$?" != "0" ];then
+        echo -e "\n$(tput setaf 1)Error! Failed to locate jq command.$(tput sgr 0)"
+        echo "Please intall jq command by following steps:"
+        echo "a) curl -sLo jq https://github.com/stedolan/jq/releases/download/jq-1.6/jq-linux64"
+        echo "b) chmod +x jq"
+        echo "c) mv jq /usb/bin"
         leave_prog
         exit 8
     fi
-    sleep 10
+}
+
+add_alamedascaler_for_nginx()
+{
+    check_needed_commands
+    start=`date +%s`
+    echo -e "\n$(tput setaf 6)Adding/Updating NGINX alamedascaler ...$(tput sgr 0)"
+    check_cluster_name_not_empty
+
+    if [ "$openshift_minor_version" = "" ]; then
+        # K8S - Deployment
+        kind_type="1"
+        kind_name="DEPLOYMENT"
+    else
+        # OpenShift - DeploymentConfig
+        kind_type="3"
+        kind_name="DEPLOYMENTCONFIG"
+    fi
+
+    if [ "$(find_current_scalers '1')" = "n" ]; then
+        # Create new scaler
+        json_data="{\"data\":[{\"object_meta\":{\"name\":\"${alamedascaler_name}\",\"namespace\":\"${install_namespace}\"\
+        ,\"nodename\":\"\",\"clustername\":\"\",\"uid\":\"\",\"creationtimestamp\":0},\"target_cluster_name\":\"${cluster_name}\",\
+        \"correlation_analysis\":2,\"controllers\":[{\"evictable\":{\"value\":false},\"enable_execution\":{\"value\":false},\
+        \"scaling_type\":${autoscaling_method},\"application_type\":\"generic\",\"generic\":{\"target\":{\"namespace\":\"${nginx_ns}\",\
+        \"name\":\"${nginx_name}\",\"controller_kind\":${kind_type}},\"hpa_parameters\":{\"min_replicas\":{\"value\":1},\
+        \"max_replicas\":40}},\"metrics\":[]}]}]}"
+
+        rest_pod_name="`kubectl get pods -n ${install_namespace} | grep "federatorai-rest-" | awk '{print $1}' | head -1`"
+        create_return_code="$(kubectl -n ${install_namespace} exec -it ${rest_pod_name} -- \
+        curl -s -X POST -w "%{http_code}" -o /dev/null -H "Content-Type: application/json" \
+            -u "${auth_username}:${auth_password}" \
+            -d "${json_data}" \
+            http://127.0.0.1:5055/apis/v1/configs/scaler)"
+        if [ "$create_return_code" != "200" ]; then
+            echo -e "\n$(tput setaf 1)Error! Create alamedascaler for NGINX app failed.$(tput sgr 0)"
+            leave_prog
+            exit 8
+        fi
+        if [ "$(find_current_scalers '5')" = "n" ]; then
+            echo -e "\n$(tput setaf 1)Error! Failed to find new created NGINX alamedascaler.$(tput sgr 0)"
+            leave_prog
+            exit 8
+        fi
+        sleep 10
+    fi
 
     echo "Done"
     end=`date +%s`
     duration=$((end-start))
     echo "Duration add_alamedascaler_for_nginx = $duration" >> $debug_log
+}
+
+find_current_scalers()
+{
+    repeat="$1"
+    rest_pod_name="`kubectl get pods -n ${install_namespace} | grep "federatorai-rest-" | awk '{print $1}' | head -1`"
+    # test if scaler exist (10-12 seconds)
+    for i in `seq 1 $repeat`
+    do
+        get_result=$(kubectl -n ${install_namespace} exec -it ${rest_pod_name} -- \
+            curl -s -X GET -H "Content-Type: application/json" \
+                -u "${auth_username}:${auth_password}" \
+                http://127.0.0.1:5055/apis/v1/configs/scaler)
+
+        record="$(echo "$get_result"|jq ".data[]|select (.target_cluster_name == \"${cluster_name}\") |select (.object_meta.name == \"${alamedascaler_name}\")|select (.controllers[].generic.target.namespace == \"${nginx_ns}\")" 2>/dev/null)"
+
+        if [ "$record" = "" ]; then
+            sleep 2
+            continue
+        else
+            echo "y"
+            return
+        fi
+    done
+    echo "n"
+    return
 }
 
 cleanup_influxdb_prediction_related_contents()
@@ -1618,7 +1618,7 @@ if [ "$#" -eq "0" ]; then
     exit
 fi
 
-while getopts "f:n:t:s:x:g:cjdehikprvoyba:" o; do
+while getopts "f:n:t:s:x:g:cjdehikprvoyba:u:" o; do
     case "${o}" in
         p)
             prepare_environment="y"
@@ -1661,7 +1661,7 @@ while getopts "f:n:t:s:x:g:cjdehikprvoyba:" o; do
             ;;
         a)
             cluster_name_specified="y"
-            a_arg=${OPTARG}
+            cluster_name="${OPTARG}"
             ;;
         # x)
         #     autoscaling_specified="y"
@@ -1684,6 +1684,10 @@ while getopts "f:n:t:s:x:g:cjdehikprvoyba:" o; do
         v)
             revert_environment="y"
             ;;
+        u)
+            auth_user_pass_specified="y"
+            u_arg="${OPTARG}"
+            ;;
         h)
             show_usage
             exit
@@ -1694,10 +1698,15 @@ while getopts "f:n:t:s:x:g:cjdehikprvoyba:" o; do
     esac
 done
 
+# We need 'curl' command
+if [ "`curl --version 2> /dev/null`" = "" ]; then
+    echo -e "\nThe 'curl' command is missing. Please install 'curl' command."
+    exit 1
+fi
 kubectl version|grep -q "^Server"
 if [ "$?" != "0" ];then
     echo -e "\nPlease login to Kubernetes first."
-    exit
+    exit 1
 fi
 
 install_namespace="`kubectl get pods --all-namespaces |grep "alameda-datahub-"|awk '{print $1}'|head -1`"
@@ -1728,9 +1737,20 @@ if [ "$k8s_enabled" = "true" ]; then
     fi
 fi
 
+# argument '-a' must co-exists with '-u'
+if [ "${cluster_name_specified}" = "y" -a "${auth_user_pass_specified}" != "y" ]; then
+    echo -e "\n$(tput setaf 1)Error! Missing '-u' argument.$(tput sgr 0)"
+    show_usage
+    exit 3
+fi
+
+if [ "${auth_user_pass_specified}" = "y" ]; then
+    auth_username="`echo \"${u_arg}\" | xargs | tr ':' ' ' | awk '{print $1}'`"
+    len="`echo \"${auth_username}:\" | wc -m`"
+    auth_password="`echo \"${u_arg}\" | xargs | cut -c${len}-`"
+fi
 
 if [ "$cluster_name_specified" = "y" ]; then
-    cluster_name="$a_arg"
     check_cluster_name_not_empty
 
     # check data source
@@ -1751,13 +1771,6 @@ if [ "$cluster_name_specified" = "y" ]; then
         fi
     fi
 
-    # check cluster-only alamedascaler exist
-    kubectl get alamedascaler -n $install_namespace -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.spec.clusterName}{"\n"}'|grep -q "^${cluster_name} ${cluster_name}"
-    if [ "$?" != "0" ];then
-        echo -e "\n$(tput setaf 1)Error! Failed to find cluster-only alamedascaler with cluster name ($cluster_name).$(tput sgr 0)"
-        echo -e "\n$(tput setaf 1)Please use Federator.ai GUI to configure cluster first.$(tput sgr 0)"
-        exit 7
-    fi
 fi
 
 if [ "$future_mode_enabled" = "y" ]; then
@@ -1813,9 +1826,11 @@ fi
 #     autoscaling_method="hpa"
 # fi
 if [ "$data_verification_enabled" = "y" ]; then
-    autoscaling_method="predictOnly"
+    # PredictOnly
+    autoscaling_method="1"
 else
-    autoscaling_method="hpa"
+    # HPA
+    autoscaling_method="2"
 fi
 
 if [ "$nginx_name_specified" = "y" ]; then
@@ -1917,7 +1932,6 @@ echo "Receiving command '$0 $@'" >> $debug_log
 
 if [ "$prepare_environment" = "y" ]; then
     if [ "$k8s_enabled" = "true" ]; then
-        #delete_all_alamedascaler
         if [ "$cluster_name" != "" ]; then
             # -a is used to specify cluster_name
             new_nginx_example
@@ -1998,7 +2012,6 @@ if [ "$revert_environment" = "y" ]; then
     scale_up_pods
     if [ "$k8s_enabled" = "true" ]; then
         # K8S
-        #delete_all_alamedascaler
         delete_nginx_example
         #patch_datahub_back_to_normal
         #patch_grafana_back_to_normal
