@@ -111,7 +111,7 @@ get_build_tag()
     tag_middle_digit=${tag_middle_digit%%.$tag_last_digit}  # Delete dot and last number.
     tag_first_digit=$(echo $tag_first_digit|cut -d 'v' -f2) # Delete v
     # Purposely ignore error of unofficial tag_number for development build, start from v4.4
-    if [ "${SKIP_TAG_NUMBER_CHECK}" = "1" ]; then tag_first_digit="4"; tag_middle_digit="7"; fi
+    if [ "${SKIP_TAG_NUMBER_CHECK}" = "1" ]; then tag_first_digit="4"; tag_middle_digit="5"; fi
 
     if [ "$tag_first_digit" -le "4" ] && [ "$tag_middle_digit" -le "3" ]; then
         # <= 4.3
@@ -230,7 +230,11 @@ download_files()
         exit 3
     fi
 
-    scriptarray=("install.sh" "email-notifier-setup.sh" "node-label-assignor.sh" "preloader-util.sh" "prepare-private-repository.sh" "uninstall.sh" "federatorai-setup-for-datadog.sh")
+    scriptarray=("install.sh" "email-notifier-setup.sh" "node-label-assignor.sh" "preloader-util.sh" "prepare-private-repository.sh" "uninstall.sh")
+    if [ "$tag_first_digit" -ge "4" ] && [ "$tag_middle_digit" -ge "3" ]; then
+        # >= 4.3
+        scriptarray=("${scriptarray[@]}" "federatorai-setup-for-datadog.sh")
+    fi
 
     if [ "$tag_first_digit" -ge "4" ] && [ "$tag_middle_digit" -ge "4" ]; then
         # >= 4.4
@@ -274,32 +278,35 @@ download_files()
         cp -r $tgz_folder_name/deploy/$planning_folder_name $scripts_folder
     fi
 
+    alamedaservice_example="alamedaservice_sample.yaml"
+    yamlarray=( "alamedadetection.yaml" "alamedanotificationchannel.yaml" "alamedanotificationtopic.yaml" )
+
     # Copy yamls
     mkdir -p $yamls_folder
-    for file_name in "*.yaml"
+    cp $tgz_folder_name/deploy/example/$alamedaservice_example $yamls_folder
+
+    for file_name in "${yamlarray[@]}"
     do
         cp $tgz_folder_name/deploy/example/$file_name $yamls_folder
     done
 
-    # Three kinds of alamedascaler
-    alamedascaler_filename="alamedascaler.yaml"
-    src_pool=( "kafka" "nginx" "redis" )
+    if [ "$tag_first_digit" -ge "4" ] && [ "$tag_middle_digit" -ge "3" ]; then
+        # Three kinds of alamedascaler
+        alamedascaler_filename="alamedascaler.yaml"
+        src_pool=( "kafka" "nginx" "redis" )
 
-    for pool in "${src_pool[@]}"
-    do
-        if [ ! -f "$tgz_folder_name/deploy/example/$pool/$alamedascaler_filename" ]; then
-            # skip if folder not exist
-            continue
-        fi
-        cp $tgz_folder_name/deploy/example/$pool/$alamedascaler_filename $yamls_folder
-        if [ "$pool" = "kafka" ]; then
-            mv $yamls_folder/$alamedascaler_filename $yamls_folder/alamedascaler_kafka.yaml
-        elif [ "$pool" = "nginx" ]; then
-            mv $yamls_folder/$alamedascaler_filename $yamls_folder/alamedascaler_nginx.yaml
-        else
-            mv $yamls_folder/$alamedascaler_filename $yamls_folder/alamedascaler_generic.yaml
-        fi
-    done
+        for pool in "${src_pool[@]}"
+        do
+            cp $tgz_folder_name/deploy/example/$pool/$alamedascaler_filename $yamls_folder
+            if [ "$pool" = "kafka" ]; then
+                mv $yamls_folder/$alamedascaler_filename $yamls_folder/alamedascaler_kafka.yaml
+            elif [ "$pool" = "nginx" ]; then
+                mv $yamls_folder/$alamedascaler_filename $yamls_folder/alamedascaler_nginx.yaml
+            else
+                mv $yamls_folder/$alamedascaler_filename $yamls_folder/alamedascaler_generic.yaml
+            fi
+        done
+    fi
 
     # Copy operator yamls
     mkdir -p $operator_folder
@@ -308,10 +315,8 @@ download_files()
         # copy upstream-1.15 and upstream
         mkdir -p $operator_folder/upstream
         cp $tgz_folder_name/deploy/upstream/* $operator_folder/upstream
-        if [ -d "$tgz_folder_name/deploy/upstream-1.15" ]; then
-            mkdir -p $operator_folder/upstream-1.15
-            cp $tgz_folder_name/deploy/upstream-1.15/* $operator_folder/upstream-1.15
-        fi
+        mkdir -p $operator_folder/upstream-1.15
+        cp $tgz_folder_name/deploy/upstream-1.15/* $operator_folder/upstream-1.15
     else
         cp $tgz_folder_name/deploy/upstream/* $operator_folder
     fi
