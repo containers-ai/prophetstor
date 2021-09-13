@@ -24,7 +24,7 @@ show_usage()
         For K8S:
             [-i] # Install Nginx on local Kubernetes cluster
                 Requirement:
-                    [-a <cluster_name> -u <username>:<password>] 
+                    [-a <cluster_name> -u <username>:<password>]
                     Specify local Kubernetes cluster name and Federator.ai username/password
             [-k] # Remove Nginx
             [-b] # Retrigger ab test inside preloader pod
@@ -1202,19 +1202,20 @@ add_alamedascaler_for_nginx()
         # Create new scaler
         json_data="{\"data\":[{\"object_meta\":{\"name\":\"${alamedascaler_name}\",\"namespace\":\"${install_namespace}\"\
         ,\"nodename\":\"\",\"clustername\":\"\",\"uid\":\"\",\"creationtimestamp\":0},\"target_cluster_name\":\"${cluster_name}\",\
-        \"correlation_analysis\":2,\"controllers\":[{\"evictable\":{\"value\":false},\"enable_execution\":{\"value\":false},\
+        \"correlation_analysis\":2,\"controllers\":[{\"evictable\":{\"value\":${evictable_option}},\"enable_execution\":{\"value\":false},\
         \"scaling_type\":${autoscaling_method},\"application_type\":\"generic\",\"generic\":{\"target\":{\"namespace\":\"${nginx_ns}\",\
         \"name\":\"${nginx_name}\",\"controller_kind\":${kind_type}},\"hpa_parameters\":{\"min_replicas\":{\"value\":1},\
         \"max_replicas\":40}},\"metrics\":[]}]}]}"
 
         rest_pod_name="`kubectl get pods -n ${install_namespace} | grep "federatorai-rest-" | awk '{print $1}' | head -1`"
-        create_return_code="$(kubectl -n ${install_namespace} exec -it ${rest_pod_name} -- \
-        curl -s -X POST -w "%{http_code}" -o /dev/null -H "Content-Type: application/json" \
+        create_response="$(kubectl -n ${install_namespace} exec -t ${rest_pod_name} -- \
+        curl -s -X POST -v -H "Content-Type: application/json" \
             -u "${auth_username}:${auth_password}" \
             -d "${json_data}" \
-            http://127.0.0.1:5055/apis/v1/configs/scaler)"
-        if [ "$create_return_code" != "200" ]; then
+            http://127.0.0.1:5055/apis/v1/configs/scaler 2>&1)"
+        if [ "`echo \"${create_response}\" | grep 'HTTP/1.1 200 '`" = "" ]; then
             echo -e "\n$(tput setaf 1)Error! Create alamedascaler for NGINX app failed.$(tput sgr 0)"
+            echo -e "The request response shows as following.\n${create_response}\n"
             leave_prog
             exit 8
         fi
@@ -1828,9 +1829,11 @@ fi
 if [ "$data_verification_enabled" = "y" ]; then
     # PredictOnly
     autoscaling_method="1"
+    evictable_option="false"
 else
     # HPA
     autoscaling_method="2"
+    evictable_option="true"
 fi
 
 if [ "$nginx_name_specified" = "y" ]; then
