@@ -120,7 +120,7 @@ get_build_tag()
         exit 3
     fi
     echo -e "$(tput setaf 3)Federator.ai version = $tag_number$(tput sgr 0)"
-    if [ "$tag_first_digit" -ge "4" ] && [ "$tag_middle_digit" -ge "5" ]; then
+    if ([ "$tag_first_digit" -eq "4" ] && [ "$tag_middle_digit" -ge "5" ]) || [ "$tag_first_digit" -ge "5" ]; then
         # >= 4.5
         default="/opt"
         read -r -p "$(tput setaf 2)Please enter the path of Federator.ai directory [default: $default]: $(tput sgr 0) " save_path </dev/tty
@@ -232,12 +232,12 @@ download_files()
 
     scriptarray=("install.sh" "email-notifier-setup.sh" "node-label-assignor.sh" "preloader-util.sh" "prepare-private-repository.sh" "uninstall.sh" "federatorai-setup-for-datadog.sh")
 
-    if [ "$tag_first_digit" -ge "4" ] && [ "$tag_middle_digit" -ge "4" ]; then
+    if ([ "$tag_first_digit" -eq "4" ] && [ "$tag_middle_digit" -ge "4" ]) || [ "$tag_first_digit" -ge "5" ]; then
         # >= 4.4
         scriptarray=("${scriptarray[@]}" "cluster-property-setup.sh" "backup-restore.sh")
     fi
 
-    if [ "$tag_first_digit" -ge "4" ] && [ "$tag_middle_digit" -lt "5" ]; then
+    if [ "$tag_first_digit" -eq "4" ] && [ "$tag_middle_digit" -lt "5" ]; then
         # < 4.5
         scriptarray=("${scriptarray[@]}" "planning-util.sh")
     fi
@@ -267,7 +267,7 @@ download_files()
     ab_folder_name="preloader_ab_runner"
     cp -r $tgz_folder_name/deploy/$ab_folder_name $scripts_folder
 
-    if [ "$tag_first_digit" -ge "4" ] && [ "$tag_middle_digit" -ge "5" ]; then
+    if ([ "$tag_first_digit" -eq "4" ] && [ "$tag_middle_digit" -ge "5" ]) || [ "$tag_first_digit" -ge "5" ]; then
         # >= 4.5
         # Copy planning util folder
         planning_folder_name="planning_util"
@@ -303,7 +303,7 @@ download_files()
 
     # Copy operator yamls
     mkdir -p $operator_folder
-    if [ "$tag_first_digit" -ge "4" ] && [ "$tag_middle_digit" -ge "7" ]; then
+    if ([ "$tag_first_digit" -eq "4" ] && [ "$tag_middle_digit" -ge "7" ]) || [ "$tag_first_digit" -ge "5" ]; then
         # >= 4.7
         # copy upstream-1.15 and upstream
         mkdir -p $operator_folder/upstream
