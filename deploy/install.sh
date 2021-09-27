@@ -307,17 +307,8 @@ wait_until_cr_ready()
   local namespace="$3"
 
   for ((i=0; i<$period; i+=$interval)); do
-    # check if cr data is filled
-    pass="y"
-    tenancy_cluster="$(kubectl exec alameda-influxdb-0 -n $namespace -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database alameda_config -execute "select * from tenancy_cluster where global_config='true'"|tail -n+4)"
-    if [ "$tenancy_cluster" = "" ]; then
-        pass="n"
-    fi
-    tenancy_organization=$(kubectl exec alameda-influxdb-0 -n $namespace -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database alameda_config -execute "select * from tenancy_organization"|tail -n+4)
-    if [ "$tenancy_organization" = "" ]; then
-        pass="n"
-    fi
-    if [ "$pass" = "y" ]; then
+    # check if cr created
+    if [ "`kubectl get alamedaorganization default --no-headers -o custom-columns=Name:.metadata.name -n $namespace 2>/dev/null`" = "default" ]; then
         echo -e "\nThe default alamedaorganization under namespace $namespace is ready."
         return 0
     else
@@ -338,7 +329,8 @@ get_grafana_route()
         echo -e "\n========================================"
         echo "You can now access GUI through $(tput setaf 6)https://${link} $(tput sgr 0)"
         echo "The default login credential is $(tput setaf 6)admin/${default_password}$(tput sgr 0)"
-        echo -e "\n$(tput setaf 6)Review the administration guide for further details.$(tput sgr 0)"
+        echo -e "\nAlso, you can start to apply alamedascaler CR for the target you would like to monitor."
+        echo "$(tput setaf 6)Review the administration guide for further details.$(tput sgr 0)"
         echo "========================================"
         else
             echo "Warning! Failed to obtain grafana route address."
@@ -348,7 +340,8 @@ get_grafana_route()
             echo -e "\n========================================"
             echo "You can now access GUI through $(tput setaf 6)https://<YOUR IP>:$dashboard_frontend_node_port $(tput sgr 0)"
             echo "The default login credential is $(tput setaf 6)admin/${default_password}$(tput sgr 0)"
-            echo -e "\n$(tput setaf 6)Review the administration guide for further details.$(tput sgr 0)"
+            echo -e "\nAlso, you can start to apply alamedascaler CR for the target you would like to monitor."
+            echo "$(tput setaf 6)Review the administration guide for further details.$(tput sgr 0)"
             echo "========================================"
         fi
     fi
@@ -497,6 +490,98 @@ get_datadog_agent_info()
     dd_cluster_name="$(kubectl get deploy $dd_cluster_agent_deploy_name -n $dd_namespace -o jsonpath='{range .spec.template.spec.containers[*]}{.env[?(@.name=="DD_CLUSTER_NAME")].value}' 2>/dev/null | awk '{print $1}')"
 }
 
+display_cluster_scaler_file_location()
+{
+    echo -e "You can find $alamedascaler_cluster_filename template file inside $file_folder"
+}
+
+# get_cluster_name()
+# {
+#     cluster_name=`kubectl get cm cluster-info -n default -o yaml 2>/dev/null|grep uid|awk '{print $2}'`
+#     if [ "$cluster_name" = "" ];then
+#         cluster_name=`kubectl get cm cluster-info -n kube-public -o yaml 2>/dev/null|grep uid|awk '{print $2}'`
+#         if [ "$cluster_name" = "" ];then
+#             cluster_name=`kubectl get cm cluster-info -n kube-service-catalog’ -o yaml 2>/dev/null|grep uid|awk '{print $2}'`
+#         fi
+#     fi
+# }
+
+setup_cluster_alamedascaler()
+{
+    alamedascaler_cluster_filename="alamedascaler_federatorai.yaml"
+
+    cat > ${alamedascaler_cluster_filename} << __EOF__
+apiVersion: autoscaling.containers.ai/v1alpha2
+kind: AlamedaScaler
+metadata:
+  name: clusterscaler
+  namespace: ${install_namespace}
+spec:
+  clusterName: NeedToBeReplacedByClusterName
+__EOF__
+
+    # Get Datadog agent info (User configuration)
+    get_datadog_agent_info
+
+    if [ "$dd_cluster_agent_deploy_name" = "" ]; then
+        echo -e "\n$(tput setaf 1)Error! Failed to auto-discover Datadog cluster agent deployment.$(tput sgr 0)"
+        echo -e "\n$(tput setaf 1)Datadog cluster agent needs to be installed to make WPA/HPA work properly.$(tput sgr 0)"
+        display_cluster_scaler_file_location
+        return
+    fi
+
+    if [ "$dd_cluster_name" = "" ]; then
+        echo -e "\n$(tput setaf 1)Error! Failed to auto-discover DD_CLUSTER_NAME value in Datadog cluster agent env variable.$(tput sgr 0)"
+        echo -e "\n$(tput setaf 1)Please help to set up cluster name accordingly.$(tput sgr 0)"
+        display_cluster_scaler_file_location
+        return
+    else
+        kubectl describe alamedascaler --all-namespaces 2>/dev/null |grep "Cluster Name"|grep -q "$dd_cluster_name"
+        if [ "$?" = "0" ];then
+            # Found at least one alamedascaler. No need to apply alamedascaler for cluster
+            return
+        fi
+    fi
+
+    while [ "$monitor_cluster" != "y" ] && [ "$monitor_cluster" != "n" ]
+    do
+        default="y"
+        read -r -p "$(tput setaf 127)Do you want to monitor this cluster? [default: $default]: $(tput sgr 0)" monitor_cluster </dev/tty
+        monitor_cluster=${monitor_cluster:-$default}
+        monitor_cluster=$(echo "$monitor_cluster" | tr '[:upper:]' '[:lower:]')
+    done
+
+    if [ "$monitor_cluster" = "n" ]; then
+        display_cluster_scaler_file_location
+        return
+    fi
+
+    if [ "$dd_namespace" = "" ]; then
+        echo -e "\n$(tput setaf 1)Error! Can't find the datadog agent installed namespace.$(tput sgr 0)"
+        display_cluster_scaler_file_location
+        return
+    elif [ "$dd_api_key" = "" ]; then
+        echo -e "\n$(tput setaf 1)Error! Can't find the datadog agent API key. Please correctly configure the datadog agent API key.$(tput sgr 0)"
+        display_cluster_scaler_file_location
+        return
+    elif [ "$dd_app_key" = "" ]; then
+        echo -e "\n$(tput setaf 1)Error! Can't find the datadog agent APP key. Please correctly configure the datadog agent APP key.$(tput sgr 0)"
+        display_cluster_scaler_file_location
+        return
+    fi
+
+    echo -e "$(tput setaf 3)Use \"$dd_cluster_name\" as the cluster name and DD_CLUSTER_NAME$(tput sgr 0)"
+        sed -i "s|\bclusterName:.*|clusterName: ${dd_cluster_name}|g" $alamedascaler_cluster_filename
+
+    echo "Applying file $alamedascaler_cluster_filename ..."
+    kubectl apply -f $alamedascaler_cluster_filename
+    if [ "$?" != "0" ];then
+        echo -e "$(tput setaf 3)Warning!! Failed to apply $alamedascaler_cluster_filename $(tput sgr 0)"
+    fi
+    echo "Done"
+    display_cluster_scaler_file_location
+}
+
 download_cr_files()
 {
     cr_files=( "alamedadetection.yaml" "alamedanotificationchannel.yaml" "alamedanotificationtopic.yaml" )
@@ -504,6 +589,26 @@ download_cr_files()
     for file_name in "${cr_files[@]}"
     do
         cp $tgz_folder_name/deploy/example/$file_name .
+    done
+}
+
+download_alamedascaler_files()
+{
+    # Three kinds of alamedascaler
+    # In offline mode, alamedascaler files will be downloaded by federatorai-launcher.sh
+    alamedascaler_filename="alamedascaler.yaml"
+    src_pool=( "kafka" "nginx" "redis" )
+
+    for pool in "${src_pool[@]}"
+    do
+        cp $tgz_folder_name/deploy/example/$pool/$alamedascaler_filename .
+        if [ "$pool" = "kafka" ]; then
+            mv $alamedascaler_filename alamedascaler_kafka.yaml
+        elif [ "$pool" = "nginx" ]; then
+            mv $alamedascaler_filename alamedascaler_nginx.yaml
+        else
+            mv $alamedascaler_filename alamedascaler_generic.yaml
+        fi
     done
 }
 
@@ -855,8 +960,8 @@ if [ "$offline_mode_enabled" != "y" ]; then
     fi
 fi
 
-previous_alameda_namespace="`kubectl get pods --all-namespaces |grep "alameda-ai-"|awk '{print $1}'|head -1`"
-previous_tag="`kubectl get pods -n $previous_alameda_namespace -o custom-columns=NAME:.metadata.name,IMAGE:.spec.containers[*].image 2>/dev/null| grep datahub | head -1 |awk -F'/' '{print $NF}'| cut -d ':' -f2`"
+previous_alameda_namespace="`kubectl get alamedaservice --all-namespaces 2>/dev/null|tail -1|awk '{print $1}'`"
+previous_tag="`kubectl get alamedaservices -n $previous_alameda_namespace -o custom-columns=VERSION:.spec.version 2>/dev/null|grep -v VERSION|head -1`"
 previous_alamedaservice="`kubectl get alamedaservice -n $previous_alameda_namespace -o custom-columns=NAME:.metadata.name 2>/dev/null|grep -v NAME|head -1`"
 
 # Read alamedaservice file option only work in fresh installation.
@@ -1018,7 +1123,7 @@ fi
 
 if [ "$need_upgrade" = "y" ];then
     source_full_tag=$(echo "$previous_tag"|cut -d '-' -f1)
-    if [ "$source_full_tag" = "dev" ]; then
+    if [[ $source_full_tag =~ ^[^v].* ]]; then
         source_tag_first_digit=""
         source_tag_middle_digit=""
         source_tag_last_digit=""
@@ -1028,11 +1133,10 @@ if [ "$need_upgrade" = "y" ];then
         source_tag_middle_digit=${source_full_tag##$source_tag_first_digit.}
         source_tag_middle_digit=${source_tag_middle_digit%%.$source_tag_last_digit}
         source_tag_first_digit=$(echo $source_tag_first_digit|cut -d 'v' -f2)
-
     fi
 
     target_full_tag=$(echo "$tag_number"|cut -d '-' -f1)
-    if [ "$target_full_tag" = "dev" ]; then
+    if [[ $target_full_tag =~ ^[^v].* ]]; then
         target_tag_first_digit=""
         target_tag_middle_digit=""
         target_tag_last_digit=""
@@ -1050,6 +1154,15 @@ if [ "$need_upgrade" = "y" ];then
     fi
 fi
 
+default_minimal_k8s_version_minor="16"
+k8s_version=$(kubectl version --short | grep -Po 'Server Version: v\K[0-9]+.[0-9]+')
+k8s_version_major=$(echo $k8s_version | cut -d. -f1)
+k8s_version_minor=$(echo $k8s_version | cut -d. -f2)
+upstream_folder_name="upstream"
+if [ "$k8s_version_major" = "1" ] && [ $k8s_version_minor -gt 10 ] && \
+    [ $k8s_version_minor -lt $default_minimal_k8s_version_minor ]; then
+    upstream_folder_name="upstream-1.15"
+fi
 if [ "$offline_mode_enabled" != "y" ]; then
     echo -e "\n$(tput setaf 2)Downloading ${tag_number} tgz file ...$(tput sgr 0)"
     tgz_name="${tag_number}.tar.gz"
@@ -1071,7 +1184,7 @@ if [ "$offline_mode_enabled" != "y" ]; then
         exit 3
     fi
 
-    cp $tgz_folder_name/deploy/upstream/* .
+    cp $tgz_folder_name/deploy/$upstream_folder_name/* .
 
     if [[ "`ls [00-11]*.yaml 2>/dev/null|wc -l`" -lt "12" ]]; then
         echo -e "\n$(tput setaf 1)Abort, operator files number is less than 12.$(tput sgr 0)"
@@ -1082,12 +1195,12 @@ else
     # Offline Mode
     # Copy Federator.ai operator 00-11 yamls
     echo "Copying Federator.ai operator yamls ..."
-    if [[ "`ls ${script_located_path}/../operator/[0-9]*yaml 2>/dev/null|wc -l`" -lt "12" ]]; then
+    if [[ "`ls ${script_located_path}/../operator/$upstream_folder_name/[0-9]*yaml 2>/dev/null|wc -l`" -lt "12" ]]; then
         echo -e "\n$(tput setaf 1)Error! Failed to locate all Federator.ai operator yaml files$(tput sgr 0)"
         echo "Please make sure you extract the offline install package and execute install.sh under scripts folder  "
         exit 1
     fi
-    cp ${script_located_path}/../operator/[0-9]*yaml .
+    cp ${script_located_path}/../operator/$upstream_folder_name/[0-9]*yaml .
     echo "Done"
 fi
 
@@ -1161,37 +1274,39 @@ if [ "$need_upgrade" = "y" ];then
 
 fi
 
-if [ "$need_upgrade" = "y" ];then
-    for yaml_fn in `ls [0-9]*.yaml | sort -n`; do
-        case "$yaml_fn" in
-        *03-*)
-          later_yaml="$yaml_fn"
-          echo "Delay applying $yaml_fn"
-          continue
-          ;;
-        esac
-        echo "Applying ${yaml_fn}..."
-        kubectl apply -f ${yaml_fn}
-        if [ "$?" != "0" ]; then
-            echo -e "\n$(tput setaf 1)Error in applying yaml file ${yaml_fn}.$(tput sgr 0)"
-            exit 8
-        fi
-    done
-    echo "Applying ${later_yaml}..."
-    kubectl apply -f ${later_yaml}
+for yaml_fn in `ls [0-9]*.yaml | sort -n`; do
+    case "$yaml_fn" in
+    *03-*)
+        later_yaml="$yaml_fn"
+        echo "Delay applying $yaml_fn"
+        continue
+        ;;
+    esac
+    echo "Applying ${yaml_fn}..."
+    kubectl apply -f ${yaml_fn}
     if [ "$?" != "0" ]; then
-        echo -e "\n$(tput setaf 1)Error in applying yaml file ${later_yaml}.$(tput sgr 0)"
+        echo -e "\n$(tput setaf 1)Error in applying yaml file ${yaml_fn}.$(tput sgr 0)"
         exit 8
     fi
-else
-    for yaml_fn in `ls [0-9]*.yaml | sort -n`; do
-        echo "Applying ${yaml_fn}..."
-        kubectl apply -f ${yaml_fn}
-        if [ "$?" != "0" ]; then
-            echo -e "\n$(tput setaf 1)Error in applying yaml file ${yaml_fn}.$(tput sgr 0)"
-            exit 8
+done
+
+if [ "$need_upgrade" != "y" ];then
+    # In need_upgrade = y case, deployment of federatorai-operator has been deleted before applying yamls
+    # Delete federatorai-operator pod with same tag_number as 03 yaml to prevent certificate erased issue.
+    while read _namespace _podname _junk; do
+        pod_tag=$(kubectl -n ${_namespace} exec ${_podname} 2>/dev/null -- cat /opt/alameda/federatorai-operator/etc/version.txt |grep TAG|cut -d'=' -f2)
+        if [ "$tag_number" = "$pod_tag" ]; then
+            echo "Deleting pod (${_podname}) before applying ${later_yaml}..."
+            kubectl -n ${_namespace} delete pod ${_podname} >/dev/null 2>&1
         fi
-    done
+    done <<< "$(kubectl get pods --all-namespaces |grep ' federatorai-operator-')"
+fi
+
+echo "Applying ${later_yaml}..."
+kubectl apply -f ${later_yaml}
+if [ "$?" != "0" ]; then
+    echo -e "\n$(tput setaf 1)Error in applying yaml file ${later_yaml}.$(tput sgr 0)"
+    exit 8
 fi
 
 if [ "$need_upgrade" != "y" ];then
@@ -1209,6 +1324,9 @@ if [ "$ALAMEDASERVICE_FILE_PATH" = "" ]; then
         echo -e "\nDownloading Federator.ai alamedaservice sample file ..."
         cp $tgz_folder_name/deploy/example/$alamedaservice_example .
         download_cr_files
+        echo "Done"
+        echo -e "\nDownloading Federator.ai alamedascaler sample files ..."
+        download_alamedascaler_files
         echo "Done"
     else
         # Offline Mode
@@ -1369,11 +1487,6 @@ __EOF__
 __EOF__
         fi
 
-        # enableGPU: false
-        cat >> ${alamedaservice_example} << __EOF__
-  enableGPU: false
-__EOF__
-
         if [ "$openshift_minor_version" = "" ]; then #k8s
             if [ "$expose_service" = "y" ] || [ "$expose_service" = "Y" ]; then
                 cat >> ${alamedaservice_example} << __EOF__
@@ -1475,18 +1588,6 @@ __EOF__
       class: ${storage_class}
       accessModes:
         - ReadWriteOnce
-  federatoraiPostgreSQL:
-    resources:
-      requests:
-        cpu: 500m
-        memory: 500Mi
-    storages:
-    - usage: data
-      type: pvc
-      size: 10Gi
-      class: ${storage_class}
-      accessModes:
-        - ReadWriteOnce
 __EOF__
         elif [ "${ENABLE_RESOURCE_REQUIREMENT}" = "y" ] && [ "$storage_type" = "ephemeral" ]; then
             cat >> ${alamedaservice_example} << __EOF__
@@ -1511,11 +1612,6 @@ __EOF__
       requests:
         cpu: 500m
         memory: 500Mi
-  federatoraiPostgreSQL:
-    resources:
-      requests:
-        cpu: 500m
-        memory: 500Mi
 __EOF__
         elif [ "${ENABLE_RESOURCE_REQUIREMENT}" != "y" ] && [ "$storage_type" = "persistent" ]; then
             cat >> ${alamedaservice_example} << __EOF__
@@ -1536,14 +1632,6 @@ __EOF__
       accessModes:
         - ReadWriteOnce
   fedemeterInfluxdb:
-    storages:
-    - usage: data
-      type: pvc
-      size: 10Gi
-      class: ${storage_class}
-      accessModes:
-        - ReadWriteOnce
-  federatoraiPostgreSQL:
     storages:
     - usage: data
       type: pvc
@@ -1644,6 +1732,9 @@ else
     echo -e "\nDownloading Federator.ai CR sample files ..."
     download_cr_files
     echo "Done"
+    echo -e "\nDownloading Federator.ai alamedascaler sample files ..."
+    download_alamedascaler_files
+    echo "Done"
     kubectl apply -f $ALAMEDASERVICE_FILE_PATH >/dev/null
     if [ "$?" != "0" ]; then
         echo -e "\n$(tput setaf 1)Error! Failed to update alamedaservice file ($ALAMEDASERVICE_FILE_PATH).$(tput sgr 0)"
@@ -1709,6 +1800,7 @@ get_restapi_route $install_namespace
 echo -e "$(tput setaf 6)\nInstall Federator.ai $tag_number successfully$(tput sgr 0)"
 check_previous_alamedascaler
 ###Configure data source from GUI
+#setup_cluster_alamedascaler
 check_alamedaservice
 leave_prog
 exit 0
