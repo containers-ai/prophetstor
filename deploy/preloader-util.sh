@@ -1175,7 +1175,7 @@ check_needed_commands()
         echo "Please intall jq command by following steps:"
         echo "a) curl -sLo jq https://github.com/stedolan/jq/releases/download/jq-1.6/jq-linux64"
         echo "b) chmod +x jq"
-        echo "c) mv jq /usb/bin"
+        echo "c) mv jq /usr/bin"
         leave_prog
         exit 8
     fi
