@@ -151,15 +151,16 @@ wait_until_data_pump_finish()
   type="$3"
 
   for ((i=0; i<$period; i+=$interval)); do
+    duration_time=$(date -d @${i} +"%H:%M:%S" -u)
     if [ "$type" = "future" ]; then
-        echo "Waiting for data pump (future mode) to finish ..."
+        echo "Waiting for data pump (future mode) to finish (Time Elapsed = $duration_time)..."
         kubectl logs -n $install_namespace $current_preloader_pod_name | grep -q "Completed to loader container future metrics data"
         if [ "$?" = "0" ]; then
             echo -e "\n$(tput setaf 6)The data pump (future mode) is finished.$(tput sgr 0)"
             return 0
         fi
     else #historical mode
-        echo "Waiting for data pump to finish ..."
+        echo "Waiting for data pump to finish (Time Elapsed = $duration_time)..."
         if [[ "`kubectl logs -n $install_namespace $current_preloader_pod_name | egrep "Succeed to generate pods historical metrics|Succeed to generate nodes historical metrics" | wc -l`" -gt "1" ]]; then
             echo -e "\n$(tput setaf 6)The data pump is finished.$(tput sgr 0)"
             return 0
@@ -424,7 +425,7 @@ run_preloader_command()
         fi
     fi
 
-    wait_until_data_pump_finish 3600 60 "historical"
+    wait_until_data_pump_finish 21600 60 "historical"
     echo "Done."
     end=`date +%s`
     duration=$((end-start))
@@ -451,7 +452,7 @@ run_futuremode_preloader()
 
     echo "Checking..."
     sleep 10
-    wait_until_data_pump_finish 3600 60 "future"
+    wait_until_data_pump_finish 21600 60 "future"
     echo "Done."
     end=`date +%s`
     duration=$((end-start))
