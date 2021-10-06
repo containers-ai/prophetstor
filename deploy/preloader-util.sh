@@ -151,15 +151,16 @@ wait_until_data_pump_finish()
   type="$3"
 
   for ((i=0; i<$period; i+=$interval)); do
+    duration_time=$(date -d @${i} +"%H:%M:%S" -u)
     if [ "$type" = "future" ]; then
-        echo "Waiting for data pump (future mode) to finish ..."
+        echo "Waiting for data pump (future mode) to finish (Time Elapsed = $duration_time)..."
         kubectl logs -n $install_namespace $current_preloader_pod_name | grep -q "Completed to loader container future metrics data"
         if [ "$?" = "0" ]; then
             echo -e "\n$(tput setaf 6)The data pump (future mode) is finished.$(tput sgr 0)"
             return 0
         fi
     else #historical mode
-        echo "Waiting for data pump to finish ..."
+        echo "Waiting for data pump to finish (Time Elapsed = $duration_time)..."
         if [[ "`kubectl logs -n $install_namespace $current_preloader_pod_name | egrep "Succeed to generate pods historical metrics|Succeed to generate nodes historical metrics" | wc -l`" -gt "1" ]]; then
             echo -e "\n$(tput setaf 6)The data pump is finished.$(tput sgr 0)"
             return 0
@@ -185,6 +186,34 @@ get_current_executor_name()
 {
     current_executor_pod_name="`kubectl get pods -n $install_namespace |grep "alameda-executor-"|awk '{print $1}'|head -1`"
     echo "current_executor_pod_name = $current_executor_pod_name"
+}
+
+delete_all_alamedascaler()
+{
+    start=`date +%s`
+    echo -e "\n$(tput setaf 6)Deleting old alamedascaler if necessary...$(tput sgr 0)"
+    while read _scaler_name _cluster_name _scaler_ns
+    do
+        if [ "$_scaler_name" = "" ] || [ "$_cluster_name" = "" ] || [ "$_scaler_ns" = "" ]; then
+           continue
+        fi
+
+        if [ "$_scaler_name" = "$_cluster_name" ]; then
+            # Ignore cluster-only alamedascaler
+            continue
+        fi
+
+        kubectl delete alamedascaler $_scaler_name -n $_scaler_ns
+        if [ "$?" != "0" ]; then
+            echo -e "\n$(tput setaf 1)Error in deleting old alamedascaler named $_scaler_name in ns $_scaler_ns.$(tput sgr 0)"
+            leave_prog
+            exit 8
+        fi
+    done <<< "$(kubectl get alamedascaler --all-namespaces --output jsonpath='{range .items[*]}{.metadata.name}{" "}{.spec.clusterName}{" "}{.metadata.namespace}{"\n"}' 2>/dev/null)"
+    echo "Done"
+    end=`date +%s`
+    duration=$((end-start))
+    echo "Duration delete_all_alamedascaler = $duration" >> $debug_log
 }
 
 _do_cluster_status_verify()
@@ -284,15 +313,10 @@ refine_preloader_variables_with_alamedaservice()
 "
     fi
     if [ "${PRELOADER_PRELOAD_UNIT}" != "" ]; then
-            if [ "${PRELOADER_PRELOAD_UNIT}" != "day" ]; then
-                echo -e "\n$(tput setaf 1)Error! _do_metrics_verify() Only PRELOADER_PRELOAD_UNIT='day' is supported.$(tput sgr 0)"
-                leave_prog
-                exit 1
-            fi
         echo -e "Setting variable PRELOADER_PRELOAD_UNIT='${PRELOADER_PRELOAD_UNIT}'"
         _env_list="${_env_list}
     - name: PRELOADER_PRELOADER_PRELOAD_UNIT
-      value: \"${PRELOADER_PRELOAD_UNIT}\"    # "day"
+      value: \"${PRELOADER_PRELOAD_UNIT}\"    # "month"/"day"/"hour"/"minute"
 "
     fi
     if [ "${_env_list}" != "" ]; then
@@ -401,7 +425,7 @@ run_preloader_command()
         fi
     fi
 
-    wait_until_data_pump_finish 7200 120 "historical"
+    wait_until_data_pump_finish 21600 60 "historical"
     echo "Done."
     end=`date +%s`
     duration=$((end-start))
@@ -428,7 +452,7 @@ run_futuremode_preloader()
 
     echo "Checking..."
     sleep 10
-    wait_until_data_pump_finish 3600 60 "future"
+    wait_until_data_pump_finish 21600 60 "future"
     echo "Done."
     end=`date +%s`
     duration=$((end-start))
@@ -626,7 +650,7 @@ check_federatorai_cluster_type()
 {
     echo -e "\n$(tput setaf 6)Checking Federator.ai cluster type...$(tput sgr 0)"
     influxdb_pod_name="$(kubectl get pods -n $install_namespace |grep "alameda-influxdb-"|awk '{print $1}'|head -1)"
-    cluster_output="$(kubectl exec $influxdb_pod_name -n $install_namespace -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database alameda_cluster_status -format 'csv' -execute "select * from cluster"|tail -n+2|awk -F',' '{print $9}')"
+    cluster_output="$(kubectl exec $influxdb_pod_name -n $install_namespace -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database alameda_cluster_status -format 'csv' -execute "select * from cluster"|tail -n +2|awk -F',' '{print $7}')"
 
     if [ "$(echo "$cluster_output"|grep "vm"|head -1)" != "" ]; then
         vm_enabled="true"
@@ -727,105 +751,38 @@ _do_metrics_verify()
         exit 8
     fi
     echo -e "\n$(tput setaf 6)Verifying $mode metrics in influxdb ...$(tput sgr 0)"
-    influxdb_pod_name="`kubectl get pods -n $install_namespace |grep "alameda-influxdb-"|awk '{print $1}'|head -1`"
-    verification_result="true"
     if [ "$mode" = "vm" ]; then
         # VM
-        # metricsArray=("node_cpu" "node_memory")
-        # metrics_required_number=`echo "${#metricsArray[@]}"`
-        # metrics_list=$(kubectl exec $influxdb_pod_name -n $install_namespace -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database alameda_metric -execute "show measurements")
-        # metrics_num_found="0"
-        # for i in $(seq 0 $((metrics_required_number-1)))
-        # do
-        #     echo "$metrics_list"|grep -q "^${metricsArray[$i]}$"
-        #     if [ "$?" = "0" ]; then
-        #         metrics_num_found=$((metrics_num_found+1))
-        #     fi
-        # done
-        echo -e "\n$(tput setaf 2)Note!! Temporarily skip vm metrics check.\n$(tput sgr 0)"
+        metricsArray=("node_cpu" "node_memory")
     else
         # K8S
-        containerMeasurementsArray=("container_0" "container_1" "container_2")
-        namespaceMeasurementsArray=("namespace_0" "namespace_1" "namespace_2")
-        nodeMeasurementsArray=("node_0" "node_1" "node_2")
-        if [ "${PRELOADER_PRELOAD_COUNT}" = "" ]; then
-            verify_before_time_range="110d"    # default pump 120d, so we verify data before 110d
-        else
-            if [ "${PRELOADER_PRELOAD_COUNT}" -ge 11 ]; then
-                verify_before_time_range="`expr ${PRELOADER_PRELOAD_COUNT} - 10`d"
-            else
-                verify_before_time_range="0d"
-            fi
-        fi
-
-        total_num="0"
-        all_id_list=""
-        for measurement in "${containerMeasurementsArray[@]}"
-        do
-            unique_id_list=$(kubectl -n $install_namespace exec $influxdb_pod_name -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database metric_instance_workload_le3599 -execute "select * from $measurement where time < now() - ${verify_before_time_range} order by time asc limit 100"|tail -n+4|grep -o " builtin-[^ ]*"|sed 's/^ *//g'|sort|uniq)
-            if [ "$unique_id_list" != "" ]; then
-                unique_id_num=$(echo "$unique_id_list"|wc -l)
-                total_num=$((total_num+unique_id_num))
-                if [ "$all_id_list" = "" ]; then
-                    all_id_list="$unique_id_list"
-                else
-                    all_id_list="$all_id_list"$'\n'"$unique_id_list"
-                fi
-            fi
-        done
-        if [ "$total_num" -lt "2" ]; then
-            verification_result="false"
-            echo -e "$(tput setaf 1)Error! Missing container built-in metric ID.$(tput sgr 0)"
-            echo -e "Container ID exist in the system:\n$all_id_list"
-        fi
-
-        total_num="0"
-        all_id_list=""
-        for measurement in "${namespaceMeasurementsArray[@]}"
-        do
-            unique_id_list=$(kubectl -n $install_namespace exec $influxdb_pod_name -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database metric_instance_workload_le3599 -execute "select * from $measurement where time < now() - ${verify_before_time_range} order by time asc limit 100"|tail -n+4|grep -o " builtin-[^ ]*"|sed 's/^ *//g'|sort|uniq)
-            if [ "$unique_id_list" != "" ]; then
-                unique_id_num=$(echo "$unique_id_list"|wc -l)
-                total_num=$((total_num+unique_id_num))
-                if [ "$all_id_list" = "" ]; then
-                    all_id_list="$unique_id_list"
-                else
-                    all_id_list="$all_id_list"$'\n'"$unique_id_list"
-                fi
-            fi
-        done
-        if [ "$total_num" -lt "2" ]; then
-            verification_result="false"
-            echo -e "$(tput setaf 1)Error! Missing namespace built-in metric ID.$(tput sgr 0)"
-            echo -e "Namespace ID exist in the system:\n$all_id_list"
-        fi
-
-        total_num="0"
-        all_id_list=""
-        for measurement in "${nodeMeasurementsArray[@]}"
-        do
-            unique_id_list=$(kubectl -n $install_namespace exec $influxdb_pod_name -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database metric_instance_workload_le3599 -execute "select * from $measurement where time < now() - ${verify_before_time_range} order by time asc limit 100"|tail -n+4|grep -o " builtin-[^ ]*"|sed 's/^ *//g'|sort|uniq)
-            if [ "$unique_id_list" != "" ]; then
-                unique_id_num=$(echo "$unique_id_list"|wc -l)
-                total_num=$((total_num+unique_id_num))
-                if [ "$all_id_list" = "" ]; then
-                    all_id_list="$unique_id_list"
-                else
-                    all_id_list="$all_id_list"$'\n'"$unique_id_list"
-                fi
-            fi
-        done
-        if [ "$total_num" -lt "2" ]; then
-            verification_result="false"
-            echo -e "$(tput setaf 1)Error! Missing node built-in metric ID.$(tput sgr 0)"
-            echo -e "Node ID exist in the system:\n$all_id_list"
-        fi
-        if [ "$verification_result" != "true" ]; then
-            leave_prog
-            exit 8
-        fi
+        metricsArray=("container_cpu" "container_memory" "namespace_cpu" "namespace_memory" "node_cpu" "node_memory")
     fi
+    metrics_required_number=`echo "${#metricsArray[@]}"`
+    influxdb_pod_name="`kubectl get pods -n $install_namespace |grep "alameda-influxdb-"|awk '{print $1}'|head -1`"
+    metrics_list=$(kubectl exec $influxdb_pod_name -n $install_namespace -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database alameda_metric -execute "show measurements")
+    metrics_num_found="0"
+    for i in $(seq 0 $((metrics_required_number-1)))
+    do
+        echo "$metrics_list"|grep -q "^${metricsArray[$i]}$"
+        if [ "$?" = "0" ]; then
+            metrics_num_found=$((metrics_num_found+1))
+        fi
+    done
 
+    if [ "$metrics_num_found" -lt "$metrics_required_number" ]; then
+        echo -e "\n$(tput setaf 1)Error! $mode metrics in alameda_metric is not complete.$(tput sgr 0)"
+        echo "=============================="
+        echo "Required metrics number: $metrics_required_number"
+        echo "Required metrics: ${metricsArray[*]}"
+        echo "=============================="
+        echo "Required metrics found = $metrics_num_found"
+        echo "Current metrics:"
+        echo "$metrics_list"
+        echo "=============================="
+        leave_prog
+        exit 8
+    fi
     echo "Done"
 }
 
@@ -1117,9 +1074,9 @@ get_datadog_agent_info()
 
 get_cluster_name_from_alamedascaler()
 {
-    cluster_name=$(kubectl exec alameda-influxdb-0 -n ${install_namespace} -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database alameda_target -execute "select resource_k8s_min_replicas,cluster_name from controller where \"alameda_scaler_name\"='$alamedascaler_name' and \"namespace\"='$nginx_ns' and \"kind\"='$kind_name'"|tail -n+4|awk '{print $3}'|head -1)
+    cluster_name="$(kubectl get alamedascaler $alamedascaler_name -n $install_namespace -o jsonpath='{.spec.clusterName}')"
     if [ "$cluster_name" = "" ]; then
-        echo -e "\n$(tput setaf 1)Error! Failed to get cluster name in alameda_target..controller by alamedascaler ($alamedascaler_name).$(tput sgr 0)"
+        echo -e "\n$(tput setaf 1)Error! Failed to get cluster name from alamedascaler ($alamedascaler_name).$(tput sgr 0)"
         exit 3
     fi
 }
@@ -1127,12 +1084,21 @@ get_cluster_name_from_alamedascaler()
 get_datasource_in_alamedaorganization()
 {
     # Get cluster specific data source setting
-    data_source_type=$(kubectl exec alameda-influxdb-0 -n ${install_namespace} -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database alameda_config -execute "select data_source from tenancy_cluster where \"name\"='$cluster_name' and \"global_config\"='false' and \"type\"='k8s'"|tail -n+4|awk '{print $2}'|head -1)
+    data_source_type="$(kubectl get alamedaorganization -o jsonpath="{range .items[*]}{.spec.clusters[?(@.name==\"$cluster_name\")].dataSource.type}")"
     if [ "$data_source_type" = "" ]; then
-        echo -e "\n$(tput setaf 1)Error! Failed to find data source of cluster ($cluster_name) in alameda_config..tenancy_cluster$(tput sgr 0)"
+        echo -e "\n$(tput setaf 1)Error! Failed to find data source of cluster ($cluster_name) in alamedaorganization CR.$(tput sgr 0)"
         echo -e "$(tput setaf 1)Remember to configure cluster through GUI before running preloader script or check specified cluster name.$(tput sgr 0)"
         exit 3
     fi
+
+    # 4.5.1 has no global data source
+    # # Get global data source setting
+    # data_source_type="$(kubectl get alamedaorganization -o jsonpath='{range .items[*]}{.spec.dataSource.type}')"
+    # if [ "$data_source_type" = "" ]; then
+    #     echo -e "\n$(tput setaf 1)Error! Failed to find global data source setting in alamedaorganization CR.$(tput sgr 0)"
+    #     echo -e "$(tput setaf 1)Remember to set up alamedaorganization before running preloader.$(tput sgr 0)"
+    #     exit 3
+    # fi
 }
 
 # 4.4 will handle local cluster automatically
@@ -1162,101 +1128,97 @@ check_cluster_name_not_empty()
 {
     if [ "$cluster_name" = "" ]; then
         echo -e "\n$(tput setaf 1)Error! Cluster name can't be empty. Use option '-a' to specify cluster name$(tput sgr 0)"
+        echo -e "$(tput setaf 1)You can look up cluster name info by following command: $(tput sgr 0)"
+        echo -e "$(tput setaf 1)kubectl -n <Federator.ai namespace> get alamedascaler$(tput sgr 0)"
         show_usage
         exit 3
     fi
 }
 
-check_needed_commands()
-{
-    type jq > /dev/null 2>&1
-    if [ "$?" != "0" ];then
-        echo -e "\n$(tput setaf 1)Error! Failed to locate jq command.$(tput sgr 0)"
-        echo "Please intall jq command by following steps:"
-        echo "a) curl -sLo jq https://github.com/stedolan/jq/releases/download/jq-1.6/jq-linux64"
-        echo "b) chmod +x jq"
-        echo "c) mv jq /usr/bin"
-        leave_prog
-        exit 8
-    fi
-}
-
 add_alamedascaler_for_nginx()
 {
-    check_needed_commands
     start=`date +%s`
     echo -e "\n$(tput setaf 6)Adding/Updating NGINX alamedascaler ...$(tput sgr 0)"
     check_cluster_name_not_empty
+    nginx_alamedascaler_file="nginx_alamedascaler_file"
 
     if [ "$openshift_minor_version" = "" ]; then
-        # K8S - Deployment
-        kind_type="1"
-        kind_name="DEPLOYMENT"
+        # K8S
+        kind_type="Deployment"
     else
-        # OpenShift - DeploymentConfig
-        kind_type="3"
-        kind_name="DEPLOYMENTCONFIG"
+        # OpenShift
+        kind_type="DeploymentConfig"
     fi
 
-    if [ "$(find_current_scalers '1')" = "n" ]; then
-        # Create new scaler
-        json_data="{\"data\":[{\"object_meta\":{\"name\":\"${alamedascaler_name}\",\"namespace\":\"${install_namespace}\"\
-        ,\"nodename\":\"\",\"clustername\":\"\",\"uid\":\"\",\"creationtimestamp\":0},\"target_cluster_name\":\"${cluster_name}\",\
-        \"correlation_analysis\":2,\"controllers\":[{\"evictable\":{\"value\":${evictable_option}},\"enable_execution\":{\"value\":false},\
-        \"scaling_type\":${autoscaling_method},\"application_type\":\"generic\",\"generic\":{\"target\":{\"namespace\":\"${nginx_ns}\",\
-        \"name\":\"${nginx_name}\",\"controller_kind\":${kind_type}},\"hpa_parameters\":{\"min_replicas\":{\"value\":1},\
-        \"max_replicas\":40}},\"metrics\":[]}]}]}"
 
+    cat > ${nginx_alamedascaler_file} << __EOF__
+apiVersion: autoscaling.containers.ai/v1alpha2
+kind: AlamedaScaler
+metadata:
+    name: ${alamedascaler_name}
+    namespace: ${install_namespace}
+spec:
+    clusterName: ${cluster_name}
+    controllers:
+    - type: generic
+      enableExecution: ${enable_execution}
+      scaling: ${autoscaling_method}
+      evictable: true
+      generic:
+        target:
+          namespace: ${nginx_ns}
+          name: ${nginx_name}
+          kind: ${kind_type}
+        hpaParameters:
+          maxReplicas: 40
+          minReplicas: 1
+__EOF__
+    kubectl apply -f ${nginx_alamedascaler_file}
+    if [ "$?" != "0" ]; then
+        echo -e "\n$(tput setaf 1)Error! Add/Update alamedascaler for NGINX app failed.$(tput sgr 0)"
+        leave_prog
+        exit 8
+    fi
+    sleep 10
+
+    # Change namespace to 'monitoring' instead of default 'collecting' state
+    # rest api to update namespace state
+    # method:  PUT
+    # rest url: http://127.0.0.1:5055/apis/v1/configs/updatenamespacestate
+    # request body: {"data": { "cluster_name": "my-k8s-1", "name": "kube-system", "state": "monitoring"}}
+    json_data="{\"data\": { \"cluster_name\": \"${cluster_name}\", \"name\": \"${nginx_ns}\", \"state\": \"monitoring\"}}"
+    # Retry maximum 20*15s=300s because data-adapter took time to add namespace into alameda_cluster_status.namespace measurement
+    for i in `seq 1 20`; do
         rest_pod_name="`kubectl get pods -n ${install_namespace} | grep "federatorai-rest-" | awk '{print $1}' | head -1`"
-        create_response="$(kubectl -n ${install_namespace} exec -t ${rest_pod_name} -- \
-        curl -s -X POST -v -H "Content-Type: application/json" \
-            -u "${auth_username}:${auth_password}" \
-            -d "${json_data}" \
-            http://127.0.0.1:5055/apis/v1/configs/scaler 2>&1)"
-        if [ "`echo \"${create_response}\" | grep 'HTTP/1.1 200 '`" = "" ]; then
-            echo -e "\n$(tput setaf 1)Error! Create alamedascaler for NGINX app failed.$(tput sgr 0)"
-            echo -e "The request response shows as following.\n${create_response}\n"
-            leave_prog
-            exit 8
+        (kubectl -n ${install_namespace} exec -it ${rest_pod_name} -- \
+            curl -s -v -X PUT -H "Content-Type: application/json" \
+                -u "${auth_username}:${auth_password}" \
+                -d "${json_data}" \
+                http://127.0.0.1:5055/apis/v1/configs/updatenamespacestate \
+                2>&1) > /tmp/.preloader-running.$$
+        cat /tmp/.preloader-running.$$ >> $debug_log
+        # Wait until exists in alameda_cluster_status.namespace
+        grep "Namespace .*. in cluster .*. is not found" /tmp/.preloader-running.$$ > /dev/null
+        if [ "$?" = "0" ]; then
+            echo "Waiting for namespace ${nginx_ns} become ready in database"
+            sleep 15
+            continue
         fi
-        if [ "$(find_current_scalers '5')" = "n" ]; then
-            echo -e "\n$(tput setaf 1)Error! Failed to find new created NGINX alamedascaler.$(tput sgr 0)"
-            leave_prog
-            exit 8
+        #
+        grep 'HTTP/1.1 200 OK' /tmp/.preloader-running.$$ > /dev/null
+        if [ "$?" = "0" ]; then
+            break
         fi
-        sleep 10
-    fi
-
+        cat /tmp/.preloader-running.$$
+        echo "Error in setting 'monitoring' state." >> $debug_log
+        echo "Error in setting 'monitoring' state."
+        sleep 5
+    done
+    rm -f /tmp/.preloader-running.$$
     echo "Done"
     end=`date +%s`
     duration=$((end-start))
     echo "Duration add_alamedascaler_for_nginx = $duration" >> $debug_log
-}
-
-find_current_scalers()
-{
-    repeat="$1"
-    rest_pod_name="`kubectl get pods -n ${install_namespace} | grep "federatorai-rest-" | awk '{print $1}' | head -1`"
-    # test if scaler exist (10-12 seconds)
-    for i in `seq 1 $repeat`
-    do
-        get_result=$(kubectl -n ${install_namespace} exec -it ${rest_pod_name} -- \
-            curl -s -X GET -H "Content-Type: application/json" \
-                -u "${auth_username}:${auth_password}" \
-                http://127.0.0.1:5055/apis/v1/configs/scaler)
-
-        record="$(echo "$get_result"|jq ".data[]|select (.target_cluster_name == \"${cluster_name}\") |select (.object_meta.name == \"${alamedascaler_name}\")|select (.controllers[].generic.target.namespace == \"${nginx_ns}\")" 2>/dev/null)"
-
-        if [ "$record" = "" ]; then
-            sleep 2
-            continue
-        else
-            echo "y"
-            return
-        fi
-    done
-    echo "n"
-    return
 }
 
 cleanup_influxdb_prediction_related_contents()
@@ -1329,41 +1291,6 @@ cleanup_influxdb_preloader_related_contents()
     end=`date +%s`
     duration=$((end-start))
     echo "Duration cleanup_influxdb_preloader_related_contents = $duration" >> $debug_log
-    cleanup_influxdb_3er_metrics
-}
-
-cleanup_influxdb_3er_metrics(){
-    start=`date +%s`
-    echo -e "\n$(tput setaf 6)Cleaning old influxdb 3er preloader metrics records ...$(tput sgr 0)"
-    influxdb_pod_name="`kubectl get pods -n $install_namespace |grep "alameda-influxdb-"|awk '{print $1}'|head -1`"
-
-    target_databases=( metric_instance_workload_le3599 metric_instance_workload_le21599 metric_instance_workload_le86399
-    metric_instance_workload_ge86400 metric_instance_prediction_le3599 metric_instance_prediction_le21599
-    metric_instance_prediction_le86399 metric_instance_prediction_ge86400 metric_instance_recommendation_le3599
-    metric_instance_recommendation_le21599 metric_instance_recommendation_le86399 metric_instance_recommendation_ge86400
-    metric_instance_planning_le3599 metric_instance_planning_le21599 metric_instance_planning_le86399
-    metric_instance_planning_ge86400)
-    for db in "${target_databases[@]}"
-    do
-        measurement_list="`kubectl exec $influxdb_pod_name -n $install_namespace -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database $db -execute "show measurements" 2>&1 |tail -n+4`"
-        echo "database=$db"
-        # prepare sql command
-        m_list=""
-        for measurement in `echo $measurement_list`
-        do
-            m_list="${m_list} ${measurement}"
-            sql_cmd="${sql_cmd}drop measurement $measurement;"
-        done
-        if [ "${m_list}" != "" ]; then
-            echo "cleaning up measurements: ${m_list}"
-            kubectl exec $influxdb_pod_name -n $install_namespace -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database $db -execute "${sql_cmd}" | grep -v "^$"
-        fi
-    done
-
-    echo "Done."
-    end=`date +%s`
-    duration=$((end-start))
-    echo "Duration cleanup_influxdb_3er_metrics = $duration" >> $debug_log
 }
 
 check_prediction_status()
@@ -1619,7 +1546,7 @@ if [ "$#" -eq "0" ]; then
     exit
 fi
 
-while getopts "f:n:t:s:x:g:cjdehikprvoyba:u:" o; do
+while getopts "f:n:t:s:x:g:cjdehikprvoba:u:" o; do
     case "${o}" in
         p)
             prepare_environment="y"
@@ -1668,9 +1595,6 @@ while getopts "f:n:t:s:x:g:cjdehikprvoyba:u:" o; do
         #     autoscaling_specified="y"
         #     x_arg=${OPTARG}
         #     ;;
-        y)
-            data_verification_enabled="y"
-            ;;
         g)
             traffic_ratio_specified="y"
             g_arg=${OPTARG}
@@ -1704,6 +1628,8 @@ if [ "`curl --version 2> /dev/null`" = "" ]; then
     echo -e "\nThe 'curl' command is missing. Please install 'curl' command."
     exit 1
 fi
+
+#
 kubectl version|grep -q "^Server"
 if [ "$?" != "0" ];then
     echo -e "\nPlease login to Kubernetes first."
@@ -1772,6 +1698,13 @@ if [ "$cluster_name_specified" = "y" ]; then
         fi
     fi
 
+    # check cluster-only alamedascaler exist
+    kubectl get alamedascaler -n $install_namespace -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.spec.clusterName}{"\n"}'|grep -q "^${cluster_name} ${cluster_name}"
+    if [ "$?" != "0" ];then
+        echo -e "\n$(tput setaf 1)Error! Failed to find cluster-only alamedascaler with cluster name ($cluster_name).$(tput sgr 0)"
+        echo -e "\n$(tput setaf 1)Please use Federator.ai GUI to configure cluster first.$(tput sgr 0)"
+        exit 7
+    fi
 fi
 
 if [ "$future_mode_enabled" = "y" ]; then
@@ -1826,15 +1759,7 @@ fi
 # else
 #     autoscaling_method="hpa"
 # fi
-if [ "$data_verification_enabled" = "y" ]; then
-    # PredictOnly
-    autoscaling_method="1"
-    evictable_option="false"
-else
-    # HPA
-    autoscaling_method="2"
-    evictable_option="true"
-fi
+autoscaling_method="hpa"
 
 if [ "$nginx_name_specified" = "y" ]; then
     nginx_name=$n_arg
@@ -1935,6 +1860,7 @@ echo "Receiving command '$0 $@'" >> $debug_log
 
 if [ "$prepare_environment" = "y" ]; then
     if [ "$k8s_enabled" = "true" ]; then
+        #delete_all_alamedascaler
         if [ "$cluster_name" != "" ]; then
             # -a is used to specify cluster_name
             new_nginx_example
@@ -2015,6 +1941,7 @@ if [ "$revert_environment" = "y" ]; then
     scale_up_pods
     if [ "$k8s_enabled" = "true" ]; then
         # K8S
+        #delete_all_alamedascaler
         delete_nginx_example
         #patch_datahub_back_to_normal
         #patch_grafana_back_to_normal
