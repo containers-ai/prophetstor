@@ -151,17 +151,30 @@ wait_until_data_pump_finish()
   type="$3"
 
   for ((i=0; i<$period; i+=$interval)); do
+    duration_time=$(date -d @${i} +"%H:%M:%S" -u)
     if [ "$type" = "future" ]; then
-        echo "Waiting for data pump (future mode) to finish ..."
+        echo "Waiting for data pump (future mode) to finish (Time Elapsed = $duration_time)..."
         kubectl logs -n $install_namespace $current_preloader_pod_name | grep -q "Completed to loader container future metrics data"
         if [ "$?" = "0" ]; then
             echo -e "\n$(tput setaf 6)The data pump (future mode) is finished.$(tput sgr 0)"
             return 0
         fi
     else #historical mode
-        echo "Waiting for data pump to finish ..."
+        echo "Waiting for data pump to finish (Time Elapsed = $duration_time)..."
         if [[ "`kubectl logs -n $install_namespace $current_preloader_pod_name | egrep "Succeed to generate pods historical metrics|Succeed to generate nodes historical metrics" | wc -l`" -gt "1" ]]; then
             echo -e "\n$(tput setaf 6)The data pump is finished.$(tput sgr 0)"
+            starttime_utc="$(kubectl logs -n $install_namespace $current_preloader_pod_name|grep 'Start PreLoader agent'|awk '{print $1}')"
+            endtime_utc="$(kubectl logs -n $install_namespace $current_preloader_pod_name|grep 'Succeed to'|tail -1|awk '{print $1}')"
+            if [ "$starttime_utc" != "" ] && [ "$endtime_utc" != "" ]; then
+                startime_timestamp="$(date -d "$starttime_utc" +%s)"
+                endtime_timestamp="$(date -d "$endtime_utc" +%s)"
+                if [ "$startime_timestamp" != "" ] && [ "$endtime_timestamp" != "" ]; then
+                    duration_seconds="$(($endtime_timestamp-$startime_timestamp))"
+                    duration_time=$(date -d @${duration_seconds} +"%H:%M:%S" -u)
+                    echo "Pumping duration in seconds = $duration_seconds" |tee -a $debug_log
+                    echo -e "Pumping duration(H:M:S) = $duration_time" |tee -a $debug_log
+                fi
+            fi
             return 0
         fi
     fi
@@ -185,6 +198,26 @@ get_current_executor_name()
 {
     current_executor_pod_name="`kubectl get pods -n $install_namespace |grep "alameda-executor-"|awk '{print $1}'|head -1`"
     echo "current_executor_pod_name = $current_executor_pod_name"
+}
+
+display_resources_detail()
+{
+    influxdb_pod_name="`kubectl get pods -n $install_namespace |grep "alameda-influxdb-"|awk '{print $1}'|head -1`"
+    total_pods="$(kubectl exec $influxdb_pod_name -n $install_namespace -- influx -ssl -unsafeSsl -precision rfc3339 \
+        -username admin -password adminpass -database alameda_cluster_status -format 'csv' -execute \
+        'select "policy","name","namespace" from pod' 2>/dev/null|sed 1d)"
+    total_pod_number="$(echo "$total_pods"|wc -l)"
+    total_namespace_number="$(echo "$total_pods"|cut -d ',' -f 5|sort|uniq|wc -l)"
+    total_node_number="$(kubectl exec $influxdb_pod_name -n $install_namespace -- influx -ssl -unsafeSsl -precision rfc3339 \
+        -username admin -password adminpass -database alameda_cluster_status -format 'csv' -execute \
+        'select * from node' 2>/dev/null|sed 1d|wc -l)"
+    total_vm_number=$(kubectl exec $influxdb_pod_name -n $install_namespace -- influx -ssl -unsafeSsl -precision rfc3339 \
+        -username admin -password adminpass -database alameda_cluster_status -format 'csv' -execute \
+        "select * from node where type='vm'" 2>/dev/null|sed 1d|wc -l)
+    echo -e "Number of target pod = $total_pod_number" |tee -a $debug_log
+    echo -e "Number of target namespace = $total_namespace_number" |tee -a $debug_log
+    echo -e "Number of target node = $total_node_number" |tee -a $debug_log
+    echo -e "Number of target vm = $total_vm_number" |tee -a $debug_log
 }
 
 _do_cluster_status_verify()
@@ -363,6 +396,7 @@ run_preloader_command()
 
     start=`date +%s`
     echo -e "\n$(tput setaf 6)Running preloader in $running_mode mode...$(tput sgr 0)"
+    display_resources_detail
     get_current_preloader_name
     if [ "$current_preloader_pod_name" = "" ]; then
         echo -e "\n$(tput setaf 1)ERROR! Can't find installed preloader pod.$(tput sgr 0)"
@@ -376,7 +410,7 @@ run_preloader_command()
 
     if [ "$disable_all_node_metrics" = "y" ]; then
         echo -e "$(tput setaf 6)Disable load on empty node.$(tput sgr 0)"
-        kubectl exec -n $install_namespace $current_preloader_pod_name -- /opt/alameda/federatorai-agent/bin/transmitter enable --state=true --DisableLoadAllNodeMetrics=true
+        kubectl exec -n $install_namespace $current_preloader_pod_name -- /opt/alameda/federatorai-agent/bin/transmitter enable --state=true --DisableLoadAllNodeMetrics=true --random=true
     else
         kubectl exec -n $install_namespace $current_preloader_pod_name -- /opt/alameda/federatorai-agent/bin/transmitter enable
     fi
@@ -401,7 +435,7 @@ run_preloader_command()
         fi
     fi
 
-    wait_until_data_pump_finish 7200 120 "historical"
+    wait_until_data_pump_finish 21600 60 "historical"
     echo "Done."
     end=`date +%s`
     duration=$((end-start))
@@ -428,7 +462,7 @@ run_futuremode_preloader()
 
     echo "Checking..."
     sleep 10
-    wait_until_data_pump_finish 3600 60 "future"
+    wait_until_data_pump_finish 21600 60 "future"
     echo "Done."
     end=`date +%s`
     duration=$((end-start))
@@ -1227,6 +1261,40 @@ add_alamedascaler_for_nginx()
         sleep 10
     fi
 
+    # Change namespace to 'monitoring' instead of default 'collecting' state
+    # rest api to update namespace state
+    # method:  PUT
+    # rest url: http://127.0.0.1:5055/apis/v1/configs/updatenamespacestate
+    # request body: {"data": { "cluster_name": "my-k8s-1", "name": "kube-system", "state": "monitoring"}}
+    json_data="{\"data\": { \"cluster_name\": \"${cluster_name}\", \"name\": \"${nginx_ns}\", \"state\": \"monitoring\"}}"
+    # Retry maximum 20*15s=300s because data-adapter took time to add namespace into alameda_cluster_status.namespace measurement
+    for i in `seq 1 20`; do
+        rest_pod_name="`kubectl get pods -n ${install_namespace} | grep "federatorai-rest-" | awk '{print $1}' | head -1`"
+        (kubectl -n ${install_namespace} exec -it ${rest_pod_name} -- \
+            curl -s -v -X PUT -H "Content-Type: application/json" \
+                -u "${auth_username}:${auth_password}" \
+                -d "${json_data}" \
+                http://127.0.0.1:5055/apis/v1/configs/updatenamespacestate \
+                2>&1) > /tmp/.preloader-running.$$
+        cat /tmp/.preloader-running.$$ >> $debug_log
+        # Wait until exists in alameda_cluster_status.namespace
+        grep "Namespace .*. in cluster .*. is not found" /tmp/.preloader-running.$$ > /dev/null
+        if [ "$?" = "0" ]; then
+            echo "Waiting for namespace ${nginx_ns} become ready in database"
+            sleep 15
+            continue
+        fi
+        #
+        grep 'HTTP/1.1 200 OK' /tmp/.preloader-running.$$ > /dev/null
+        if [ "$?" = "0" ]; then
+            break
+        fi
+        cat /tmp/.preloader-running.$$
+        echo "Error in setting 'monitoring' state." >> $debug_log
+        echo "Error in setting 'monitoring' state."
+        sleep 5
+    done
+    rm -f /tmp/.preloader-running.$$
     echo "Done"
     end=`date +%s`
     duration=$((end-start))
@@ -1609,6 +1677,11 @@ disable_preloader_in_alamedaservice()
 
 clean_environment_operations()
 {
+    get_current_preloader_name
+    if [ "$current_preloader_pod_name" != "" ]; then
+        echo -e "Deleting preloader pod to renew the pod state..."
+        kubectl delete pod -n $install_namespace $current_preloader_pod_name
+    fi
     cleanup_influxdb_preloader_related_contents
     cleanup_influxdb_prediction_related_contents
     cleanup_alamedaai_models
@@ -1631,6 +1704,7 @@ while getopts "f:n:t:s:x:g:cjdehikprvoyba:u:" o; do
             remove_nginx="y"
             ;;
         j)
+            # For data verifier
             disable_all_node_metrics="y"
             ;;
         c)
@@ -1668,9 +1742,6 @@ while getopts "f:n:t:s:x:g:cjdehikprvoyba:u:" o; do
         #     autoscaling_specified="y"
         #     x_arg=${OPTARG}
         #     ;;
-        y)
-            data_verification_enabled="y"
-            ;;
         g)
             traffic_ratio_specified="y"
             g_arg=${OPTARG}
@@ -1704,6 +1775,7 @@ if [ "`curl --version 2> /dev/null`" = "" ]; then
     echo -e "\nThe 'curl' command is missing. Please install 'curl' command."
     exit 1
 fi
+
 kubectl version|grep -q "^Server"
 if [ "$?" != "0" ];then
     echo -e "\nPlease login to Kubernetes first."
@@ -1826,10 +1898,12 @@ fi
 # else
 #     autoscaling_method="hpa"
 # fi
-if [ "$data_verification_enabled" = "y" ]; then
+if [ "$disable_all_node_metrics" = "y" ]; then
+    # For data verifier
     # PredictOnly
     autoscaling_method="1"
     evictable_option="false"
+    enable_execution="false"
 else
     # HPA
     autoscaling_method="2"

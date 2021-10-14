@@ -1,13 +1,11 @@
-apiVersion: admissionregistration.k8s.io/v1
+apiVersion: admissionregistration.k8s.io/v1beta1
 kind: ValidatingWebhookConfiguration
 metadata:
   creationTimestamp: null
   name: federatorai-operator-servicesvalidation
 webhooks:
-- admissionReviewVersions:
-  - v1beta1
-  - v1
-  clientConfig:
+- clientConfig:
+    caBundle: Cg==
     service:
       name: federatorai-operator-service
       namespace: federatorai
@@ -24,4 +22,3 @@ webhooks:
     - UPDATE
     resources:
     - alamedaservices
-  sideEffects: None
