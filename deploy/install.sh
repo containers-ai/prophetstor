@@ -1204,6 +1204,17 @@ else
     echo "Done"
 fi
 
+fedemeter_influxdb_size="10"
+# Platform Check
+if [ "$DISABLE_PLATFORM_CHECK" = "" ]; then
+    # check IBM cloud platform
+    kubectl get nodes -o  jsonpath='{.items[*].metadata.labels}' 2>/dev/null|grep -q 'ibm-cloud.kubernetes.io'
+    if [ "$?" = "0" ]; then
+        IBM_env="y"
+        fedemeter_influxdb_size="20"
+    fi
+fi
+
 # Modify federator.ai operator yaml(s)
 # for tag
 if [ "$aws_mode" = "y" ]; then
@@ -1219,7 +1230,11 @@ else
     if [ "$ECR_URL" != "" ]; then
         sed -i "s|quay.io/prophetstor/federatorai-operator-ubi:latest|$ECR_URL|g" 03*.yaml
     else
-        sed -i "s/:latest$/:${tag_number}/g" 03*.yaml
+        if [ "$IBM_env" = "y" ]; then
+            sed -i "s/:latest$/:${tag_number}-ibm/g" 03*.yaml
+        else
+            sed -i "s/:latest$/:${tag_number}/g" 03*.yaml
+        fi
     fi
 fi
 
@@ -1584,7 +1599,7 @@ __EOF__
     storages:
     - usage: data
       type: pvc
-      size: 10Gi
+      size: ${fedemeter_influxdb_size}Gi
       class: ${storage_class}
       accessModes:
         - ReadWriteOnce
@@ -1635,7 +1650,7 @@ __EOF__
     storages:
     - usage: data
       type: pvc
-      size: 10Gi
+      size: ${fedemeter_influxdb_size}Gi
       class: ${storage_class}
       accessModes:
         - ReadWriteOnce
