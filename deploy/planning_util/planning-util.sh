@@ -790,7 +790,7 @@ create_variable_tf()
         echo "" >> $variable_tf_name
         echo "module \"$module_name\" {" >> $variable_tf_name
         echo "    source  = \"prophetstor-ai/resource-provision/federatorai\"" >> $variable_tf_name
-        echo "    version = \"4.6.0\"" >> $variable_tf_name
+        echo "    version = \"4.7.2\"" >> $variable_tf_name
         echo "    federatorai_resource_id = \"${resource_id}\"" >> $variable_tf_name
         echo "    federatorai_cluster_name = \"${cluster_name}\"" >> $variable_tf_name
         echo "    federatorai_recommendations = var.federatorai_recommendations" >> $variable_tf_name
