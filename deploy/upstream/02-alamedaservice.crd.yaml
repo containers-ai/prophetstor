@@ -3538,7 +3538,6 @@ spec:
                         type: string
                     type: object
                   tls:
-                    description: Version         string   `json:"version,omitempty"`
                     properties:
                       enabled:
                         type: boolean
