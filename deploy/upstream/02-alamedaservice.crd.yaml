@@ -56,8 +56,6 @@ spec:
                         description: PullPolicy describes a policy for if/when to
                           pull a container image
                         type: string
-                      version:
-                        type: string
                     type: object
                   env:
                     items:
@@ -230,8 +228,6 @@ spec:
                       - usage
                       type: object
                     type: array
-                  version:
-                    type: string
                 type: object
               alamedaAi:
                 properties:
@@ -243,8 +239,6 @@ spec:
                         description: PullPolicy describes a policy for if/when to
                           pull a container image
                         type: string
-                      version:
-                        type: string
                     type: object
                   env:
                     items:
@@ -417,8 +411,6 @@ spec:
                       - usage
                       type: object
                     type: array
-                  version:
-                    type: string
                 type: object
               alamedaDatahub:
                 properties:
@@ -430,8 +422,6 @@ spec:
                         description: PullPolicy describes a policy for if/when to
                           pull a container image
                         type: string
-                      version:
-                        type: string
                     type: object
                   env:
                     items:
@@ -604,8 +594,6 @@ spec:
                       - usage
                       type: object
                     type: array
-                  version:
-                    type: string
                 type: object
               alamedaExecutor:
                 properties:
@@ -617,8 +605,6 @@ spec:
                         description: PullPolicy describes a policy for if/when to
                           pull a container image
                         type: string
-                      version:
-                        type: string
                     type: object
                   env:
                     items:
@@ -791,8 +777,6 @@ spec:
                       - usage
                       type: object
                     type: array
-                  version:
-                    type: string
                 type: object
               alamedaInfluxdb:
                 properties:
@@ -804,8 +788,6 @@ spec:
                         description: PullPolicy describes a policy for if/when to
                           pull a container image
                         type: string
-                      version:
-                        type: string
                     type: object
                   env:
                     items:
@@ -978,8 +960,6 @@ spec:
                       - usage
                       type: object
                     type: array
-                  version:
-                    type: string
                 type: object
               alamedaNotifier:
                 properties:
@@ -991,8 +971,6 @@ spec:
                         description: PullPolicy describes a policy for if/when to
                           pull a container image
                         type: string
-                      version:
-                        type: string
                     type: object
                   env:
                     items:
@@ -1165,8 +1143,6 @@ spec:
                       - usage
                       type: object
                     type: array
-                  version:
-                    type: string
                 type: object
               alamedaRabbitMQ:
                 properties:
@@ -1178,8 +1154,6 @@ spec:
                         description: PullPolicy describes a policy for if/when to
                           pull a container image
                         type: string
-                      version:
-                        type: string
                     type: object
                   env:
                     items:
@@ -1352,8 +1326,6 @@ spec:
                       - usage
                       type: object
                     type: array
-                  version:
-                    type: string
                 type: object
               autoPatchPrometheusRules:
                 type: boolean
@@ -1473,8 +1445,6 @@ spec:
                         description: PullPolicy describes a policy for if/when to
                           pull a container image
                         type: string
-                      version:
-                        type: string
                     type: object
                   env:
                     items:
@@ -1647,8 +1617,6 @@ spec:
                       - usage
                       type: object
                     type: array
-                  version:
-                    type: string
                 type: object
               fedemeterInfluxdb:
                 properties:
@@ -1660,8 +1628,6 @@ spec:
                         description: PullPolicy describes a policy for if/when to
                           pull a container image
                         type: string
-                      version:
-                        type: string
                     type: object
                   env:
                     items:
@@ -1834,8 +1800,6 @@ spec:
                       - usage
                       type: object
                     type: array
-                  version:
-                    type: string
                 type: object
               federatoraiAgent:
                 properties:
@@ -1847,8 +1811,6 @@ spec:
                         description: PullPolicy describes a policy for if/when to
                           pull a container image
                         type: string
-                      version:
-                        type: string
                     type: object
                   env:
                     items:
@@ -2021,8 +1983,6 @@ spec:
                       - usage
                       type: object
                     type: array
-                  version:
-                    type: string
                 type: object
               federatoraiAgentPreloader:
                 properties:
@@ -2034,8 +1994,6 @@ spec:
                         description: PullPolicy describes a policy for if/when to
                           pull a container image
                         type: string
-                      version:
-                        type: string
                     type: object
                   env:
                     items:
@@ -2208,8 +2166,6 @@ spec:
                       - usage
                       type: object
                     type: array
-                  version:
-                    type: string
                 type: object
               federatoraiBackend:
                 properties:
@@ -2221,8 +2177,6 @@ spec:
                         description: PullPolicy describes a policy for if/when to
                           pull a container image
                         type: string
-                      version:
-                        type: string
                     type: object
                   env:
                     items:
@@ -2395,8 +2349,6 @@ spec:
                       - usage
                       type: object
                     type: array
-                  version:
-                    type: string
                 type: object
               federatoraiDataAdapter:
                 properties:
@@ -2408,8 +2360,6 @@ spec:
                         description: PullPolicy describes a policy for if/when to
                           pull a container image
                         type: string
-                      version:
-                        type: string
                     type: object
                   env:
                     items:
@@ -2582,8 +2532,6 @@ spec:
                       - usage
                       type: object
                     type: array
-                  version:
-                    type: string
                 type: object
               federatoraiFrontend:
                 properties:
@@ -2595,8 +2543,6 @@ spec:
                         description: PullPolicy describes a policy for if/when to
                           pull a container image
                         type: string
-                      version:
-                        type: string
                     type: object
                   env:
                     items:
@@ -2769,8 +2715,6 @@ spec:
                       - usage
                       type: object
                     type: array
-                  version:
-                    type: string
                 type: object
               federatoraiPostgreSQL:
                 properties:
@@ -2782,8 +2726,6 @@ spec:
                         description: PullPolicy describes a policy for if/when to
                           pull a container image
                         type: string
-                      version:
-                        type: string
                     type: object
                   env:
                     items:
@@ -2956,8 +2898,6 @@ spec:
                       - usage
                       type: object
                     type: array
-                  version:
-                    type: string
                 type: object
               federatoraiRecommendDispatcher:
                 properties:
@@ -2969,8 +2909,6 @@ spec:
                         description: PullPolicy describes a policy for if/when to
                           pull a container image
                         type: string
-                      version:
-                        type: string
                     type: object
                   env:
                     items:
@@ -3143,8 +3081,6 @@ spec:
                       - usage
                       type: object
                     type: array
-                  version:
-                    type: string
                 type: object
               federatoraiRecommendWorker:
                 properties:
@@ -3156,8 +3092,6 @@ spec:
                         description: PullPolicy describes a policy for if/when to
                           pull a container image
                         type: string
-                      version:
-                        type: string
                     type: object
                   env:
                     items:
@@ -3330,8 +3264,6 @@ spec:
                       - usage
                       type: object
                     type: array
-                  version:
-                    type: string
                 type: object
               federatoraiRest:
                 properties:
@@ -3343,8 +3275,6 @@ spec:
                         description: PullPolicy describes a policy for if/when to
                           pull a container image
                         type: string
-                      version:
-                        type: string
                     type: object
                   env:
                     items:
@@ -3517,8 +3447,6 @@ spec:
                       - usage
                       type: object
                     type: array
-                  version:
-                    type: string
                 type: object
               imageLocation:
                 type: string
