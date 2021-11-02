@@ -183,22 +183,6 @@ rules:
   verbs:
   - '*'
 - apiGroups:
-  - monitoring.coreos.com
-  resources:
-  - prometheuses
-  verbs:
-  - list
-- apiGroups:
-  - monitoring.coreos.com
-  resources:
-  - prometheusrules
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - update
-- apiGroups:
   - rbac.authorization.k8s.io
   resources:
   - clusterrolebindings
@@ -235,14 +219,6 @@ rules:
   - storage.k8s.io
   resources:
   - storageclasses
-  verbs:
-  - list
-  - watch
-- apiGroups:
-  - volumesnapshot.external-storage.k8s.io
-  resources:
-  - volumesnapshotdatas
-  - volumesnapshots
   verbs:
   - list
   - watch

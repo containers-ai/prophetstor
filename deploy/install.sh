@@ -241,7 +241,6 @@ wait_until_single_pod_become_ready()
 # {
 #     echo "Checking Prometheus..."
 #     current_operator_pod_name="`kubectl get pods -n $install_namespace |grep "federatorai-operator-"|awk '{print $1}'|head -1`"
-#     kubectl exec $current_operator_pod_name -n $install_namespace -- /usr/bin/federatorai-operator prom_check > /dev/null 2>&1
 #     return_state="$?"
 #     echo "Return state = $return_state"
 #     if [ "$return_state" = "0" ];then

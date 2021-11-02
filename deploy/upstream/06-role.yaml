@@ -76,24 +76,9 @@ rules:
   verbs:
   - '*'
 - apiGroups:
-  - monitoring.coreos.com
-  resources:
-  - servicemonitors
-  verbs:
-  - create
-  - get
-- apiGroups:
   - storage.k8s.io
   resources:
   - storageclasses
-  verbs:
-  - list
-  - watch
-- apiGroups:
-  - volumesnapshot.external-storage.k8s.io
-  resources:
-  - volumesnapshotdatas
-  - volumesnapshots
   verbs:
   - list
   - watch

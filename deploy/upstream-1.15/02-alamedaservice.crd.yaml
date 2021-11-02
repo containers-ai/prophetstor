@@ -1306,8 +1306,6 @@ spec:
                     type: object
                   type: array
               type: object
-            autoPatchPrometheusRules:
-              type: boolean
             enableExecution:
               type: boolean
             enablePreloader:
@@ -3395,31 +3393,6 @@ spec:
                   type: array
               type: object
             imageLocation:
-              type: string
-            kafka:
-              properties:
-                brokerAddresses:
-                  items:
-                    type: string
-                  type: array
-                sasl:
-                  properties:
-                    enabled:
-                      type: boolean
-                    password:
-                      type: string
-                    username:
-                      type: string
-                  type: object
-                tls:
-                  properties:
-                    enabled:
-                      type: boolean
-                    insecureSkipVerify:
-                      type: boolean
-                  type: object
-              type: object
-            prometheusService:
               type: string
             resources:
               description: ResourceRequirements describes the compute resource requirements.
