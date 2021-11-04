@@ -49,8 +49,6 @@ rules:
 - apiGroups:
   - ""
   resources:
-  - persistentvolumes
-  - pods/log
   - replicationcontrollers
   - services
   verbs:
@@ -137,7 +135,6 @@ rules:
   - extensions
   resources:
   - daemonsets
-  - deployments/scale
   verbs:
   - create
   - delete
@@ -167,27 +164,17 @@ rules:
   verbs:
   - list
 - apiGroups:
-  - batch
-  resources:
-  - cronjobs
-  - jobs
-  verbs:
-  - get
-  - list
-  - watch
-- apiGroups:
   - extensions
   - policy
   resources:
   - podsecuritypolicies
   verbs:
-  - '*'
+  - use
 - apiGroups:
   - rbac.authorization.k8s.io
   resources:
   - clusterrolebindings
   - clusterroles
-  - clusterroles/finalizers
   - rolebindings
   - roles
   verbs:
@@ -208,20 +195,7 @@ rules:
   resources:
   - securitycontextconstraints
   verbs:
-  - create
-  - delete
-  - get
-  - list
-  - update
   - use
-  - watch
-- apiGroups:
-  - storage.k8s.io
-  resources:
-  - storageclasses
-  verbs:
-  - list
-  - watch
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
