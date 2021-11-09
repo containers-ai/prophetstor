@@ -408,7 +408,15 @@ prepare_media()
     echo "build_version=$tag_number" > build_version
     echo -e "\n$(tput setaf 6)Creating offline install package ...$(tput sgr 0)"
     target_filename="${target_name_prefix}.${tag_number}.tgz"
-    tar --warning=no-file-changed --exclude="$target_filename" -zcf $target_filename ../${tag_number}/
+    if [ "$machine_type" = "Linux" ]; then
+        tar --warning=no-file-changed --exclude="$target_filename" -zcf $target_filename ../${tag_number}/
+    else
+        # Mac
+        cd ../
+        tar --exclude="$target_filename" -zcf $target_filename ${tag_number}/
+        mv $target_filename ${tag_number}
+        cd -
+    fi
     echo -e "\n$(tput setaf 11)Offline install package $target_filename saved in $PWD $(tput sgr 0)"
 }
 
@@ -439,7 +447,12 @@ offline_install()
         # Make sure images are saved under image folder
         cd ../$image_folder
 
-        bash ../$scripts_folder/prepare-private-repository.sh --push --repo-url $repo_url
+        if [ "$source_repo_url" != "" ]; then
+            bash ../$scripts_folder/prepare-private-repository.sh --push --repo-url $repo_url --source-repo-url $source_repo_url
+        else
+            bash ../$scripts_folder/prepare-private-repository.sh --push --repo-url $repo_url
+        fi
+
         if [ "$?" != "0" ];then
             echo -e "\n$(tput setaf 1)Abort, prepare-private-repository.sh ran with errors.$(tput sgr 0)"
             exit 3
@@ -461,6 +474,17 @@ operator_folder="operator"
 target_name_prefix="federatorai-media"
 current_location=`pwd`
 
+unameOut="$(uname -s)"
+case "${unameOut}" in
+    Linux*)
+        machine_type=Linux;;
+    Darwin*)
+        machine_type=Mac;;
+    *)
+        echo -e "\n$(tput setaf 1)Error! Unsupported machine type (${unameOut}).$(tput sgr 0)"
+        exit
+        ;;
+esac
 
 if [ "$do_prepare_media" != "y" ] && [ "$do_offline_install" != "y" ]; then
     # Interactive mode
