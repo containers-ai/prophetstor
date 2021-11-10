@@ -10,7 +10,6 @@ rules:
   resources:
   - configmaps
   - endpoints
-  - events
   - persistentvolumeclaims
   - pods
   - secrets
@@ -22,8 +21,6 @@ rules:
   resources:
   - nodes
   - persistentvolumeclaims
-  - persistentvolumes
-  - pods/log
   - replicationcontrollers
   - services
   verbs:
@@ -39,61 +36,11 @@ rules:
   - '*'
 - apiGroups:
   - apps
-  resources:
-  - deployments/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - apps
   - extensions
   resources:
   - deployments
-  - deployments/scale
   - replicasets
   verbs:
   - get
-  - list
-  - watch
-- apiGroups:
-  - batch
-  resources:
-  - cronjobs
-  - jobs
-  verbs:
-  - get
-  - list
-  - watch
-- apiGroups:
-  - extensions
-  resources:
-  - deployments/scale
-  verbs:
-  - update
-- apiGroups:
-  - extensions
-  resources:
-  - podsecuritypolicies
-  verbs:
-  - '*'
-- apiGroups:
-  - monitoring.coreos.com
-  resources:
-  - servicemonitors
-  verbs:
-  - create
-  - get
-- apiGroups:
-  - storage.k8s.io
-  resources:
-  - storageclasses
-  verbs:
-  - list
-  - watch
-- apiGroups:
-  - volumesnapshot.external-storage.k8s.io
-  resources:
-  - volumesnapshotdatas
-  - volumesnapshots
-  verbs:
   - list
   - watch

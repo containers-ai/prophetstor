@@ -241,7 +241,6 @@ wait_until_single_pod_become_ready()
 # {
 #     echo "Checking Prometheus..."
 #     current_operator_pod_name="`kubectl get pods -n $install_namespace |grep "federatorai-operator-"|awk '{print $1}'|head -1`"
-#     kubectl exec $current_operator_pod_name -n $install_namespace -- /usr/bin/federatorai-operator prom_check > /dev/null 2>&1
 #     return_state="$?"
 #     echo "Return state = $return_state"
 #     if [ "$return_state" = "0" ];then
@@ -855,6 +854,18 @@ if [ "$offline_mode_enabled" != "y" ]; then
     fi
 fi
 
+unameOut="$(uname -s)"
+case "${unameOut}" in
+    Linux*)
+        machine_type=Linux;;
+    Darwin*)
+        machine_type=Mac;;
+    *)
+        echo -e "\n$(tput setaf 1)Error! Unsupported machine type (${unameOut}).$(tput sgr 0)"
+        exit
+        ;;
+esac
+
 previous_alameda_namespace="`kubectl get alamedaservice --all-namespaces 2>/dev/null|tail -1|awk '{print $1}'`"
 previous_tag="`kubectl get alamedaservices -n $previous_alameda_namespace -o custom-columns=VERSION:.spec.version 2>/dev/null|grep -v VERSION|head -1`"
 previous_alamedaservice="`kubectl get alamedaservice -n $previous_alameda_namespace -o custom-columns=NAME:.metadata.name 2>/dev/null|grep -v NAME|head -1`"
@@ -907,7 +918,17 @@ if [ "$previous_alameda_namespace" != "" ];then
     fi
 fi
 
-script_located_path=$(dirname $(readlink -f "$0"))
+realpath() {
+    [[ $1 = /* ]] && echo "$1" || echo "$PWD/${1#./}"
+}
+
+if [ "$machine_type" = "Linux" ]; then
+    script_located_path=$(dirname $(readlink -f "$0"))
+else
+    # Mac
+    script_located_path=$(dirname $(realpath "$0"))
+fi
+
 if [ "$FEDERATORAI_FILE_PATH" = "" ]; then
     # Try to find existing path
     if [[ $script_located_path =~ .*/federatorai/repo/.* ]]; then
@@ -1050,7 +1071,7 @@ if [ "$need_upgrade" = "y" ];then
 fi
 
 default_minimal_k8s_version_minor="16"
-k8s_version=$(kubectl version --short | grep -Po 'Server Version: v\K[0-9]+.[0-9]+')
+k8s_version=$(kubectl version --short |grep 'Server Version'|grep -oE 'v[0-9.]+'|sed 's/v//'|cut -d '.' -f1-2)
 k8s_version_major=$(echo $k8s_version | cut -d. -f1)
 k8s_version_minor=$(echo $k8s_version | cut -d. -f2)
 upstream_folder_name="upstream"
@@ -1102,9 +1123,16 @@ fi
 # Modify federator.ai operator yaml(s)
 # for tag
 if [ "$aws_mode" = "y" ]; then
-    sed -i "s|quay.io/prophetstor/federatorai-operator-ubi:latest|$ecr_url|g" 03*.yaml
-    # Change command to /start.sh
-    sed -i "/- federatorai-operator/ {n; :a; /- federatorai-operator/! {N; ba;}; s/- federatorai-operator/- \/start.sh/; :b; n; $! bb}" 03*.yaml
+    if [ "$machine_type" = "Linux" ]; then
+        # Change command to /start.sh
+        sed -i "s|quay.io/prophetstor/federatorai-operator-ubi:latest|$ecr_url|g" 03*.yaml
+        sed -i "/- federatorai-operator/ {n; :a; /- federatorai-operator/! {N; ba;}; s/- federatorai-operator/- \/start.sh/; :b; n; $! bb}" 03*.yaml
+    else
+        # Mac # Change command to /start.sh
+        sed '1!G;h;$!d' `ls 03*.yaml` |awk '/- federatorai-operator/&&!x{sub("- federatorai-operator","- /start.sh");x=1}1'|sed '1!G;h;$!d' > 03tmp
+        mv 03tmp `ls 03*.yaml`
+    fi
+
 cat >> 01*.yaml << __EOF__
   annotations:
     eks.amazonaws.com/role-arn: ${role_arn}
@@ -1112,15 +1140,30 @@ __EOF__
 else
     # Handle new aws operator url only case (ignore aws_mode enabled or not)
     if [ "$ECR_URL" != "" ]; then
-        sed -i "s|quay.io/prophetstor/federatorai-operator-ubi:latest|$ECR_URL|g" 03*.yaml
+        if [ "$machine_type" = "Linux" ]; then
+            sed -i "s|quay.io/prophetstor/federatorai-operator-ubi:latest|$ECR_URL|g" 03*.yaml
+        else
+            # Mac
+            sed -i "" "s|quay.io/prophetstor/federatorai-operator-ubi:latest|$ECR_URL|g" 03*.yaml
+        fi
     else
-        sed -i "s/:latest$/:${tag_number}/g" 03*.yaml
+        if [ "$machine_type" = "Linux" ]; then
+            sed -i "s/:latest$/:${tag_number}/g" 03*.yaml
+        else
+            # Mac
+            sed -i "" "s/:latest$/:${tag_number}/g" 03*.yaml
+        fi
     fi
 fi
 
 # Specified alternative container image location
 if [ "${RELATED_IMAGE_URL_PREFIX}" != "" ]; then
-    sed -i -e "s%quay.io/prophetstor%${RELATED_IMAGE_URL_PREFIX}%g" 03*.yaml
+    if [ "$machine_type" = "Linux" ]; then
+        sed -i "s%quay.io/prophetstor%${RELATED_IMAGE_URL_PREFIX}%g" 03*.yaml
+    else
+        # Mac
+        sed -i "" "s%quay.io/prophetstor%${RELATED_IMAGE_URL_PREFIX}%g" 03*.yaml
+    fi
 fi
 
 # No need for recent build
@@ -1130,11 +1173,22 @@ fi
 # fi
 
 # for namespace
-sed -i "s/name: federatorai/name: ${install_namespace}/g" 00*.yaml
-sed -i "s|\bnamespace:.*|namespace: ${install_namespace}|g" *.yaml
+if [ "$machine_type" = "Linux" ]; then
+    sed -i "s/name: federatorai/name: ${install_namespace}/g" 00*.yaml
+    sed -i "s|\bnamespace:.*|namespace: ${install_namespace}|g" *.yaml
+else
+    # Mac
+    sed -i "" "s/name: federatorai/name: ${install_namespace}/g" 00*.yaml
+    sed -i "" "s| namespace:.*| namespace: ${install_namespace}|g" *.yaml
+fi
 
 if [ "${ENABLE_RESOURCE_REQUIREMENT}" = "y" ]; then
-    sed -i -e "/image: /a\          resources:\n            limits:\n              cpu: 4000m\n              memory: 8000Mi\n            requests:\n              cpu: 100m\n              memory: 100Mi" `ls 03*.yaml`
+    if [ "$machine_type" = "Linux" ]; then
+        sed -i -e "/image: /a\          resources:\n            limits:\n              cpu: 4000m\n              memory: 8000Mi\n            requests:\n              cpu: 100m\n              memory: 100Mi" `ls 03*.yaml`
+    else
+        # Mac
+        sed -i "" -e "/image: /a\          resources:\n            limits:\n              cpu: 4000m\n              memory: 8000Mi\n            requests:\n              cpu: 100m\n              memory: 100Mi" `ls 03*.yaml`
+    fi
 fi
 
 if [ "$need_upgrade" = "y" ];then
@@ -1235,10 +1289,20 @@ if [ "$ALAMEDASERVICE_FILE_PATH" = "" ]; then
 
     # Specified alternative container image location
     if [ "${RELATED_IMAGE_URL_PREFIX}" != "" ]; then
-        sed -i "s|imageLocation:.*|imageLocation: ${RELATED_IMAGE_URL_PREFIX}|g" ${alamedaservice_example}
+        if [ "$machine_type" = "Linux" ]; then
+            sed -i "s|imageLocation:.*|imageLocation: ${RELATED_IMAGE_URL_PREFIX}|g" ${alamedaservice_example}
+        else
+            # Mac
+            sed -i "" "s|imageLocation:.*|imageLocation: ${RELATED_IMAGE_URL_PREFIX}|g" ${alamedaservice_example}
+        fi
     fi
     # Specified version tag
-    sed -i "s/version: latest/version: ${tag_number}/g" ${alamedaservice_example}
+    if [ "$machine_type" = "Linux" ]; then
+        sed -i "s/version: latest/version: ${tag_number}/g" ${alamedaservice_example}
+    else
+        # Mac
+        sed -i "" "s/version: latest/version: ${tag_number}/g" ${alamedaservice_example}
+    fi
 
     echo "========================================"
 
@@ -1340,7 +1404,12 @@ if [ "$ALAMEDASERVICE_FILE_PATH" = "" ]; then
 
     if [ "$need_upgrade" != "y" ]; then
         # First time installation case
-        sed -i "s|\bnamespace:.*|namespace: ${install_namespace}|g" ${alamedaservice_example}
+        if [ "$machine_type" = "Linux" ]; then
+            sed -i "s|\bnamespace:.*|namespace: ${install_namespace}|g" ${alamedaservice_example}
+        else
+            # Mac
+            sed -i "" "s| namespace:.*| namespace: ${install_namespace}|g" ${alamedaservice_example}
+        fi
 
         # if [ "$set_prometheus_rule_to" = "y" ]; then
         #     sed -i "s|\bprometheusService:.*|prometheusService: ${prometheus_address}|g" ${alamedaservice_example}
@@ -1350,7 +1419,12 @@ if [ "$ALAMEDASERVICE_FILE_PATH" = "" ]; then
         # fi
 
         if [[ "$storage_type" == "persistent" ]]; then
-            sed -i '/- usage:/,+10d' ${alamedaservice_example}
+            if [ "$machine_type" = "Linux" ]; then
+                sed -i '/- usage:/,+10d' ${alamedaservice_example}
+            else
+                # Mac
+                sed -i "" '/- usage:/,+10d' ${alamedaservice_example}
+            fi
             cat >> ${alamedaservice_example} << __EOF__
     - usage: log
       type: pvc

@@ -120,7 +120,7 @@ wait_until_pods_ready()
 
     if [[ "$wait_pod_creating" = "1" ]]; then
         # check if pods created
-        if [[ "`kubectl get po -n $namespace 2>/dev/null|wc -l`" -ge "$target_pod_number" ]]; then
+        if [[ "`kubectl get po -n $namespace 2>/dev/null|wc -l|sed 's/[ \t]*//g'`" -ge "$target_pod_number" ]]; then
             wait_pod_creating=0
             echo -e "\nChecking pods..."
         else
@@ -151,7 +151,13 @@ wait_until_data_pump_finish()
   type="$3"
 
   for ((i=0; i<$period; i+=$interval)); do
-    duration_time=$(date -d @${i} +"%H:%M:%S" -u)
+    if [ "$machine_type" = "Linux" ]; then
+        duration_time=$(date -d @${i} +"%H:%M:%S" -u)
+    else
+        # Mac
+        duration_time=$(date -u -r ${i} +%H:%M:%S)
+    fi
+
     if [ "$type" = "future" ]; then
         echo "Waiting for data pump (future mode) to finish (Time Elapsed = $duration_time)..."
         kubectl logs -n $install_namespace $current_preloader_pod_name | grep -q "Completed to loader container future metrics data"
@@ -161,16 +167,29 @@ wait_until_data_pump_finish()
         fi
     else #historical mode
         echo "Waiting for data pump to finish (Time Elapsed = $duration_time)..."
-        if [[ "`kubectl logs -n $install_namespace $current_preloader_pod_name | egrep "Succeed to generate pods historical metrics|Succeed to generate nodes historical metrics" | wc -l`" -gt "1" ]]; then
+        if [[ "`kubectl logs -n $install_namespace $current_preloader_pod_name | egrep "Succeed to generate pods historical metrics|Succeed to generate nodes historical metrics" | wc -l|sed 's/[ \t]*//g'`" -gt "1" ]]; then
             echo -e "\n$(tput setaf 6)The data pump is finished.$(tput sgr 0)"
             starttime_utc="$(kubectl logs -n $install_namespace $current_preloader_pod_name|grep 'Start PreLoader agent'|awk '{print $1}')"
             endtime_utc="$(kubectl logs -n $install_namespace $current_preloader_pod_name|grep 'Succeed to'|tail -1|awk '{print $1}')"
             if [ "$starttime_utc" != "" ] && [ "$endtime_utc" != "" ]; then
-                startime_timestamp="$(date -d "$starttime_utc" +%s)"
-                endtime_timestamp="$(date -d "$endtime_utc" +%s)"
+                if [ "$machine_type" = "Linux" ]; then
+                    startime_timestamp="$(date -d "$starttime_utc" +%s)"
+                    endtime_timestamp="$(date -d "$endtime_utc" +%s)"
+                else
+                    # Mac
+                    # Remove decimal point
+                    starttime_utc="`echo $starttime_utc|cut -d '.' -f1`Z"
+                    endtime_utc="`echo $endtime_utc|cut -d '.' -f1`Z"
+                    startime_timestamp="$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$starttime_utc" +"%s")"
+                    endtime_timestamp="$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$endtime_utc" +"%s")"
+                fi
                 if [ "$startime_timestamp" != "" ] && [ "$endtime_timestamp" != "" ]; then
                     duration_seconds="$(($endtime_timestamp-$startime_timestamp))"
-                    duration_time=$(date -d @${duration_seconds} +"%H:%M:%S" -u)
+                    if [ "$machine_type" = "Linux" ]; then
+                        duration_time=$(date -d @${duration_seconds} +"%H:%M:%S" -u)
+                    else
+                        duration_time=$(date -u -r ${duration_seconds} +%H:%M:%S)
+                    fi
                     echo "Pumping duration in seconds = $duration_seconds" |tee -a $debug_log
                     echo -e "Pumping duration(H:M:S) = $duration_time" |tee -a $debug_log
                 fi
@@ -206,14 +225,14 @@ display_resources_detail()
     total_pods="$(kubectl exec $influxdb_pod_name -n $install_namespace -- influx -ssl -unsafeSsl -precision rfc3339 \
         -username admin -password adminpass -database alameda_cluster_status -format 'csv' -execute \
         'select "policy","name","namespace" from pod' 2>/dev/null|sed 1d)"
-    total_pod_number="$(echo "$total_pods"|wc -l)"
-    total_namespace_number="$(echo "$total_pods"|cut -d ',' -f 5|sort|uniq|wc -l)"
+    total_pod_number="$(echo "$total_pods"|wc -l|sed 's/[ \t]*//g')"
+    total_namespace_number="$(echo "$total_pods"|cut -d ',' -f 5|sort|uniq|wc -l|sed 's/[ \t]*//g')"
     total_node_number="$(kubectl exec $influxdb_pod_name -n $install_namespace -- influx -ssl -unsafeSsl -precision rfc3339 \
         -username admin -password adminpass -database alameda_cluster_status -format 'csv' -execute \
-        'select * from node' 2>/dev/null|sed 1d|wc -l)"
+        'select * from node' 2>/dev/null|sed 1d|wc -l|sed 's/[ \t]*//g')"
     total_vm_number=$(kubectl exec $influxdb_pod_name -n $install_namespace -- influx -ssl -unsafeSsl -precision rfc3339 \
         -username admin -password adminpass -database alameda_cluster_status -format 'csv' -execute \
-        "select * from node where type='vm'" 2>/dev/null|sed 1d|wc -l)
+        "select * from node where type='vm'" 2>/dev/null|sed 1d|wc -l|sed 's/[ \t]*//g')
     echo -e "Number of target pod = $total_pod_number" |tee -a $debug_log
     echo -e "Number of target namespace = $total_namespace_number" |tee -a $debug_log
     echo -e "Number of target node = $total_node_number" |tee -a $debug_log
@@ -237,7 +256,7 @@ _do_cluster_status_verify()
     do
         if [ "$mode" = "vm" ]; then
             # VM
-            if [ "$(kubectl exec $influxdb_pod_name -n $install_namespace -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database alameda_cluster_status -format 'csv' -execute "select * from node where type='vm'" 2>/dev/null|sed 1d|wc -l)" -gt "0" ]; then
+            if [ "$(kubectl exec $influxdb_pod_name -n $install_namespace -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database alameda_cluster_status -format 'csv' -execute "select * from node where type='vm'" 2>/dev/null|sed 1d|wc -l|sed 's/[ \t]*//g')" -gt "0" ]; then
                 result="ok"
             fi
         else
@@ -248,7 +267,7 @@ _do_cluster_status_verify()
                     result="ok"
                 fi
             else
-                if [ "$(kubectl exec $influxdb_pod_name -n $install_namespace -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database alameda_cluster_status -format 'csv' -execute "select * from pod" 2>/dev/null|sed 1d|wc -l)" -gt "0" ]; then
+                if [ "$(kubectl exec $influxdb_pod_name -n $install_namespace -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database alameda_cluster_status -format 'csv' -execute "select * from pod" 2>/dev/null|sed 1d|wc -l|sed 's/[ \t]*//g')" -gt "0" ]; then
                     result="ok"
                 fi
             fi
@@ -359,11 +378,15 @@ run_ab_test()
 
     # Modify parameters
     nginx_ip="${nginx_name}.${nginx_ns}"
-
-    sed -i "s/SVC_IP=.*/SVC_IP=${nginx_ip}/g" $preloader_folder/generate_loads.sh
-    sed -i "s/SVC_PORT=.*/SVC_PORT=${nginx_port}/g" $preloader_folder/generate_loads.sh
-    sed -i "s/traffic_ratio.*/traffic_ratio = ${traffic_ratio}/g" $preloader_folder/define.py
-
+    if [ "$machine_type" = "Linux" ]; then
+        sed -i "s/SVC_IP=.*/SVC_IP=${nginx_ip}/g" $preloader_folder/generate_loads.sh
+        sed -i "s/SVC_PORT=.*/SVC_PORT=${nginx_port}/g" $preloader_folder/generate_loads.sh
+        sed -i "s/traffic_ratio.*/traffic_ratio = ${traffic_ratio}/g" $preloader_folder/define.py
+    else
+        sed -i "" "s/SVC_IP=.*/SVC_IP=${nginx_ip}/g" $preloader_folder/generate_loads.sh
+        sed -i "" "s/SVC_PORT=.*/SVC_PORT=${nginx_port}/g" $preloader_folder/generate_loads.sh
+        sed -i "" "s/traffic_ratio.*/traffic_ratio = ${traffic_ratio}/g" $preloader_folder/define.py
+    fi
     for ab_file in "${ab_files_list[@]}"
     do
         kubectl cp -n $install_namespace $preloader_folder/$ab_file ${current_preloader_pod_name}:/opt/alameda/federatorai-agent/
@@ -582,7 +605,7 @@ patch_data_adapter_for_preloader()
     else
         # COLLECT_METADATA_ONLY not found
         # Check if env[] exist
-        current_env_exist="$(kubectl -n $install_namespace get alamedaservice $alamedaservice_name -o 'jsonpath={.spec.federatoraiDataAdapter.env}'|wc -c)"
+        current_env_exist="$(kubectl -n $install_namespace get alamedaservice $alamedaservice_name -o 'jsonpath={.spec.federatoraiDataAdapter.env}'|wc -c|sed 's/[ \t]*//g')"
         if [ "$current_env_exist" == 0 ]; then
             # env section empty
             kubectl patch alamedaservice $alamedaservice_name -n $install_namespace --type merge --patch "{\"spec\":{\"federatoraiDataAdapter\":{\"env\":[{\"name\": \"COLLECT_METADATA_ONLY\",\"value\": \"$only_mode\"}]}}}"
@@ -798,7 +821,7 @@ _do_metrics_verify()
         do
             unique_id_list=$(kubectl -n $install_namespace exec $influxdb_pod_name -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database metric_instance_workload_le3599 -execute "select * from $measurement where time < now() - ${verify_before_time_range} order by time asc limit 100"|tail -n+4|grep -o " builtin-[^ ]*"|sed 's/^ *//g'|sort|uniq)
             if [ "$unique_id_list" != "" ]; then
-                unique_id_num=$(echo "$unique_id_list"|wc -l)
+                unique_id_num=$(echo "$unique_id_list"|wc -l|sed 's/[ \t]*//g')
                 total_num=$((total_num+unique_id_num))
                 if [ "$all_id_list" = "" ]; then
                     all_id_list="$unique_id_list"
@@ -819,7 +842,7 @@ _do_metrics_verify()
         do
             unique_id_list=$(kubectl -n $install_namespace exec $influxdb_pod_name -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database metric_instance_workload_le3599 -execute "select * from $measurement where time < now() - ${verify_before_time_range} order by time asc limit 100"|tail -n+4|grep -o " builtin-[^ ]*"|sed 's/^ *//g'|sort|uniq)
             if [ "$unique_id_list" != "" ]; then
-                unique_id_num=$(echo "$unique_id_list"|wc -l)
+                unique_id_num=$(echo "$unique_id_list"|wc -l|sed 's/[ \t]*//g')
                 total_num=$((total_num+unique_id_num))
                 if [ "$all_id_list" = "" ]; then
                     all_id_list="$unique_id_list"
@@ -840,7 +863,7 @@ _do_metrics_verify()
         do
             unique_id_list=$(kubectl -n $install_namespace exec $influxdb_pod_name -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database metric_instance_workload_le3599 -execute "select * from $measurement where time < now() - ${verify_before_time_range} order by time asc limit 100"|tail -n+4|grep -o " builtin-[^ ]*"|sed 's/^ *//g'|sort|uniq)
             if [ "$unique_id_list" != "" ]; then
-                unique_id_num=$(echo "$unique_id_list"|wc -l)
+                unique_id_num=$(echo "$unique_id_list"|wc -l|sed 's/[ \t]*//g')
                 total_num=$((total_num+unique_id_num))
                 if [ "$all_id_list" = "" ]; then
                     all_id_list="$unique_id_list"
@@ -1232,14 +1255,36 @@ add_alamedascaler_for_nginx()
         kind_name="DEPLOYMENTCONFIG"
     fi
 
+    case ${data_source_type} in
+        "datadog") data_source_id=1;;
+        "prometheus") data_source_id=2;;
+        "sysdig") data_source_id=3;;
+        "vmware") data_source_id=4;;
+        "cloudwatch") data_source_id=5;;
+        *)
+            echo -e "\n$(tput setaf 1)Error! Invalid data source type '${data_source_type}'.$(tput sgr 0)"
+            leave_prog
+            exit 8
+            ;;
+    esac
     if [ "$(find_current_scalers '1')" = "n" ]; then
+        # Retrieve metrics
+        rest_pod_name="`kubectl get pods -n ${install_namespace} | grep "federatorai-rest-" | awk '{print $1}' | head -1`"
+        json_data="{\"cluster_name\": \"${cluster_name}\", \"data_source\": ${data_source_id}}"
+        get_result=$(kubectl -n ${install_namespace} exec -t ${rest_pod_name} -- \
+          curl -s -X POST -v -H "Content-Type: application/json" \
+            -u "${auth_username}:${auth_password}" \
+            -d "${json_data}" \
+            http://127.0.0.1:5055/apis/v1/configs/allow_metrics)
+        metrics_record=$(echo "${get_result}" | jq ".data[] | select (.representative.Name == \"cpu\")" 2> /dev/null)
+
         # Create new scaler
         json_data="{\"data\":[{\"object_meta\":{\"name\":\"${alamedascaler_name}\",\"namespace\":\"${install_namespace}\"\
         ,\"nodename\":\"\",\"clustername\":\"\",\"uid\":\"\",\"creationtimestamp\":0},\"target_cluster_name\":\"${cluster_name}\",\
-        \"correlation_analysis\":2,\"controllers\":[{\"evictable\":{\"value\":${evictable_option}},\"enable_execution\":{\"value\":false},\
+        \"correlation_analysis\":1,\"controllers\":[{\"evictable\":{\"value\":${evictable_option}},\"enable_execution\":{\"value\":false},\
         \"scaling_type\":${autoscaling_method},\"application_type\":\"generic\",\"generic\":{\"target\":{\"namespace\":\"${nginx_ns}\",\
         \"name\":\"${nginx_name}\",\"controller_kind\":${kind_type}},\"hpa_parameters\":{\"min_replicas\":{\"value\":1},\
-        \"max_replicas\":40}},\"metrics\":[]}]}]}"
+        \"max_replicas\":40}},\"metrics\":[${metrics_record}]}]}]}"
 
         rest_pod_name="`kubectl get pods -n ${install_namespace} | grep "federatorai-rest-" | awk '{print $1}' | head -1`"
         create_response="$(kubectl -n ${install_namespace} exec -t ${rest_pod_name} -- \
@@ -1776,6 +1821,19 @@ if [ "`curl --version 2> /dev/null`" = "" ]; then
     exit 1
 fi
 
+unameOut="$(uname -s)"
+case "${unameOut}" in
+    Linux*)
+        machine_type=Linux;;
+    Darwin*)
+        machine_type=Mac;;
+    *)
+        echo -e "\n$(tput setaf 1)Error! Unsupported machine type (${unameOut}).$(tput sgr 0)"
+        exit
+        ;;
+esac
+
+
 kubectl version|grep -q "^Server"
 if [ "$?" != "0" ];then
     echo -e "\nPlease login to Kubernetes first."
@@ -1819,7 +1877,7 @@ fi
 
 if [ "${auth_user_pass_specified}" = "y" ]; then
     auth_username="`echo \"${u_arg}\" | xargs | tr ':' ' ' | awk '{print $1}'`"
-    len="`echo \"${auth_username}:\" | wc -m`"
+    len="`echo \"${auth_username}:\" | wc -m|sed 's/[ \t]*//g'`"
     auth_password="`echo \"${u_arg}\" | xargs | cut -c${len}-`"
 fi
 
@@ -1949,7 +2007,17 @@ fi
 
 debug_log="debug.log"
 
-script_located_path=$(dirname $(readlink -f "$0"))
+realpath() {
+    [[ $1 = /* ]] && echo "$1" || echo "$PWD/${1#./}"
+}
+
+if [ "$machine_type" = "Linux" ]; then
+    script_located_path=$(dirname $(readlink -f "$0"))
+else
+    # Mac
+    script_located_path=$(dirname $(realpath "$0"))
+fi
+
 if [ "$FEDERATORAI_FILE_PATH" = "" ]; then
     if [[ $script_located_path =~ .*/federatorai/repo/.* ]]; then
         save_path="$(dirname "$(dirname "$(dirname "$(realpath $script_located_path)")")")"
