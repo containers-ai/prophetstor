@@ -69,9 +69,14 @@ download_operator_yaml_if_needed()
     done
 
     # for namespace
-    sed -i "s/name:.*/name: ${installed_namespace}/g" 00*.yaml
-    sed -i "s|\bnamespace:.*|namespace: ${installed_namespace}|g" *.yaml
-
+    if [ "$machine_type" = "Linux" ]; then
+        sed -i "s/name: federatorai/name: ${installed_namespace}/g" 00*.yaml
+        sed -i "s|\bnamespace:.*|namespace: ${installed_namespace}|g" *.yaml
+    else
+        # Mac
+        sed -i "" "s/name: federatorai/name: ${installed_namespace}/g" 00*.yaml
+        sed -i "" "s| namespace:.*| namespace: ${installed_namespace}|g" *.yaml
+    fi
 }
 
 remove_operator_yaml()
@@ -143,6 +148,18 @@ while getopts "h-:" o; do
     esac
 done
 
+unameOut="$(uname -s)"
+case "${unameOut}" in
+    Linux*)
+        machine_type=Linux;;
+    Darwin*)
+        machine_type=Mac;;
+    *)
+        echo -e "\n$(tput setaf 1)Error! Unsupported machine type (${unameOut}).$(tput sgr 0)"
+        exit
+        ;;
+esac
+
 installed_namespace="`kubectl get pods --all-namespaces |egrep "alameda-datahub-|federatorai-operator-"|awk '{print $1}'|head -1`"
 if [ "$installed_namespace" = "" ]; then
     echo -e "\nInstalled_namespace is empty. Federator.ai build doesn't exist in system."
@@ -180,6 +197,10 @@ echo -e "$(tput setaf 3)\n----------------------------------------"
 echo -e "Starting to remove the Federator.ai product"
 echo -e "----------------------------------------\n$(tput sgr 0)"
 
+realpath() {
+    [[ $1 = /* ]] && echo "$1" || echo "$PWD/${1#./}"
+}
+
 if [ "$offline_mode" = "y" ]; then
     # Check if script ran under offline package folder
     if [ ! -f "../$operator_folder/00-namespace.yaml" ]; then
@@ -191,8 +212,14 @@ if [ "$offline_mode" = "y" ]; then
     remove_all_alamedaservice
 
     cd ../$operator_folder
-    sed -i "s/name: federatorai/name: ${installed_namespace}/g" 00*.yaml
-    sed -i "s|\bnamespace:.*|namespace: ${installed_namespace}|g" *.yaml
+    if [ "$machine_type" = "Linux" ]; then
+        sed -i "s/name: federatorai/name: ${installed_namespace}/g" 00*.yaml
+        sed -i "s|\bnamespace:.*|namespace: ${installed_namespace}|g" *.yaml
+    else
+        # Mac
+        sed -i "" "s/name: federatorai/name: ${installed_namespace}/g" 00*.yaml
+        sed -i "" "s| namespace:.*| namespace: ${installed_namespace}|g" *.yaml
+    fi
 
     for yaml_file in `ls ../$operator_folder/[0-9]*yaml|sort -n -r`
     do
@@ -204,7 +231,12 @@ if [ "$offline_mode" = "y" ]; then
     done
     cd - > /dev/null
 else
-    script_located_path=$(dirname $(readlink -f "$0"))
+    if [ "$machine_type" = "Linux" ]; then
+        script_located_path=$(dirname $(readlink -f "$0"))
+    else
+        # Mac
+        script_located_path=$(dirname $(realpath "$0"))
+    fi
     if [ "$FEDERATORAI_FILE_PATH" = "" ]; then
         if [[ $script_located_path =~ .*/federatorai/repo/.* ]]; then
             save_path="$(dirname "$(dirname "$(dirname "$(realpath $script_located_path)")")")"
