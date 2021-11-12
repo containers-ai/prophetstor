@@ -2,7 +2,7 @@
 set -e
 
 function number::of::spaces() {
-  echo "$1" | tr -cd ' ' | wc -c
+  echo "$1" | tr -cd ' ' | wc -c|sed 's/[ \t]*//g'
 }
 
 function neat::yaml() {
@@ -88,7 +88,7 @@ function backup::ns::cr() {
     fi
 
     # to prevent from Error "executing template: not in range, nothing to end"
-    if [ "$(kubectl get $nsres --all-namespaces -o=name | wc -l)" = "0" ]; then
+    if [ "$(kubectl get $nsres --all-namespaces -o=name | wc -l|sed 's/[ \t]*//g')" = "0" ]; then
       continue
     fi
     kubectl get $nsres --all-namespaces --sort-by=.metadata.creationTimestamp \
@@ -114,7 +114,7 @@ function backup::ns::cr() {
 function backup::cr() {
   for res in $(kubectl api-resources --namespaced=false 2>/dev/null | grep \\.containers\\.ai | awk '{print $1}'); do
     # to prevent from Error "executing template: not in range, nothing to end"
-    if [ "$(kubectl get $res -o=name | wc -l)" = "0" ]; then
+    if [ "$(kubectl get $res -o=name | wc -l|sed 's/[ \t]*//g')" = "0" ]; then
       continue
     fi
     kubectl get $res --sort-by=.metadata.creationTimestamp \
@@ -143,12 +143,17 @@ function backup::op::deploy() {
 function save::to::backup::dir() {
   local backupts="$(date +%s)"
   local dirname="federatorai-backup-$backupts"
+  if [ "$machine_type" = "Linux" ]; then
+    local time="$(date -d @$backupts)"
+  else
+    local time="$(date -u -r $backupts)"
+  fi
   local backdir="${USER_DEF_SAVED_DIR:-/tmp}/$dirname"
   local opfile="$TEMP_UPSTREAM_DIR/deployments_${INSTALLED_NS}_${OP_NAME}.yaml"
 
   cat > $TEMP_DIR/info.txt << EOF
 version: $(parse::image::tag "$(get::op::image::name "$opfile")")
-time: $(date -d @$backupts)
+time: $time
 script version: $SCRIPT_TAG
 EOF
 
@@ -161,8 +166,15 @@ function backup() {
   USER_DEF_SAVED_DIR="$1"
   TEMP_DIR=`mktemp -d`
   if [ "$USER_DEF_SAVED_DIR" != "" ]; then
-    TEMP_DIR=`mktemp -d -p "$USER_DEF_SAVED_DIR"`
+    if [ "$machine_type" = "Linux" ]; then
+      TEMP_DIR=`mktemp -d -p "$USER_DEF_SAVED_DIR"`
+    else
+      TMP_FOLDER_NAME=`basename $TEMP_DIR`
+      mv $TEMP_DIR $USER_DEF_SAVED_DIR
+      TEMP_DIR="$USER_DEF_SAVED_DIR/$TMP_FOLDER_NAME"
+    fi
   fi
+
   INSTALLED_NS="$(get::installed::ns)"
   TEMP_CFG_DIR="$TEMP_DIR/configs"
   TEMP_INFO_DIR="$TEMP_DIR/infos"
@@ -207,8 +219,14 @@ function download::and::apply::op::upstream() {
   fi
   cd "$ORIGIN_OP_UPSTREAM_DIR"
   download::github::assets containers-ai "$repo" "$imagetag" deploy/upstream
-  sed -i "s/name:.*/name: ${opns}/g" 00*.yaml
-  sed -i "s|\bnamespace:.*|namespace: ${opns}|g" *.yaml
+  if [ "$machine_type" = "Linux" ]; then
+    sed -i "s/name:.*/name: ${opns}/g" 00*.yaml
+    sed -i "s|\bnamespace:.*|namespace: ${opns}|g" *.yaml
+  else
+    # Mac
+    sed -i "" "s/name:.*/name: ${opns}/g" 00*.yaml
+    sed -i "" "s| namespace:.*| namespace: ${opns}|g" *.yaml
+  fi
   cd -
 
   cp "$OP_FILE" "$(grep -rl image:.*federatorai-operator "$ORIGIN_OP_UPSTREAM_DIR")"
@@ -293,6 +311,18 @@ function on::exit() {
   exit $ret
 }
 trap on::exit EXIT
+
+unameOut="$(uname -s)"
+case "${unameOut}" in
+    Linux*)
+        machine_type=Linux;;
+    Darwin*)
+        machine_type=Mac;;
+    *)
+        echo -e "\n$(tput setaf 1)Error! Unsupported machine type (${unameOut}).$(tput sgr 0)"
+        exit
+        ;;
+esac
 
 if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
   IS_BACKUP="false"
