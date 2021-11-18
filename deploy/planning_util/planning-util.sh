@@ -275,7 +275,12 @@ get_info_from_config()
         # Percentage mode
         cpu_headroom_mode="%"
         # Remove last character as value
-        cpu_headroom=`echo ${cpu_headroom::-1}`
+        if [ "$machine_type" = "Linux" ]; then
+            cpu_headroom=`echo ${cpu_headroom::-1}`
+        else
+            # Mac
+            cpu_headroom=`echo "${cpu_headroom%?}"`
+        fi
     elif [[ $cpu_headroom =~ ^[0-9]+$ ]]; then
         # Absolute value (mCore) mode
         cpu_headroom_mode="m"
@@ -290,7 +295,12 @@ get_info_from_config()
         # Percentage mode
         memory_headroom_mode="%"
         # Remove last character as value
-        memory_headroom=`echo ${memory_headroom::-1}`
+        if [ "$machine_type" = "Linux" ]; then
+            memory_headroom=`echo ${memory_headroom::-1}`
+        else
+            # Mac
+            memory_headroom=`echo "${memory_headroom%?}"`
+        fi
     elif [[ $memory_headroom =~ ^[0-9]+$ ]]; then
         # Absolute value (byte) mode
         memory_headroom_mode="b"
@@ -672,9 +682,15 @@ update_target_resources()
             fi
 
             # For get_controller_resources_from_kubecmd 'after' mode
-            [ "$do_limit_cpu" = "n" ] && limits_pod_cpu="${limit_cpu_before::-1}"
+            if [ "$machine_type" = "Linux" ]; then
+                [ "$do_limit_cpu" = "n" ] && limits_pod_cpu="${limit_cpu_before::-1}"
+                [ "$do_request_cpu" = "n" ] && requests_pod_cpu="${request_cpu_before::-1}"
+            else
+                # Mac
+                [ "$do_limit_cpu" = "n" ] && limits_pod_cpu="${limit_cpu_before%?}"
+                [ "$do_request_cpu" = "n" ] && requests_pod_cpu="${request_cpu_before%?}"
+            fi
             [ "$do_limit_memory" = "n" ] && limits_pod_memory=$limit_memory_before
-            [ "$do_request_cpu" = "n" ] && requests_pod_cpu="${request_cpu_before::-1}"
             [ "$do_request_memory" = "n" ] && requests_pod_memory=$request_memory_before
 
             if [ "$set_cmd" = "" ]; then
@@ -1304,6 +1320,19 @@ while getopts "h-:" o; do
     esac
 done
 
+unameOut="$(uname -s)"
+case "${unameOut}" in
+    Linux*)
+        machine_type=Linux;;
+    Darwin*)
+        machine_type=Mac;;
+    *)
+        err_code="6"
+        show_error "Unsupported machine type (${unameOut})." $err_code
+        exit $err_code
+        ;;
+esac
+
 if [ "$FEDERATORAI_FILE_PATH" = "" ]; then
     save_path="/opt/federatorai"
 else
@@ -1311,7 +1340,9 @@ else
 fi
 
 file_folder="$save_path/auto-provisioning"
-
+realpath() {
+    [[ $1 = /* ]] && echo "$1" || echo "$PWD/${1#./}"
+}
 
 if [ "$log_name" = "" ]; then
     log_name="output.log"
@@ -1323,19 +1354,31 @@ else
         debug_log="$log_name"
     else
         # Relative path
-        file_folder="$(readlink -f "${file_folder}/$(dirname "$log_name")")"
-        debug_log="${file_folder}/$(basename "$log_name")"
+        if [ "$machine_type" = "Linux" ]; then
+            file_folder="${file_folder}/$(dirname "$log_name")"
+            debug_log="${file_folder}/$(basename "$log_name")"
+        else
+            parent_folder=$(dirname $log_name)
+            file_folder="$file_folder/$parent_folder"
+            debug_log="${file_folder}/$(basename "$log_name")"
+        fi
     fi
 fi
 
 mkdir -p $file_folder
 if [ ! -d "$file_folder" ]; then
     err_code="6"
-    "Failed to create folder ($file_folder) to save Federator.ai planning-util files."
+    show_error "Failed to create folder ($file_folder) to save Federator.ai planning-util files. Consider exporting the env variable \$FEDERATORAI_FILE_PATH to specify the folder path."
     exit $err_code
 fi
 
-script_located_path=$(dirname $(readlink -f "$0"))
+if [ "$machine_type" = "Linux" ]; then
+    script_located_path=$(dirname $(readlink -f "$0"))
+else
+    # Mac
+    script_located_path=$(dirname $(realpath "$0"))
+fi
+
 if [ "$terraform_path" = "" ]; then
     terraform_path="$script_located_path"
 fi
