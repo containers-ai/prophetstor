@@ -581,6 +581,9 @@ patch_data_adapter_for_preloader()
     start=`date +%s`
     echo -e "\n$(tput setaf 6)Updating data adapter (collect metadata only mode to $only_mode) for preloader...$(tput sgr 0)"
 
+    # Need federatorai-operator ready for webhook service to validate alamedaservice
+    wait_until_pods_ready 600 30 $install_namespace 5
+
     flag_updated="n"
     current_flag_value=$(kubectl get alamedaservice $alamedaservice_name -n $install_namespace -o 'jsonpath={.spec.federatoraiDataAdapter.env[?(@.name=="COLLECT_METADATA_ONLY")].value}')
     if [ "$current_flag_value" != "" ]; then
