@@ -1203,6 +1203,17 @@ if [ "$need_upgrade" = "y" ];then
         kubectl -n $install_namespace exec alameda-influxdb-0 -- chmod -R 777 /var/lib/influxdb
         echo "Done"
     fi
+
+    # for upgrade - extend checksum column - Will remove this later
+    kubectl -n $install_namespace get pod federatorai-postgresql-0 >/dev/null 2>&1
+    if [ "$?" = "0" ]; then
+        alter_table_result=`kubectl -n $install_namespace exec -it federatorai-postgresql-0 -- psql -d federatorai -U postgres -c "ALTER TABLE builtin_metric_configs ADD COLUMN checksum text DEFAULT '' NOT NULL;" 2>&1`
+        echo "$alter_table_result"|egrep -q 'ALTER TABLE|column "checksum" of relation "builtin_metric_configs" already exists'
+        if [ "$?" != "0" ]; then
+            echo -e "\n$(tput setaf 1)Error! Failed to alter postgresql table.$(tput sgr 0)"
+            exit 3
+        fi
+    fi
 fi
 
 echo -e "\n$(tput setaf 2)Applying Federator.ai operator yaml files...$(tput sgr 0)"
