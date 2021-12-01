@@ -107,39 +107,25 @@ check_version()
     fi
 }
 
-
 wait_until_pods_ready()
 {
-  period="$1"
-  interval="$2"
-  namespace="$3"
-  target_pod_number="$4"
+  local period="$1"
+  local interval="$2"
+  local namespace="$3"
 
-  wait_pod_creating=1
-  for ((i=0; i<$period; i+=$interval)); do
-
-    if [[ "$wait_pod_creating" = "1" ]]; then
-        # check if pods created
-        if [[ "`kubectl get po -n $namespace 2>/dev/null|wc -l|sed 's/[ \t]*//g'`" -ge "$target_pod_number" ]]; then
-            wait_pod_creating=0
-            echo -e "\nChecking pods..."
-        else
-            echo "Waiting for pods in namespace $namespace to be created..."
-        fi
-    else
-        # check if pods running
-        if pods_ready $namespace; then
-            echo -e "\nAll $namespace pods are ready."
-            return 0
-        fi
-        echo "Waiting for pods in namespace $namespace to be ready..."
+  for ((i=0; i<${period}; i+=${interval})); do
+    result=`(kubectl -n ${namespace} get deployment; kubectl -n ${namespace} get statefulset; kubectl -n ${namespace} get daemonset) 2>&1 | egrep -v " 0/0 | 1/1 |^NAME |^No resources"`
+    if [ "${result}" = "" ]; then
+        echo -e "\nAll resources in ${namespace} are ready."
+        return 0
     fi
+    echo "Waiting for the following resources in namespace ${namespace} to be ready ..."
+    echo "${result}"
 
     sleep "$interval"
-    
   done
 
-  echo -e "\n$(tput setaf 1)Warning!! Waited for $period seconds, but all pods are not ready yet. Please check $namespace namespace$(tput sgr 0)"
+  echo -e "\n$(tput setaf 1)Warning!! Waited for ${period} seconds, but all pods are not ready yet. Please check ${namespace} namespace$(tput sgr 0)"
   leave_prog
   exit 4
 }
@@ -544,7 +530,7 @@ scale_up_pods()
     fi
 
     if [ "$do_something" = "y" ]; then
-        wait_until_pods_ready 600 30 $install_namespace 5
+        wait_until_pods_ready 600 30 $install_namespace
     fi
     echo "Done"
 }
@@ -567,7 +553,7 @@ reschedule_dispatcher()
         exit 8
     fi
     echo ""
-    wait_until_pods_ready 600 30 $install_namespace 5
+    wait_until_pods_ready 600 30 $install_namespace
     echo "Done."
     end=`date +%s`
     duration=$((end-start))
@@ -582,7 +568,7 @@ patch_data_adapter_for_preloader()
     echo -e "\n$(tput setaf 6)Updating data adapter (collect metadata only mode to $only_mode) for preloader...$(tput sgr 0)"
 
     # Need federatorai-operator ready for webhook service to validate alamedaservice
-    wait_until_pods_ready 600 30 $install_namespace 5
+    wait_until_pods_ready 600 30 $install_namespace
 
     flag_updated="n"
     current_flag_value=$(kubectl get alamedaservice $alamedaservice_name -n $install_namespace -o 'jsonpath={.spec.federatoraiDataAdapter.env[?(@.name=="COLLECT_METADATA_ONLY")].value}')
@@ -631,7 +617,7 @@ patch_data_adapter_for_preloader()
     fi
 
     if [ "$flag_updated" = "y" ]; then
-        wait_until_pods_ready 600 30 $install_namespace 5
+        wait_until_pods_ready 600 30 $install_namespace
     fi
 
     echo "Done."
@@ -653,7 +639,7 @@ patch_datahub_for_preloader()
             exit 8
         fi
         echo ""
-        wait_until_pods_ready 600 30 $install_namespace 5
+        wait_until_pods_ready 600 30 $install_namespace
     fi
     echo "Done"
     end=`date +%s`
@@ -674,7 +660,7 @@ patch_datahub_back_to_normal()
             exit 8
         fi
         echo ""
-        wait_until_pods_ready 600 30 $install_namespace 5
+        wait_until_pods_ready 600 30 $install_namespace
     fi
     echo "Done"
     end=`date +%s`
@@ -1069,7 +1055,7 @@ __EOF__
                 exit 8
             fi
             echo ""
-            wait_until_pods_ready 600 30 $nginx_ns 1
+            wait_until_pods_ready 600 30 $nginx_ns
             oc project $install_namespace
         else
             # K8S
@@ -1145,7 +1131,7 @@ __EOF__
                 exit 8
             fi
             echo ""
-            wait_until_pods_ready 600 30 $nginx_ns 1
+            wait_until_pods_ready 600 30 $nginx_ns
         fi
     fi
     echo "Done."
@@ -1565,7 +1551,7 @@ check_deployment_status()
 
 #     if [ "$modified" = "y" ]; then
 #         echo ""
-#         wait_until_pods_ready 600 30 $install_namespace 5
+#         wait_until_pods_ready 600 30 $install_namespace
 #     fi
 
 #     get_current_executor_name
@@ -1616,7 +1602,7 @@ enable_preloader_in_alamedaservice()
     # Check if preloader is ready
     check_deployment_status 180 10 "federatorai-agent-preloader" "on"
     echo ""
-    wait_until_pods_ready 600 30 $install_namespace 5
+    wait_until_pods_ready 600 30 $install_namespace
     get_current_preloader_name
     if [ "$current_preloader_pod_name" = "" ]; then
         echo -e "\n$(tput setaf 1)ERROR! Can't find installed preloader pod.$(tput sgr 0)"
@@ -1709,7 +1695,7 @@ disable_preloader_in_alamedaservice()
         # Check if preloader is removed and other pods are ready
         check_deployment_status 180 10 "federatorai-agent-preloader" "off"
         echo ""
-        wait_until_pods_ready 600 30 $install_namespace 5
+        wait_until_pods_ready 600 30 $install_namespace
         get_current_preloader_name
         if [ "$current_preloader_pod_name" != "" ]; then
             echo -e "\n$(tput setaf 1)ERROR! Can't stop preloader pod.$(tput sgr 0)"
