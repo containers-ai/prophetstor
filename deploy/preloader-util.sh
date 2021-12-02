@@ -114,7 +114,12 @@ wait_until_pods_ready()
   local namespace="$3"
 
   for ((i=0; i<${period}; i+=${interval})); do
-    result=`(kubectl -n ${namespace} get deployment; kubectl -n ${namespace} get statefulset; kubectl -n ${namespace} get daemonset) 2>&1 | egrep -v " 0/0 | 1/1 |^NAME |^No resources"`
+    for j in deployment statefulset daemonset; do
+        result="`kubectl -n ${namespace} get $j 2>&1 | egrep -v \"^NAME |^No resources\" | tr '/' ' ' | while read name ready total junk; do [ \"${ready}\" != \"${total}\" ] && echo \"${name} \"; done`"
+        if [ "${result}" != "" ]; then
+            break
+        fi
+    done
     if [ "${result}" = "" ]; then
         echo -e "\nAll resources in ${namespace} are ready."
         return 0
