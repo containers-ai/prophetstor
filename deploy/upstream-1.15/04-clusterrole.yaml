@@ -175,6 +175,7 @@ rules:
   resources:
   - clusterrolebindings
   - clusterroles
+  - clusterroles/finalizers
   - rolebindings
   - roles
   verbs:
