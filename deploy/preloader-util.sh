@@ -566,6 +566,81 @@ reschedule_dispatcher()
 
 }
 
+patch_agent_for_preloader()
+{
+    local _mode="$1"
+    local _period="@every 10m"
+
+    start=`date +%s`
+    [ "${_mode}" = "true" ] && echo -e "\n$(tput setaf 6)Updating Agent to compute monthly/weekly cost recommendation every ${_period}) for preloader...$(tput sgr 0)"
+
+    # Need federatorai-operator ready for webhook service to validate alamedaservice
+    wait_until_pods_ready 600 30 $install_namespace
+
+    flag_updated="n"
+    for key in FEDERATORAI_AGENT_INPUT_JOBS_COST_ANALYSIS_HIGH_MONTHLY_SCHEDULE_SPEC FEDERATORAI_AGENT_INPUT_JOBS_COST_ANALYSIS_HIGH_WEEKLY_SCHEDULE_SPEC; do
+        if [ "${_mode}" != "true" ]; then
+            patch_index=$(kubectl get alamedaservice $alamedaservice_name -n $install_namespace -o jsonpath="{.spec.federatoraiAgent.env[*]}" | sed 's/ /\n/g' | sed 's/"//g' | grep "name:"|awk '{print NR-1 "," $0}' | grep "$key" | cut -d ',' -f1)
+            if [ "${patch_index}" != "" ]; then
+                # Remove existing value
+                kubectl patch alamedaservice $alamedaservice_name -n $install_namespace --type=json --patch "[{\"op\": \"remove\", \"path\": \"/spec/federatoraiAgent/env/${patch_index}\"}]"
+                flag_updated="y"
+            fi
+            continue
+        fi
+        current_flag_value=$(kubectl get alamedaservice $alamedaservice_name -n $install_namespace -o jsonpath="{.spec.federatoraiAgent.env[?(@.name==\"${key}\")].value}")
+        if [ "$current_flag_value" != "" ]; then
+            if [ "$current_flag_value" != "$_period" ]; then
+                # Get ${key} index in env array
+                patch_index=$(kubectl get alamedaservice $alamedaservice_name -n $install_namespace -o jsonpath="{.spec.federatoraiAgent.env[*]}" | sed 's/ /\n/g' |sed 's/"//g' | grep "name:" | awk '{print NR-1 "," $0}' | grep "${key}" | cut -d ',' -f1)
+                if [ "$patch_index" != "" ]; then
+                    # replace value at $patch_index
+                    kubectl patch alamedaservice $alamedaservice_name -n $install_namespace --type json --patch "[ { \"op\" : \"replace\" , \"path\" : \"/spec/federatoraiAgent/env/${patch_index}\" , \"value\" : { \"name\" : \"${key}\", \"value\" : \"$_period\" } } ]"
+                    if [ "$?" != "0" ]; then
+                        echo -e "\n$(tput setaf 1)Error in setting agent env ${key} (op replace).$(tput sgr 0)"
+                        leave_prog
+                        exit 8
+                    fi
+                    flag_updated="y"
+                else
+                    echo -e "\n$(tput setaf 1)Error in setting agent env ${key} (Can't get ${key} index).$(tput sgr 0)"
+                    leave_prog
+                    exit 8
+                fi
+            fi
+        else
+            # ${key} not found
+            # Check if env[] exist
+            current_env_exist="$(kubectl -n $install_namespace get alamedaservice $alamedaservice_name -o "jsonpath={.spec.federatoraiAgent.env}" | wc -c | sed 's/[ \t]*//g')"
+            if [ "$current_env_exist" == 0 ]; then
+                # env section empty
+                kubectl patch alamedaservice $alamedaservice_name -n $install_namespace --type merge --patch "{\"spec\":{\"federatoraiAgent\":{\"env\":[{\"name\": \"${key}\",\"value\": \"$_period\"}]}}}"
+                if [ "$?" != "0" ]; then
+                    echo -e "\n$(tput setaf 1)Error in setting agent env ${key} (merge patch).$(tput sgr 0)"
+                    leave_prog
+                    exit 8
+                fi
+                flag_updated="y"
+            else
+                # env section exist, add entry
+                kubectl patch alamedaservice $alamedaservice_name -n $install_namespace --type json --patch "[ { \"op\" : \"add\" , \"path\" : \"/spec/federatoraiAgent/env/-\" , \"value\" : { \"name\" : \"${key}\", \"value\" : \"$_period\" } } ]"
+                if [ "$?" != "0" ]; then
+                    echo -e "\n$(tput setaf 1)Error in setting agent env ${key} (op add).$(tput sgr 0)"
+                    leave_prog
+                    exit 8
+                fi
+                flag_updated="y"
+            fi
+        fi
+    done
+    wait_until_pods_ready 600 30 $install_namespace
+
+    echo "Done."
+    end=`date +%s`
+    duration=$((end-start))
+    echo "Duration patch_agent_for_preloader = $duration" >> $debug_log
+}
+
 patch_data_adapter_for_preloader()
 {
     only_mode="$1"
@@ -2090,6 +2165,7 @@ fi
 
 if [ "$enable_preloader" = "y" ]; then
     enable_preloader_in_alamedaservice
+    patch_agent_for_preloader "true"
 fi
 
 if [ "$run_ab_from_preloader" = "y" ]; then
@@ -2143,6 +2219,7 @@ if [ "$disable_preloader" = "y" ]; then
     # scale up if any failure encounter previously or program abort
     scale_up_pods
     #switch_alameda_executor_in_alamedaservice "off"
+    patch_agent_for_preloader "false"
     disable_preloader_in_alamedaservice
 fi
 
