@@ -111,7 +111,7 @@ get_build_tag()
     tag_middle_digit=${tag_middle_digit%%.$tag_last_digit}  # Delete dot and last number.
     tag_first_digit=$(echo $tag_first_digit|cut -d 'v' -f2) # Delete v
     # Purposely ignore error of unofficial tag_number for development build, start from v4.4
-    if [ "${SKIP_TAG_NUMBER_CHECK}" = "1" ]; then tag_first_digit="4"; tag_middle_digit="7"; fi
+    if [ "${SKIP_TAG_NUMBER_CHECK}" = "1" ]; then tag_first_digit="5"; tag_middle_digit="0"; fi
 
     if [ "$tag_first_digit" -le "4" ] && [ "$tag_middle_digit" -le "3" ]; then
         # <= 4.3
@@ -231,6 +231,16 @@ download_files()
     fi
 
     scriptarray=("install.sh" "email-notifier-setup.sh" "node-label-assignor.sh" "preloader-util.sh" "prepare-private-repository.sh" "uninstall.sh" "federatorai-setup-for-datadog.sh")
+
+    if [ "$tag_first_digit" -ge "5" ]; then
+        # >= 5.0, remove federatorai-setup-for-datadog.sh script
+        delete="federatorai-setup-for-datadog.sh"
+        for i in "${!scriptarray[@]}"; do
+            if [ "${scriptarray[i]}" = "$delete" ]; then
+                unset 'scriptarray[i]'
+            fi
+        done
+    fi
 
     if ([ "$tag_first_digit" -eq "4" ] && [ "$tag_middle_digit" -ge "4" ]) || [ "$tag_first_digit" -ge "5" ]; then
         # >= 4.4
