@@ -107,39 +107,37 @@ check_version()
     fi
 }
 
-
 wait_until_pods_ready()
 {
-  period="$1"
-  interval="$2"
-  namespace="$3"
-  target_pod_number="$4"
+  local period="$1"
+  local interval="$2"
+  local namespace="$3"
 
-  wait_pod_creating=1
-  for ((i=0; i<$period; i+=$interval)); do
+  sleep "$interval"
+  for ((i=0; i<${period}; i+=${interval})); do
+    for j in deployment statefulset daemonset; do
+        result=""
+        while read name ready total junk; do
+            if [ "${ready}" != "${total}" ]; then
+                result="${name} "
+            fi
+        done<<<"$(kubectl -n ${namespace} get $j 2>&1 | egrep -v "^NAME |^No resources" | tr '/' ' ')"
 
-    if [[ "$wait_pod_creating" = "1" ]]; then
-        # check if pods created
-        if [[ "`kubectl get po -n $namespace 2>/dev/null|wc -l|sed 's/[ \t]*//g'`" -ge "$target_pod_number" ]]; then
-            wait_pod_creating=0
-            echo -e "\nChecking pods..."
-        else
-            echo "Waiting for pods in namespace $namespace to be created..."
+        if [ "${result}" != "" ]; then
+            break
         fi
-    else
-        # check if pods running
-        if pods_ready $namespace; then
-            echo -e "\nAll $namespace pods are ready."
-            return 0
-        fi
-        echo "Waiting for pods in namespace $namespace to be ready..."
+    done
+    if [ "${result}" = "" ]; then
+        echo -e "\nAll resources in ${namespace} are ready."
+        return 0
     fi
+    echo "Waiting for the following resources in namespace ${namespace} to be ready ..."
+    echo "${result}"
 
     sleep "$interval"
-    
   done
 
-  echo -e "\n$(tput setaf 1)Warning!! Waited for $period seconds, but all pods are not ready yet. Please check $namespace namespace$(tput sgr 0)"
+  echo -e "\n$(tput setaf 1)Warning!! Waited for ${period} seconds, but all pods are not ready yet. Please check ${namespace} namespace$(tput sgr 0)"
   leave_prog
   exit 4
 }
@@ -544,7 +542,7 @@ scale_up_pods()
     fi
 
     if [ "$do_something" = "y" ]; then
-        wait_until_pods_ready 600 30 $install_namespace 5
+        wait_until_pods_ready 600 30 $install_namespace
     fi
     echo "Done"
 }
@@ -567,7 +565,7 @@ reschedule_dispatcher()
         exit 8
     fi
     echo ""
-    wait_until_pods_ready 600 30 $install_namespace 5
+    wait_until_pods_ready 600 30 $install_namespace
     echo "Done."
     end=`date +%s`
     duration=$((end-start))
@@ -575,11 +573,118 @@ reschedule_dispatcher()
 
 }
 
+alamedaservice_set_component_env()
+{
+    local component="$1"
+    local key="$2"
+    local value="$3"    # delete env if value is empty
+
+    # delete env if value is empty
+    if [ "${value}" = "" ]; then
+        patch_index=$(kubectl get alamedaservice ${alamedaservice_name} -n ${install_namespace} -o jsonpath="{.spec.${component}.env[*]}" | sed 's/ /\n/g' | sed 's/"//g' | grep "name:" | awk '{print NR-1 "," $0}' | grep "${key}" | cut -d ',' -f1)
+        if [ "${patch_index}" != "" ]; then
+            # Remove existing value
+            kubectl patch alamedaservice ${alamedaservice_name} -n ${install_namespace} --type=json --patch "[{\"op\": \"remove\", \"path\": \"/spec/${component}/env/${patch_index}\"}]"
+            if [ "$?" != "0" ]; then
+                echo -e "\n$(tput setaf 1)Error in removing ${component} env ${key} (op replace).$(tput sgr 0)"
+                leave_prog
+                exit 8
+            fi
+        fi
+        echo -e "\n$(tput setaf 6)Remove ${component} env ${key}.$(tput sgr 0)"
+        return 0
+    fi
+
+    current_value=$(kubectl get alamedaservice ${alamedaservice_name} -n ${install_namespace} -o jsonpath="{.spec.${component}.env[?(@.name==\"${key}\")].value}")
+    if [ "${current_value}" != "" ]; then
+        # Modify only if values are differents
+        if [ "${current_value}" != "${value}" ]; then
+            # Get ${key} index in env array
+            patch_index=$(kubectl get alamedaservice ${alamedaservice_name} -n ${install_namespace} -o jsonpath="{.spec.${component}.env[*]}" | sed 's/ /\n/g' |sed 's/"//g' | grep "name:" | awk '{print NR-1 "," $0}' | grep "${key}" | cut -d ',' -f1)
+            if [ "${patch_index}" != "" ]; then
+                # replace value at $patch_index
+                kubectl patch alamedaservice ${alamedaservice_name} -n ${install_namespace} --type json --patch "[ { \"op\" : \"replace\" , \"path\" : \"/spec/${component}/env/${patch_index}\" , \"value\" : { \"name\" : \"${key}\", \"value\" : \"${value}\" } } ]"
+                if [ "$?" != "0" ]; then
+                    echo -e "\n$(tput setaf 1)Error in setting ${component} env ${key} (op replace).$(tput sgr 0)"
+                    leave_prog
+                    exit 8
+                fi
+            else
+                echo -e "\n$(tput setaf 1)Error in setting ${component} env ${key} (Can't get ${key} index).$(tput sgr 0)"
+                leave_prog
+                exit 8
+            fi
+            echo -e "\n$(tput setaf 6)Modify ${component} env ${key}=${value}.$(tput sgr 0)"
+        else
+            echo -e "\n$(tput setaf 6)Use existing ${component} env ${key}=${value}.$(tput sgr 0)"
+        fi
+    else
+        # ${key} not found
+        # Check if env[] exist
+        current_env_exist="$(kubectl -n ${install_namespace} get alamedaservice ${alamedaservice_name} -o "jsonpath={.spec.${component}.env}" | wc -c | sed 's/[ \t]*//g')"
+        if [ "${current_env_exist}" == 0 ]; then
+            # env section empty
+            kubectl patch alamedaservice ${alamedaservice_name} -n ${install_namespace} --type merge --patch "{\"spec\":{\"${component}\":{\"env\":[{\"name\": \"${key}\",\"value\": \"${value}\"}]}}}"
+            if [ "$?" != "0" ]; then
+                echo -e "\n$(tput setaf 1)Error in setting agent env ${key} (merge patch).$(tput sgr 0)"
+                leave_prog
+                exit 8
+            fi
+        else
+            # env section exist, add entry
+            kubectl patch alamedaservice ${alamedaservice_name} -n ${install_namespace} --type json --patch "[ { \"op\" : \"add\" , \"path\" : \"/spec/${component}/env/-\" , \"value\" : { \"name\" : \"${key}\", \"value\" : \"${value}\" } } ]"
+            if [ "$?" != "0" ]; then
+                echo -e "\n$(tput setaf 1)Error in setting agent env ${key} (op add).$(tput sgr 0)"
+                leave_prog
+                exit 8
+            fi
+        fi
+        echo -e "\n$(tput setaf 6)Set ${component} env ${key}=${value}.$(tput sgr 0)"
+    fi
+    return 0
+}
+
+patch_agent_for_preloader()
+{
+    local _mode="$1"
+    local _period="@every 10m"
+
+    start=`date +%s`
+    [ "${_mode}" = "true" ] && echo -e "\n$(tput setaf 6)Updating Agent to compute monthly/weekly cost recommendation every ${_period}) for preloader...$(tput sgr 0)"
+
+    # Need federatorai-operator ready for webhook service to validate alamedaservice
+    wait_until_pods_ready 600 30 $install_namespace
+
+    flag_updated="n"
+    for key in FEDERATORAI_AGENT_INPUT_JOBS_COST_ANALYSIS_HIGH_MONTHLY_SCHEDULE_SPEC FEDERATORAI_AGENT_INPUT_JOBS_COST_ANALYSIS_HIGH_WEEKLY_SCHEDULE_SPEC; do
+        if [ "${_mode}" != "true" ]; then
+            alamedaservice_set_component_env federatoraiAgent ${key} ""
+        fi
+        alamedaservice_set_component_env federatoraiAgent ${key} "${_period}"
+    done
+    wait_until_pods_ready 600 30 $install_namespace
+
+    echo "Done."
+    end=`date +%s`
+    duration=$((end-start))
+    echo "Duration patch_agent_for_preloader = $duration" >> $debug_log
+}
+
 patch_data_adapter_for_preloader()
 {
     only_mode="$1"
     start=`date +%s`
     echo -e "\n$(tput setaf 6)Updating data adapter (collect metadata only mode to $only_mode) for preloader...$(tput sgr 0)"
+
+    # Need federatorai-operator ready for webhook service to validate alamedaservice
+    wait_until_pods_ready 600 30 $install_namespace
+
+    # To shorten CI running time, need to collect data in shorter time for different intervals
+    if [ "${DO_CI}" = "1" ]; then
+        alamedaservice_set_component_env federatoraiDataAdapter COLLECTION_INTERVAL_1H "10m"
+        alamedaservice_set_component_env federatoraiDataAdapter COLLECTION_INTERVAL_6H "10m"
+        alamedaservice_set_component_env federatoraiDataAdapter COLLECTION_INTERVAL_24H "10m"
+    fi
 
     flag_updated="n"
     current_flag_value=$(kubectl get alamedaservice $alamedaservice_name -n $install_namespace -o 'jsonpath={.spec.federatoraiDataAdapter.env[?(@.name=="COLLECT_METADATA_ONLY")].value}')
@@ -628,7 +733,7 @@ patch_data_adapter_for_preloader()
     fi
 
     if [ "$flag_updated" = "y" ]; then
-        wait_until_pods_ready 600 30 $install_namespace 5
+        wait_until_pods_ready 600 30 $install_namespace
     fi
 
     echo "Done."
@@ -650,7 +755,7 @@ patch_datahub_for_preloader()
             exit 8
         fi
         echo ""
-        wait_until_pods_ready 600 30 $install_namespace 5
+        wait_until_pods_ready 600 30 $install_namespace
     fi
     echo "Done"
     end=`date +%s`
@@ -671,7 +776,7 @@ patch_datahub_back_to_normal()
             exit 8
         fi
         echo ""
-        wait_until_pods_ready 600 30 $install_namespace 5
+        wait_until_pods_ready 600 30 $install_namespace
     fi
     echo "Done"
     end=`date +%s`
@@ -1066,7 +1171,7 @@ __EOF__
                 exit 8
             fi
             echo ""
-            wait_until_pods_ready 600 30 $nginx_ns 1
+            wait_until_pods_ready 600 30 $nginx_ns
             oc project $install_namespace
         else
             # K8S
@@ -1142,7 +1247,7 @@ __EOF__
                 exit 8
             fi
             echo ""
-            wait_until_pods_ready 600 30 $nginx_ns 1
+            wait_until_pods_ready 600 30 $nginx_ns
         fi
     fi
     echo "Done."
@@ -1562,7 +1667,7 @@ check_deployment_status()
 
 #     if [ "$modified" = "y" ]; then
 #         echo ""
-#         wait_until_pods_ready 600 30 $install_namespace 5
+#         wait_until_pods_ready 600 30 $install_namespace
 #     fi
 
 #     get_current_executor_name
@@ -1613,7 +1718,7 @@ enable_preloader_in_alamedaservice()
     # Check if preloader is ready
     check_deployment_status 180 10 "federatorai-agent-preloader" "on"
     echo ""
-    wait_until_pods_ready 600 30 $install_namespace 5
+    wait_until_pods_ready 600 30 $install_namespace
     get_current_preloader_name
     if [ "$current_preloader_pod_name" = "" ]; then
         echo -e "\n$(tput setaf 1)ERROR! Can't find installed preloader pod.$(tput sgr 0)"
@@ -1706,7 +1811,7 @@ disable_preloader_in_alamedaservice()
         # Check if preloader is removed and other pods are ready
         check_deployment_status 180 10 "federatorai-agent-preloader" "off"
         echo ""
-        wait_until_pods_ready 600 30 $install_namespace 5
+        wait_until_pods_ready 600 30 $install_namespace
         get_current_preloader_name
         if [ "$current_preloader_pod_name" != "" ]; then
             echo -e "\n$(tput setaf 1)ERROR! Can't stop preloader pod.$(tput sgr 0)"
@@ -2096,6 +2201,7 @@ fi
 
 if [ "$enable_preloader" = "y" ]; then
     enable_preloader_in_alamedaservice
+    patch_agent_for_preloader "true"
 fi
 
 if [ "$run_ab_from_preloader" = "y" ]; then
@@ -2149,6 +2255,7 @@ if [ "$disable_preloader" = "y" ]; then
     # scale up if any failure encounter previously or program abort
     scale_up_pods
     #switch_alameda_executor_in_alamedaservice "off"
+    patch_agent_for_preloader "false"
     disable_preloader_in_alamedaservice
 fi
 

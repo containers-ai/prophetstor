@@ -68,8 +68,6 @@ spec:
                   fieldPath: metadata.name
             - name: OPERATOR_NAME
               value: "federatorai-operator"
-            - name: DISABLE_OPERAND_RESOURCE_PROTECTION
-              value: "false"
           readinessProbe:
             failureThreshold: 20
             httpGet:

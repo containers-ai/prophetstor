@@ -171,7 +171,7 @@ check_if_pod_match_expected_version()
     namespace="$4"
 
     for ((i=0; i<$period; i+=$interval)); do
-        current_tag="$(kubectl get pod -n $namespace -o custom-columns=NAME:.metadata.name,IMAGE:.spec.containers[*].image | grep "$pod_name" | head -1 |awk -F'/' '{print $NF}'|cut -d ':' -f2)"
+        current_tag="$(kubectl get pod -n $namespace -o custom-columns=NAME:.metadata.name,IMAGE:.spec.containers[*].image | grep "$pod_name" | awk '{print $2}'|tr "," "\n"|grep "$pod_name" |awk -F'/' '{print $NF}'|cut -d ':' -f2)"
         if [ "$current_tag" = "$tag_number" ]; then
             echo -e "\n$pod_name pod is present.\n"
             return 0
@@ -374,62 +374,6 @@ get_restapi_route()
             echo "The REST API online document can be found in $(tput setaf 6)https://<YOUR IP>:$rest_api_node_port/apis/v1/swagger/index.html $(tput sgr 0)"
             echo "========================================"
         fi
-    fi
-}
-
-setup_data_adapter_secret()
-{
-    secret_name="federatorai-data-adapter-secret"
-    secret_api_key="`kubectl get secret $secret_name -n $install_namespace -o jsonpath='{.data.datadog_api_key}'|base64 -d`"
-    secret_app_key="`kubectl get secret $secret_name -n $install_namespace -o jsonpath='{.data.datadog_application_key}'|base64 -d`"
-
-    modified="n"
-    if [ "$secret_api_key" = "" ] || [ "$secret_app_key" = "" ] || [ "$secret_api_key" = "dummy" ] || [ "$secret_app_key" = "dummy" ]; then
-        modified="y"
-        while [ "$input_api_key" = "" ] || [ "$input_app_key" = "" ]
-        do
-            read -r -p "$(tput setaf 2)Please enter Datadog API key: $(tput sgr 0)" input_api_key </dev/tty
-            input_api_key=`echo -n "$input_api_key" | base64`
-            read -r -p "$(tput setaf 2)Please enter Datadog Application key: $(tput sgr 0)" input_app_key </dev/tty
-            input_app_key=`echo -n "$input_app_key" | base64`
-        done
-    else
-        while [ "$reconfigure_action" != "y" ] && [ "$reconfigure_action" != "n" ]
-        do
-            default="n"
-            read -r -p "$(tput setaf 2)Do you want to reconfigure Datadog API & Application keys? [default: $default]: $(tput sgr 0)" reconfigure_action </dev/tty
-            reconfigure_action=${reconfigure_action:-$default}
-            reconfigure_action=$(echo "$reconfigure_action" | tr '[:upper:]' '[:lower:]')
-        done
-        if [ "$reconfigure_action" = "y" ]; then
-            modified="y"
-            while [ "$input_api_key" = "" ] || [ "$input_app_key" = "" ]
-            do
-                default="$secret_api_key"
-                read -r -p "$(tput setaf 2)Please enter Datadog API key [current: $default]: $(tput sgr 0)" input_api_key </dev/tty
-                input_api_key=${input_api_key:-$default}
-                input_api_key=`echo -n "$input_api_key" | base64`
-
-                default="$secret_app_key"
-                read -r -p "$(tput setaf 2)Please enter Datadog Application key [current: $default]: $(tput sgr 0)" input_app_key </dev/tty
-                input_app_key=${input_app_key:-$default}
-                input_app_key=`echo -n "$input_app_key" | base64`
-            done
-        fi
-    fi
-
-    if [ "$modified" = "y" ]; then
-        kubectl patch secret $secret_name -n $install_namespace --type merge --patch "{\"data\":{\"datadog_api_key\": \"$input_api_key\"}}"
-        if [ "$?" != "0" ]; then
-            echo -e "\n$(tput setaf 1)Error! Failed to update datadog API key in data adapter secret.$(tput sgr 0)"
-            exit 1
-        fi
-        kubectl patch secret $secret_name -n $install_namespace --type merge --patch "{\"data\":{\"datadog_application_key\": \"$input_app_key\"}}"
-        if [ "$?" != "0" ]; then
-            echo -e "\n$(tput setaf 1)Error! Failed to update datadog Application key in data adapter secret.$(tput sgr 0)"
-            exit 1
-        fi
-        restart_data_adapter_pod
     fi
 }
 
@@ -1203,6 +1147,17 @@ if [ "$need_upgrade" = "y" ];then
         kubectl -n $install_namespace exec alameda-influxdb-0 -- chmod -R 777 /var/lib/influxdb
         echo "Done"
     fi
+
+    # for upgrade - extend checksum column - Will remove this later
+    kubectl -n $install_namespace get pod federatorai-postgresql-0 >/dev/null 2>&1
+    if [ "$?" = "0" ]; then
+        alter_table_result=`kubectl -n $install_namespace exec -it federatorai-postgresql-0 -- psql -d federatorai -U postgres -c "ALTER TABLE builtin_metric_configs ADD COLUMN checksum text DEFAULT '' NOT NULL;" 2>&1`
+        echo "$alter_table_result"|egrep -q 'ALTER TABLE|column "checksum" of relation "builtin_metric_configs" already exists'
+        if [ "$?" != "0" ]; then
+            echo -e "\n$(tput setaf 1)Error! Failed to alter postgresql table.$(tput sgr 0)"
+            exit 3
+        fi
+    fi
 fi
 
 echo -e "\n$(tput setaf 2)Applying Federator.ai operator yaml files...$(tput sgr 0)"
@@ -1673,17 +1628,6 @@ __EOF__
             exit 7
         fi
 
-        # Add sysdig entry inside secret if needed
-        sysdig_info=$(kubectl get secret federatorai-data-adapter-secret -n $install_namespace -o jsonpath='{.data.sysdig_api_token}')
-        if [ "$sysdig_info" == "" ]; then
-            sysdig_token=$(echo -n "dummy" | base64 )
-            kubectl patch secret federatorai-data-adapter-secret -n $install_namespace --type merge --patch "{\"data\":{\"sysdig_api_token\": \"$sysdig_token\"}}"
-            if [ "$?" != "0" ]; then
-                echo -e "\n$(tput setaf 1)Error! Failed to update sysdig dummy token in data adapter secret.$(tput sgr 0)"
-                exit 1
-            fi
-        fi
-
         # Specified alternative container imageLocation
         if [ "${RELATED_IMAGE_URL_PREFIX}" != "" ]; then
             kubectl patch alamedaservice $previous_alamedaservice -n $install_namespace --type merge --patch "{\"spec\":{\"imageLocation\": \"${RELATED_IMAGE_URL_PREFIX}\"}}"
@@ -1753,7 +1697,6 @@ if [ "$webhook_exist" != "y" ];then
 fi
 
 ###Configure data source from GUI
-#setup_data_adapter_secret
 
 if [ "$need_upgrade" != "y" ];then
     if [ "$ECR_URL" != "" ]; then

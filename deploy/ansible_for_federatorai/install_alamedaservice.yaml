@@ -16,16 +16,16 @@
   loop: "{{ cr_files }}"
 
 # Download cr files
-- name: Download alamedascaler files
-  get_url:
-    url: "https://raw.githubusercontent.com/containers-ai/prophetstor/{{ federatorai_version }}/deploy/example/{{ item.pool }}/{{ item.name }}"
-    dest: "{{ default_yaml_files_base_path }}/{{ federatorai_version }}/{{ item.dest }}"
-    mode: 0755
-    force: yes
-  loop:
-    - { pool: 'kafka', name: 'alamedascaler.yaml', dest: 'alamedascaler_kafka.yaml' }
-    - { pool: 'nginx', name: 'alamedascaler.yaml', dest: 'alamedascaler_nginx.yaml' }
-    - { pool: 'redis', name: 'alamedascaler.yaml', dest: 'alamedascaler_generic.yaml' }
+# - name: Download alamedascaler files
+#   get_url:
+#     url: "https://raw.githubusercontent.com/containers-ai/prophetstor/{{ federatorai_version }}/deploy/example/{{ item.pool }}/{{ item.name }}"
+#     dest: "{{ default_yaml_files_base_path }}/{{ federatorai_version }}/{{ item.dest }}"
+#     mode: 0755
+#     force: yes
+#   loop:
+#     - { pool: 'kafka', name: 'alamedascaler.yaml', dest: 'alamedascaler_kafka.yaml' }
+#     - { pool: 'nginx', name: 'alamedascaler.yaml', dest: 'alamedascaler_nginx.yaml' }
+#     - { pool: 'redis', name: 'alamedascaler.yaml', dest: 'alamedascaler_generic.yaml' }
 
 # Replace imagelocation info in alamedaservice file
 - name: Replace image location in alamedaservice file
