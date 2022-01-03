@@ -113,9 +113,16 @@ wait_until_pods_ready()
   local interval="$2"
   local namespace="$3"
 
+  sleep "$interval"
   for ((i=0; i<${period}; i+=${interval})); do
     for j in deployment statefulset daemonset; do
-        result="`kubectl -n ${namespace} get $j 2>&1 | egrep -v \"^NAME |^No resources\" | tr '/' ' ' | while read name ready total junk; do [ \"${ready}\" != \"${total}\" ] && echo \"${name} \"; done`"
+        result=""
+        while read name ready total junk; do
+            if [ "${ready}" != "${total}" ]; then
+                result="${name} "
+            fi
+        done<<<"$(kubectl -n ${namespace} get $j 2>&1 | egrep -v "^NAME |^No resources" | tr '/' ' ')"
+
         if [ "${result}" != "" ]; then
             break
         fi
@@ -566,6 +573,77 @@ reschedule_dispatcher()
 
 }
 
+alamedaservice_set_component_env()
+{
+    local component="$1"
+    local key="$2"
+    local value="$3"    # delete env if value is empty
+
+    # delete env if value is empty
+    if [ "${value}" = "" ]; then
+        patch_index=$(kubectl get alamedaservice ${alamedaservice_name} -n ${install_namespace} -o jsonpath="{.spec.${component}.env[*]}" | sed 's/ /\n/g' | sed 's/"//g' | grep "name:" | awk '{print NR-1 "," $0}' | grep "${key}" | cut -d ',' -f1)
+        if [ "${patch_index}" != "" ]; then
+            # Remove existing value
+            kubectl patch alamedaservice ${alamedaservice_name} -n ${install_namespace} --type=json --patch "[{\"op\": \"remove\", \"path\": \"/spec/${component}/env/${patch_index}\"}]"
+            if [ "$?" != "0" ]; then
+                echo -e "\n$(tput setaf 1)Error in removing ${component} env ${key} (op replace).$(tput sgr 0)"
+                leave_prog
+                exit 8
+            fi
+        fi
+        echo -e "\n$(tput setaf 6)Remove ${component} env ${key}.$(tput sgr 0)"
+        return 0
+    fi
+
+    current_value=$(kubectl get alamedaservice ${alamedaservice_name} -n ${install_namespace} -o jsonpath="{.spec.${component}.env[?(@.name==\"${key}\")].value}")
+    if [ "${current_value}" != "" ]; then
+        # Modify only if values are differents
+        if [ "${current_value}" != "${value}" ]; then
+            # Get ${key} index in env array
+            patch_index=$(kubectl get alamedaservice ${alamedaservice_name} -n ${install_namespace} -o jsonpath="{.spec.${component}.env[*]}" | sed 's/ /\n/g' |sed 's/"//g' | grep "name:" | awk '{print NR-1 "," $0}' | grep "${key}" | cut -d ',' -f1)
+            if [ "${patch_index}" != "" ]; then
+                # replace value at $patch_index
+                kubectl patch alamedaservice ${alamedaservice_name} -n ${install_namespace} --type json --patch "[ { \"op\" : \"replace\" , \"path\" : \"/spec/${component}/env/${patch_index}\" , \"value\" : { \"name\" : \"${key}\", \"value\" : \"${value}\" } } ]"
+                if [ "$?" != "0" ]; then
+                    echo -e "\n$(tput setaf 1)Error in setting ${component} env ${key} (op replace).$(tput sgr 0)"
+                    leave_prog
+                    exit 8
+                fi
+            else
+                echo -e "\n$(tput setaf 1)Error in setting ${component} env ${key} (Can't get ${key} index).$(tput sgr 0)"
+                leave_prog
+                exit 8
+            fi
+            echo -e "\n$(tput setaf 6)Modify ${component} env ${key}=${value}.$(tput sgr 0)"
+        else
+            echo -e "\n$(tput setaf 6)Use existing ${component} env ${key}=${value}.$(tput sgr 0)"
+        fi
+    else
+        # ${key} not found
+        # Check if env[] exist
+        current_env_exist="$(kubectl -n ${install_namespace} get alamedaservice ${alamedaservice_name} -o "jsonpath={.spec.${component}.env}" | wc -c | sed 's/[ \t]*//g')"
+        if [ "${current_env_exist}" == 0 ]; then
+            # env section empty
+            kubectl patch alamedaservice ${alamedaservice_name} -n ${install_namespace} --type merge --patch "{\"spec\":{\"${component}\":{\"env\":[{\"name\": \"${key}\",\"value\": \"${value}\"}]}}}"
+            if [ "$?" != "0" ]; then
+                echo -e "\n$(tput setaf 1)Error in setting agent env ${key} (merge patch).$(tput sgr 0)"
+                leave_prog
+                exit 8
+            fi
+        else
+            # env section exist, add entry
+            kubectl patch alamedaservice ${alamedaservice_name} -n ${install_namespace} --type json --patch "[ { \"op\" : \"add\" , \"path\" : \"/spec/${component}/env/-\" , \"value\" : { \"name\" : \"${key}\", \"value\" : \"${value}\" } } ]"
+            if [ "$?" != "0" ]; then
+                echo -e "\n$(tput setaf 1)Error in setting agent env ${key} (op add).$(tput sgr 0)"
+                leave_prog
+                exit 8
+            fi
+        fi
+        echo -e "\n$(tput setaf 6)Set ${component} env ${key}=${value}.$(tput sgr 0)"
+    fi
+    return 0
+}
+
 patch_agent_for_preloader()
 {
     local _mode="$1"
@@ -580,58 +658,9 @@ patch_agent_for_preloader()
     flag_updated="n"
     for key in FEDERATORAI_AGENT_INPUT_JOBS_COST_ANALYSIS_HIGH_MONTHLY_SCHEDULE_SPEC FEDERATORAI_AGENT_INPUT_JOBS_COST_ANALYSIS_HIGH_WEEKLY_SCHEDULE_SPEC; do
         if [ "${_mode}" != "true" ]; then
-            patch_index=$(kubectl get alamedaservice $alamedaservice_name -n $install_namespace -o jsonpath="{.spec.federatoraiAgent.env[*]}" | sed 's/ /\n/g' | sed 's/"//g' | grep "name:"|awk '{print NR-1 "," $0}' | grep "$key" | cut -d ',' -f1)
-            if [ "${patch_index}" != "" ]; then
-                # Remove existing value
-                kubectl patch alamedaservice $alamedaservice_name -n $install_namespace --type=json --patch "[{\"op\": \"remove\", \"path\": \"/spec/federatoraiAgent/env/${patch_index}\"}]"
-                flag_updated="y"
-            fi
-            continue
+            alamedaservice_set_component_env federatoraiAgent ${key} ""
         fi
-        current_flag_value=$(kubectl get alamedaservice $alamedaservice_name -n $install_namespace -o jsonpath="{.spec.federatoraiAgent.env[?(@.name==\"${key}\")].value}")
-        if [ "$current_flag_value" != "" ]; then
-            if [ "$current_flag_value" != "$_period" ]; then
-                # Get ${key} index in env array
-                patch_index=$(kubectl get alamedaservice $alamedaservice_name -n $install_namespace -o jsonpath="{.spec.federatoraiAgent.env[*]}" | sed 's/ /\n/g' |sed 's/"//g' | grep "name:" | awk '{print NR-1 "," $0}' | grep "${key}" | cut -d ',' -f1)
-                if [ "$patch_index" != "" ]; then
-                    # replace value at $patch_index
-                    kubectl patch alamedaservice $alamedaservice_name -n $install_namespace --type json --patch "[ { \"op\" : \"replace\" , \"path\" : \"/spec/federatoraiAgent/env/${patch_index}\" , \"value\" : { \"name\" : \"${key}\", \"value\" : \"$_period\" } } ]"
-                    if [ "$?" != "0" ]; then
-                        echo -e "\n$(tput setaf 1)Error in setting agent env ${key} (op replace).$(tput sgr 0)"
-                        leave_prog
-                        exit 8
-                    fi
-                    flag_updated="y"
-                else
-                    echo -e "\n$(tput setaf 1)Error in setting agent env ${key} (Can't get ${key} index).$(tput sgr 0)"
-                    leave_prog
-                    exit 8
-                fi
-            fi
-        else
-            # ${key} not found
-            # Check if env[] exist
-            current_env_exist="$(kubectl -n $install_namespace get alamedaservice $alamedaservice_name -o "jsonpath={.spec.federatoraiAgent.env}" | wc -c | sed 's/[ \t]*//g')"
-            if [ "$current_env_exist" == 0 ]; then
-                # env section empty
-                kubectl patch alamedaservice $alamedaservice_name -n $install_namespace --type merge --patch "{\"spec\":{\"federatoraiAgent\":{\"env\":[{\"name\": \"${key}\",\"value\": \"$_period\"}]}}}"
-                if [ "$?" != "0" ]; then
-                    echo -e "\n$(tput setaf 1)Error in setting agent env ${key} (merge patch).$(tput sgr 0)"
-                    leave_prog
-                    exit 8
-                fi
-                flag_updated="y"
-            else
-                # env section exist, add entry
-                kubectl patch alamedaservice $alamedaservice_name -n $install_namespace --type json --patch "[ { \"op\" : \"add\" , \"path\" : \"/spec/federatoraiAgent/env/-\" , \"value\" : { \"name\" : \"${key}\", \"value\" : \"$_period\" } } ]"
-                if [ "$?" != "0" ]; then
-                    echo -e "\n$(tput setaf 1)Error in setting agent env ${key} (op add).$(tput sgr 0)"
-                    leave_prog
-                    exit 8
-                fi
-                flag_updated="y"
-            fi
-        fi
+        alamedaservice_set_component_env federatoraiAgent ${key} "${_period}"
     done
     wait_until_pods_ready 600 30 $install_namespace
 
@@ -649,6 +678,13 @@ patch_data_adapter_for_preloader()
 
     # Need federatorai-operator ready for webhook service to validate alamedaservice
     wait_until_pods_ready 600 30 $install_namespace
+
+    # To shorten CI running time, need to collect data in shorter time for different intervals
+    if [ "${DO_CI}" = "1" ]; then
+        alamedaservice_set_component_env federatoraiDataAdapter COLLECTION_INTERVAL_1H "10m"
+        alamedaservice_set_component_env federatoraiDataAdapter COLLECTION_INTERVAL_6H "10m"
+        alamedaservice_set_component_env federatoraiDataAdapter COLLECTION_INTERVAL_24H "10m"
+    fi
 
     flag_updated="n"
     current_flag_value=$(kubectl get alamedaservice $alamedaservice_name -n $install_namespace -o 'jsonpath={.spec.federatoraiDataAdapter.env[?(@.name=="COLLECT_METADATA_ONLY")].value}')

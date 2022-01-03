@@ -79,10 +79,20 @@ push_operation()
     for image in ${image_list}; do
         file_name="`ls *.tgz|grep -E "$image\.[v][[:digit:]]+\.[[:digit:]]+\.[0-9a-z\-]+\."`"
         if [ "$file_name" = "" ]; then
-            echo -e "\n$(tput setaf 1)Error! Failed to find \"$image.<tag>.tgz\" file name in $PWD.$(tput sgr 0)"
-            exit 3
+            # add dev- build support
+            file_name="`ls *.tgz|grep -E "$image\.dev-"`"
+            if [ "$file_name" = "" ]; then
+                echo -e "\n$(tput setaf 1)Error! Failed to find \"$image.<tag>.tgz\" file name in $PWD.$(tput sgr 0)"
+                exit 3
+            else
+                is_dev_build="y"
+            fi
         fi
-        build_ver="`echo $file_name|awk -F'.' '{print $2"."$3"."$4}'`"
+        if [ "$is_dev_build" = "y" ]; then
+            build_ver="`echo $file_name|cut -d '.' -f2`"
+        else
+            build_ver="`echo $file_name|awk -F'.' '{print $2"."$3"."$4}'`"
+        fi
         if [ "$build_ver" = "" ]; then
             echo -e "\n$(tput setaf 1)Error! Failed to parse build tag version.$(tput sgr 0)"
             exit 3
@@ -162,7 +172,7 @@ while getopts "h-:" o; do
 done
 
 ## Global variables
-image_list="alameda-ai-dispatcher alameda-ai alameda-datahub-ubi alameda-executor-ubi alameda-influxdb alameda-notifier-ubi alameda-rabbitmq alameda-recommender-ubi fedemeter-api-ubi fedemeter-influxdb federatorai-agent-preloader federatorai-agent-ubi federatorai-dashboard-backend federatorai-dashboard-frontend federatorai-data-adapter federatorai-operator-ubi federatorai-postgresql federatorai-rest-ubi"
+image_list="alameda-ai-dispatcher alameda-ai alameda-datahub-ubi alameda-executor-ubi alameda-influxdb alameda-notifier-ubi alameda-rabbitmq alameda-recommender-ubi fedemeter-api-ubi fedemeter-influxdb federatorai-agent-preloader federatorai-agent-ubi federatorai-dashboard-backend federatorai-dashboard-frontend federatorai-data-adapter federatorai-operator-ubi federatorai-postgresql federatorai-rest-ubi federatorai-telemetry"
 script_output="execution_output_`date +%s`.log"
 if [ "$source_repo_url" = "" ]; then
     original_url_prefix="quay.io/prophetstor"
