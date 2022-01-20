@@ -84,10 +84,13 @@ remove_operator_yaml()
     for yaml_fn in `ls [0-9]*yaml | sort -n -r`
     do
         echo -e "$(tput setaf 2)\nDeleting $yaml_fn ...$(tput sgr 0)"
-        kubectl delete -f ${yaml_fn}
+        if [[ $yaml_fn =~ ^04-.*$ ]]; then
+            kubectl delete -f ${yaml_fn} --ignore-not-found=true
+        else
+            kubectl delete -f ${yaml_fn}
+        fi
         if [ "$?" != "0" ]; then
             echo -e "$(tput setaf 1)Error in removing $yaml_fn$(tput sgr 0)"
-            #exit 2
         fi
     done
 }
