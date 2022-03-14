@@ -1,316 +1,399 @@
 #!/usr/bin/env bash
-set -e
 
-function number::of::spaces() {
-  echo "$1" | tr -cd ' ' | wc -c|sed 's/[ \t]*//g'
-}
+show_usage()
+{
+    cat << __EOF__
 
-function neat::yaml() {
-  #tab=$(printf '\t')
-  local tab="  "
+    Usage:
+        -b,    backup, cannot use with restore(-r) at the same time
+        -r,    restore, cannot use with backup(-b) at the same time
+        -d,    backup or restore folder [e.g., -d /opt/backup]
 
-  local status="^status:"
-  local ownerrefs="^${tab}ownerReferences:"
-  local generation="^${tab}generation:"
-  local managedfields="^${tab}managedFields:"
-  local creattimestamp="^${tab}creationTimestamp:"
-  local resourcever="^${tab}resourceVersion:"
-  local selflink="^${tab}selfLink:"
-  local uid="^${tab}uid:"
-  local rmfields="$status\|$ownerrefs\|$generation\|$managedfields\|$creattimestamp\|$resourcever\|$selflink\|$uid"
-
-  local skip="false"
-  local currmfield=""
-
-  while IFS= read -r; do
-    if [ "$skip" = "true" ]; then
-      local chkpos=$(number::of::spaces "$currmfield")
-      chkpos=$((chkpos+1))
-      local chchk="$(echo "$REPLY" | cut -c$chkpos)"
-      if [ "$chchk" != " " -a "$chchk" != "-" ]; then
-        if ! echo "$REPLY" | grep -q "$rmfields"; then
-          skip="false"
-          echo "$REPLY"
-        fi
-        continue
-      fi
-    fi
-    if echo "$REPLY" | grep -q "$rmfields"; then
-      currmfield="$REPLY"
-      skip="true"
-      continue
-    fi
-    if [ "$skip" = "false" ]; then
-      echo "$REPLY"
-    fi
-  done <<< "$1"
-}
-
-function download::github::assets() {
-  local account="$1"
-  local repo="$2"
-  local tagorbranch="$3"
-  local relativedir="$(echo $4 | sed 's|^/||' | sed 's|/$||')"
-  local opfiles=""
-
-  opfiles=`curl --silent https://api.github.com/repos/${account}/${repo}/contents/${relativedir}?ref=${tagorbranch} 2>&1|grep "\"name\":"|cut -d ':' -f2|cut -d '"' -f2`
-  if [ "$opfiles" = "" ]; then
-    echo -e "\n$(tput setaf 1)Abort, download ${relativedir} file list of ${repo} failed!!!$(tput sgr 0)"
-    echo "Please check tag name and network"
+__EOF__
     exit 1
-  fi
-
-  for file in `echo $opfiles`; do
-    echo "Downloading file $file ..."
-    if ! curl -sL --fail https://raw.githubusercontent.com/${account}/${repo}/${tagorbranch}/${relativedir}/${file} -O; then
-      echo -e "\n$(tput setaf 1)Abort, download file failed!!!$(tput sgr 0)"
-      echo "Please check tag name and network"
-      exit 1
-    fi
-  done
 }
 
-function get::installed::ns() {
-  if ! kubectl get sts --all-namespaces | grep -q "alameda-influxdb\|fedemeter-influxdb"; then
-    echo "cannot find installed namespace" >&2
-    return 1
-  fi
+restore(){
+    ask_confirmation_from_user
+    check_and_uncompress_file
+    stop_services
+    restore_influxdb
+    restore_postgresql
+    start_services
+    echo "Restoration job has completed successfully."
+}
 
-  local retns=$(kubectl get sts --all-namespaces | grep "alameda-influxdb\|fedemeter-influxdb" | head -1 | awk '{print $1}')
-  echo $retns
+backup(){
+    prepare_folder
+    backup_influxdb
+    backup_postgresql
+    compress_files
+    echo "backup file saved to folder $tgz_file"
+}
+
+ask_confirmation_from_user(){
+    default="n"
+    echo -e "$(tput setaf 2)Restoration will drop all the data inside current dbs.$(tput sgr 0)"
+    read -r -p "$(tput setaf 2)Do you want to continue the restoration process? [default: $default]: $(tput sgr 0)" go_restore </dev/tty
+    go_restore=${go_restore:-$default}
+    go_restore=$(echo "$go_restore" | tr '[:upper:]' '[:lower:]')
+    if [ "$go_restore" != "y" ]; then
+        exit 2
+    fi
+}
+
+stop_services(){
+    # Stop operator first
+    echo "Stopping Federator.ai services..."
+    kubectl -n $fed_ns scale deploy federatorai-operator --replicas=0 >/dev/null 2>&1
+    if [ "$?" != 0 ]; then
+        echo -e "\n$(tput setaf 1)Error! Failed to bring down Federator.ai operator service.$(tput sgr 0)"
+        exit 3
+    fi
+
+    # Stop all deploys
+    all_deploys="$(kubectl -n $fed_ns get deploy|grep -v ^NAME|awk '{print $1}'|xargs)"
+    kubectl -n $fed_ns scale deploy $all_deploys --replicas=0 >/dev/null 2>&1
+    if [ "$?" != 0 ]; then
+        echo -e "\n$(tput setaf 1)Error! Failed to bring down Federator.ai services for restoration.$(tput sgr 0)"
+        exit 3
+    fi
+    sleep 20
+    echo -e "Done.\n"
+}
+
+start_services()
+{
+    echo "Starting Federator.ai services..."
+    # 1. rabbitmq
+    kubectl -n $fed_ns scale deploy --replicas=1 alameda-rabbitmq >/dev/null 2>&1
+    sleep 30
+    # 2. datahub
+    kubectl -n $fed_ns scale deploy --replicas=1 alameda-datahub >/dev/null 2>&1
+    sleep 40
+    # 3. Others
+    all_deploys="$(kubectl -n $fed_ns get deploy|grep -v ^NAME|awk '{print $1}'|xargs)"
+    kubectl -n $fed_ns scale deploy $all_deploys --replicas=1 >/dev/null 2>&1
+    # Check status
+    wait_until_pods_ready $max_wait_pods_ready_time 30 $fed_ns 6
+    echo -e "Done.\n"
+}
+
+wait_until_pods_ready()
+{
+  period="$1"
+  interval="$2"
+  namespace="$3"
+  target_pod_number="$4"
+
+  wait_pod_creating=1
+  for ((i=0; i<$period; i+=$interval)); do
+
+    if [[ "$wait_pod_creating" = "1" ]]; then
+        # check if pods created
+        if [[ "`kubectl get po -n $namespace 2>/dev/null|wc -l`" -ge "$target_pod_number" ]]; then
+            wait_pod_creating=0
+            echo -e "\nChecking pods..."
+        else
+            echo "Waiting for pods in namespace $namespace to be created..."
+        fi
+    else
+        # check if pods running
+        if pods_ready $namespace; then
+            echo -e "\nAll pods under namespace($namespace) are ready."
+            return 0
+        fi
+        echo "Waiting for pods in namespace $namespace to be ready..."
+    fi
+
+    sleep "$interval"
+    
+  done
+
+  echo -e "\n$(tput setaf 1)Warning!! Waited for $period seconds, but all pods are not ready yet. Please check $namespace namespace$(tput sgr 0)"
+  exit 4
+}
+
+pods_ready()
+{
+  [[ "$#" == 0 ]] && return 0
+
+  namespace="$1"
+  kubectl get pod -n $namespace \
+    '-o=go-template={{range .items}}{{.metadata.name}}{{"\t"}}{{range .status.conditions}}{{if eq .type "Ready"}}{{.status}}{{"\t"}}{{end}}{{end}}{{.status.phase}}{{"\t"}}{{if .status.reason}}{{.status.reason}}{{end}}{{"\n"}}{{end}}' \
+      | while read name status phase reason _junk; do
+          if [ "$status" != "True" ]; then
+            msg="Waiting for pod $name in namespace $namespace to be ready."
+            [ "$phase" != "" ] && msg="$msg phase: [$phase]"
+            [ "$reason" != "" ] && msg="$msg reason: [$reason]"
+            echo "$msg"
+            return 1
+          fi
+        done || return 1
+
   return 0
 }
 
-function backup::ns::cr() {
-  for nsres in $(kubectl api-resources --namespaced=true 2>/dev/null | grep \\.containers\\.ai | awk '{print $1}'); do
-    if [ "$nsres" = "alamedarecommendations" ]; then
-      continue
+restore_postgresql(){
+    echo "Restoring PostgreSQL backup files..."
+    kubectl -n $fed_ns exec $postgresql_name -- dropdb -U postgres federatorai
+    if [ "$?" != 0 ]; then
+        echo -e "\n$(tput setaf 1)Error! Failed to drop federatorai db in PostgreSQL.$(tput sgr 0)"
+        exit 3
     fi
-
-    # to prevent from Error "executing template: not in range, nothing to end"
-    if [ "$(kubectl get $nsres --all-namespaces -o=name | wc -l|sed 's/[ \t]*//g')" = "0" ]; then
-      continue
+    kubectl -n $fed_ns exec $postgresql_name -- createdb -U postgres federatorai
+    if [ "$?" != 0 ]; then
+        echo -e "\n$(tput setaf 1)Error! Failed to recreate federatorai db in PostgreSQL.$(tput sgr 0)"
+        exit 3
     fi
-    kubectl get $nsres --all-namespaces --sort-by=.metadata.creationTimestamp \
-      -o=jsonpath="{range .items[*]}kubectl -n {.metadata.namespace} get $nsres {.metadata.name} {'\n'}{end}" \
-       | while IFS= read -r cmd ; do
+    kubectl -n $fed_ns exec $postgresql_name -- pg_restore -U postgres -d federatorai $postgresql_internal_folder/postgres.dump
+    if [ "$?" != 0 ]; then
+        echo -e "\n$(tput setaf 1)Error! Failed to recreate federatorai db in PostgreSQL.$(tput sgr 0)"
+        exit 3
+    fi
+    echo -e "Done.\n"
+}
 
-      ns=$(eval "${cmd} -ojsonpath={.metadata.namespace}")
-      name=$(eval "${cmd} -ojsonpath={.metadata.name}")
-      opfile="$TEMP_CFG_DIR/${nsres}_${ns}_${name}.yaml"
-      if [ "$nsres" = "alamedaservices" ]; then
-        opfile="$TEMP_DIR/${nsres}_${ns}_${name}.yaml"
-      fi
+restore_influxdb(){
 
-      neat::yaml "`eval ${cmd} -oyaml`" > "$opfile"
-      # only backup oldest service
-      if [ "$nsres" = "alamedaservices" ]; then
-        break
-      fi
+    # Find all backup dbs needed to be restored.
+    echo "Restoring InfluxDB backup files..."
+    db_name_all="$(kubectl -n $fed_ns exec $influxdb_name -- bash -c "find $influxdb_internal_folder/* -maxdepth 0 -type d"|awk -F/ '{print $NF}')"
+    if [ "$db_name_all" = "" ]; then
+        echo -e "\n$(tput setaf 1)Error! Failed to locate restore folders inside pod.$(tput sgr 0)"
+        exit 3
+    fi
+    # Drop databases
+    for db_name in $(echo "$db_name_all")
+    do
+        kubectl -n $fed_ns exec $influxdb_name -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -execute "drop database $db_name" >/dev/null
+        if [ "$?" != 0 ]; then
+            echo -e "\n$(tput setaf 1)Error! Failed to drop influxdb database ($db_name).$(tput sgr 0)"
+            exit 3
+        fi
     done
-  done
-}
 
-function backup::cr() {
-  for res in $(kubectl api-resources --namespaced=false 2>/dev/null | grep \\.containers\\.ai | awk '{print $1}'); do
-    # to prevent from Error "executing template: not in range, nothing to end"
-    if [ "$(kubectl get $res -o=name | wc -l|sed 's/[ \t]*//g')" = "0" ]; then
-      continue
-    fi
-    kubectl get $res --sort-by=.metadata.creationTimestamp \
-      -o=jsonpath="{range .items[*]}kubectl get $res {.metadata.name} {'\n'}{end}" | while IFS= read -r cmd ; do
-
-      name=$(eval "${cmd} -ojsonpath={.metadata.name}")
-      opfile="$TEMP_CFG_DIR/${res}_${name}.yaml"
-      neat::yaml "`eval ${cmd} -oyaml`" > "$opfile"
+    # Restore databases
+    for db_name in $(echo "$db_name_all")
+    do
+        kubectl -n $fed_ns exec $influxdb_name -- influxd restore -portable -db $db_name ${influxdb_internal_folder}/${db_name}
+        if [ "$?" != 0 ]; then
+            echo -e "\n$(tput setaf 1)Error! Failed to restore influxdb database ($db_name).$(tput sgr 0)"
+            exit 3
+        fi
     done
-  done
+    echo -e "Done.\n"
 }
 
-function backup::cluster::info::cm() {
-  local cns=default
-  local cname=cluster-info
-  if kubectl -n $cns get cm $cname | grep -q $cname; then
-    neat::yaml "`kubectl -n $cns get cm $cname -oyaml`" > $TEMP_INFO_DIR/configmaps_${cns}_${cname}.yaml
-  fi
-}
-
-function backup::op::deploy() {
-  local opfile="$TEMP_UPSTREAM_DIR/deployments_${INSTALLED_NS}_${OP_NAME}.yaml"
-  neat::yaml "`kubectl -n $INSTALLED_NS get deploy $OP_NAME -oyaml`" > "$opfile"
-}
-
-function save::to::backup::dir() {
-  local backupts="$(date +%s)"
-  local dirname="federatorai-backup-$backupts"
-  if [ "$machine_type" = "Linux" ]; then
-    local time="$(date -d @$backupts)"
-  else
-    local time="$(date -u -r $backupts)"
-  fi
-  local backdir="${USER_DEF_SAVED_DIR:-/tmp}/$dirname"
-  local opfile="$TEMP_UPSTREAM_DIR/deployments_${INSTALLED_NS}_${OP_NAME}.yaml"
-
-  cat > $TEMP_DIR/info.txt << EOF
-version: $(parse::image::tag "$(get::op::image::name "$opfile")")
-time: $time
-script version: $SCRIPT_TAG
-EOF
-
-  mv "$TEMP_DIR" "$backdir"
-  md5sum `find "$backdir" -type f` > "$backdir/md5sum.txt"
-  echo "backup yamls saved to folder $backdir"
-}
-
-function backup() {
-  USER_DEF_SAVED_DIR="$1"
-  TEMP_DIR=`mktemp -d`
-  if [ "$USER_DEF_SAVED_DIR" != "" ]; then
-    if [ "$machine_type" = "Linux" ]; then
-      TEMP_DIR=`mktemp -d -p "$USER_DEF_SAVED_DIR"`
-    else
-      TMP_FOLDER_NAME=`basename $TEMP_DIR`
-      mv $TEMP_DIR $USER_DEF_SAVED_DIR
-      TEMP_DIR="$USER_DEF_SAVED_DIR/$TMP_FOLDER_NAME"
+check_and_uncompress_file(){
+    # Locate backup file
+    matched_file="0"
+    for file in $specific_dir/*.tgz
+    do
+        if [[ $file =~ federatorai-v5.0.0.*-backup-.* ]]; then
+            backup_file="$file"
+            # Remove ".tgz"
+            backup_folder="${backup_file%????}"
+            matched_file=$((matched_file+1))
+        fi
+    done
+    if [ "$matched_file" -gt "1" ]; then
+        echo -e "\n$(tput setaf 1)Error! Multiple backup file inside specific folder ($specific_dir).$(tput sgr 0)"
+        exit 3
+    elif [ "$matched_file" -eq "0" ]; then
+        echo -e "\n$(tput setaf 1)Error! Failed to locate backup file inside specific folder ($specific_dir).$(tput sgr 0)"
+        exit 3
     fi
-  fi
 
-  INSTALLED_NS="$(get::installed::ns)"
-  TEMP_CFG_DIR="$TEMP_DIR/configs"
-  TEMP_INFO_DIR="$TEMP_DIR/infos"
-  TEMP_UPSTREAM_DIR="$TEMP_DIR/upstream"
-  mkdir -p "$TEMP_CFG_DIR" "$TEMP_INFO_DIR" "$TEMP_UPSTREAM_DIR"
+    # Delete previous folder if exist
+    if [ -d "$backup_folder" ]; then
+        rm -rf $backup_folder
+    fi
+    # Untar file
+    tar zxf $backup_file -C $specific_dir
+    if [ "$?" != 0 ]; then
+        echo -e "\n$(tput setaf 1)Error! Failed to untar Federator.ai backup file ($backup_file).$(tput sgr 0)"
+        exit 3
+    fi
 
-  cp "${BASH_SOURCE[0]}" "$TEMP_DIR"
-  backup::ns::cr
-  backup::cr
-  backup::cluster::info::cm
-  backup::op::deploy
-  save::to::backup::dir
+    # check two backup files inside
+    if [ ! -f "$backup_folder/$influxdb_backup_name" ]; then
+        echo -e "\n$(tput setaf 1)Error! No InfluxDB backup file ($influxdb_backup_name) found.$(tput sgr 0)"
+        exit 3
+    fi
+    if [ ! -f "$backup_folder/$postgresql_backup_name" ]; then
+        echo -e "\n$(tput setaf 1)Error! No PostgreSQL backup file ($postgresql_backup_name) found.$(tput sgr 0)"
+        exit 3
+    fi
+
+    # Test to untar InfluxDB file
+    tar xf $backup_folder/$influxdb_backup_name -C $backup_folder
+    if [ "$?" != 0 ]; then
+        echo -e "\n$(tput setaf 1)Error! Failed to untar InfluxDB backup file ($backup_folder/$influxdb_backup_name).$(tput sgr 0)"
+        exit 3
+    fi
+    # Delete test files
+    if [ -d $backup_folder/var ]; then
+        rm -rf $backup_folder/var
+    fi
+
+    # Test to untar PostgreSQL file
+    tar xf $backup_folder/$postgresql_backup_name -C $backup_folder
+    if [ "$?" != 0 ]; then
+        echo -e "\n$(tput setaf 1)Error! Failed to untar PostgreSQL backup file ($backup_folder/$postgresql_backup_name).$(tput sgr 0)"
+        exit 3
+    fi
+    # Delete test files
+    if [ -d $backup_folder/var ]; then
+        rm -rf $backup_folder/var
+    fi
+
+    # Copy backup file into pod
+    kubectl -n $fed_ns exec $influxdb_name -- rm -rf $influxdb_internal_folder
+    kubectl -n $fed_ns exec $influxdb_name -- mkdir -p $influxdb_internal_folder
+    kubectl -n $fed_ns cp $backup_folder/$influxdb_backup_name $influxdb_name:$influxdb_internal_folder
+    if [ "$?" != 0 ]; then
+        echo -e "\n$(tput setaf 1)Error! Failed to copy InfluxDB backup file into InfluxDB pod.$(tput sgr 0)"
+        exit 3
+    fi
+
+    # Copy backup file into pod
+    kubectl -n $fed_ns exec $postgresql_name -- rm -rf $postgresql_internal_folder
+    kubectl -n $fed_ns exec $postgresql_name -- mkdir -p $postgresql_internal_folder
+    kubectl -n $fed_ns cp $backup_folder/$postgresql_backup_name $postgresql_name:$postgresql_internal_folder
+    if [ "$?" != 0 ]; then
+        echo -e "\n$(tput setaf 1)Error! Failed to copy PostgreSQL backup file into PostgreSQL pod.$(tput sgr 0)"
+        exit 3
+    fi
+
+    #Untar file inside pod
+    kubectl -n $fed_ns exec $influxdb_name -- tar xf $influxdb_internal_folder/$influxdb_backup_name
+    if [ "$?" != 0 ]; then
+        echo -e "\n$(tput setaf 1)Error! Failed to untar InfluxDB backup file inside pod.$(tput sgr 0)"
+        exit 3
+    fi
+    #Untar file inside pod
+    kubectl -n $fed_ns exec $postgresql_name -- tar xf $postgresql_internal_folder/$postgresql_backup_name
+    if [ "$?" != 0 ]; then
+        echo -e "\n$(tput setaf 1)Error! Failed to untar PostgreSQL backup file inside pod.$(tput sgr 0)"
+        exit 3
+    fi
 }
 
-function get::op::image::name() {
-  local opimage="$(grep "image:" "$1" | head -1)"
-  echo $opimage | sed 's/image: //'
+compress_files(){
+    tgz_file="$specific_dir/${backup_name}.tgz"
+    tar -C $specific_dir -zcf $tgz_file $backup_name
+    if [ "$?" != 0 ]; then
+        echo -e "\n$(tput setaf 1)Error! Failed to create backup tgz file ($tgz_file).$(tput sgr 0)"
+        exit 3
+    fi
+
+    # Remove useless folder
+    if [ -d "$specific_dir/$backup_name" ]; then
+        rm -rf $specific_dir/$backup_name
+    fi
 }
 
-function get::op::ns() {
-  local opns="$(grep "namespace:" "$1" | head -1)"
-  echo $opns | sed 's/namespace: //'
+prepare_folder(){
+    # Prepare external backup folder
+    if [ ! -d "$specific_dir" ]; then
+        mkdir -p $specific_dir
+        if [ "$?" != 0 ]; then
+            echo -e "\n$(tput setaf 1)Error! Failed to create backup folder ($specific_dir).$(tput sgr 0)"
+            exit 3
+        fi
+    fi
+    backup_name="federatorai-${fed_tag}-backup-$(date +"%Y%m%d-%H%M%S")"
+    backup_folder_path="$specific_dir/$backup_name"
+    mkdir $backup_folder_path
 }
 
-function parse::image::prefix::url() {
-  echo "$1" | awk -F/$(echo "$1" | awk -F/ '{print $NF}') '{print $1}'
+backup_postgresql(){
+    # Prepare internal backup folder
+    kubectl -n $fed_ns exec $postgresql_name -- rm -rf $postgresql_internal_folder
+    kubectl -n $fed_ns exec $postgresql_name -- mkdir -p $postgresql_internal_folder
+
+    # Start to backup postgresql to binary file
+    kubectl -n $fed_ns exec $postgresql_name -- bash -c "pg_dump -Fc -U postgres federatorai > ${postgresql_internal_folder}/postgres.dump"
+    if [ "$?" != 0 ]; then
+        echo -e "\n$(tput setaf 1)Error! Failed to backup postgresql.$(tput sgr 0)"
+        exit 3
+    fi
+    # (Double confirmation) Start to backup postgresql to text file
+    # ignore result check
+    kubectl -n $fed_ns exec $postgresql_name -- bash -c "pg_dump -U postgres federatorai > $postgresql_internal_folder/postgres.pgsql"
+    
+    # Retrieve backup files
+    kubectl -n $fed_ns exec $postgresql_name -- tar cf - $postgresql_internal_folder > $backup_folder_path/$postgresql_backup_name 2>/dev/null
+    if [ "$?" != 0 ]; then
+        echo -e "\n$(tput setaf 1)Error! Failed to copy backup file out of influxdb pod.$(tput sgr 0)"
+        exit 3
+    fi
 }
 
-function parse::image::tag() {
-  echo "$1" | awk -F: '{print $2}'
+backup_influxdb(){
+    # Prepare internal backup folder
+    kubectl -n $fed_ns exec $influxdb_name -- rm -rf $influxdb_internal_folder
+    kubectl -n $fed_ns exec $influxdb_name -- mkdir -p $influxdb_internal_folder
+
+    # Start to backup needed dbs
+    for db_name in "${backup_dbs[@]}"
+    do
+        # Check if database has measurement(s)
+        measurements=$(kubectl -n $fed_ns exec $influxdb_name -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database $db_name -execute "show measurements")
+        if [ "$measurements" = "" ]; then
+            # If database is empty, skill backup to prevent restore failure.
+            continue
+        fi
+        kubectl -n $fed_ns exec $influxdb_name -- mkdir -p $influxdb_internal_folder/$db_name
+        kubectl -n $fed_ns exec $influxdb_name -- influxd backup -portable -database $db_name $influxdb_internal_folder/$db_name >/dev/null
+        if [ "$?" != 0 ]; then
+            echo -e "\n$(tput setaf 1)Error! Failed to backup influxdb database ($db_name).$(tput sgr 0)"
+            exit 3
+        fi
+    done
+
+    # Retrieve backup files
+    kubectl -n $fed_ns exec $influxdb_name -- tar cf - $influxdb_internal_folder > $backup_folder_path/$influxdb_backup_name 2>/dev/null
+    if [ "$?" != 0 ]; then
+        echo -e "\n$(tput setaf 1)Error! Failed to copy backup file out of influxdb pod.$(tput sgr 0)"
+        exit 3
+    fi
 }
 
-function download::and::apply::op::upstream() {
-  local opimgname="$(get::op::image::name "$OP_FILE")"
-  local opns="$(get::op::ns "$OP_FILE")"
-  local imgprefixurl="$(echo $(parse::image::prefix::url "$opimgname"))"
-  local imagetag="$(echo $(parse::image::tag "$opimgname"))"
-  local repo=prophetstor
+kubectl version|grep -q "^Server"
+if [ "$?" != "0" ];then
+    echo -e "\n$(tput setaf 1)Error! Please login to Kubernetes first.$(tput sgr 0)"
+    exit 3
+fi
 
-  if echo "$imagetag" | grep "^v4.2\|^v4.3"; then
-    repo=federatorai-operator
-  fi
-  cd "$ORIGIN_OP_UPSTREAM_DIR"
-  download::github::assets containers-ai "$repo" "$imagetag" deploy/upstream
-  if [ "$machine_type" = "Linux" ]; then
-    sed -i "s/name:.*/name: ${opns}/g" 00*.yaml
-    sed -i "s|\bnamespace:.*|namespace: ${opns}|g" *.yaml
-  else
-    # Mac
-    sed -i "" "s/name:.*/name: ${opns}/g" 00*.yaml
-    sed -i "" "s| namespace:.*| namespace: ${opns}|g" *.yaml
-  fi
-  cd -
+which tar 2>&1 >/dev/null
+if [ "$?" != "0" ];then
+    echo -e "\n$(tput setaf 1)Error! Need tar command to use this tool.$(tput sgr 0)"
+    exit 3
+fi
 
-  cp "$OP_FILE" "$(grep -rl image:.*federatorai-operator "$ORIGIN_OP_UPSTREAM_DIR")"
-  kubectl apply -f "$ORIGIN_OP_UPSTREAM_DIR"
-}
+which gzip 2>&1 >/dev/null
+if [ "$?" != "0" ];then
+    echo -e "\n$(tput setaf 1)Error! Need gzip command to use this tool.$(tput sgr 0)"
+    exit 3
+fi
 
-function restore::service() {
-  until kubectl apply -f "$SVC_FILE"; do
-    echo "Service CRD or webhook is not ready, retrying..."
-    sleep 30
-  done
-}
+influxdb_name="alameda-influxdb-0"
+postgresql_name="federatorai-postgresql-0"
+influxdb_backup_name="influxdb.tar"
+postgresql_backup_name="postgres.tar"
+influxdb_internal_folder="/var/lib/influxdb/backup"
+postgresql_internal_folder="/var/lib/postgresql/data/backup"
+fed_ns="`kubectl get alamedaservice --all-namespaces 2>/dev/null|tail -1|awk '{print $1}'`"
+fed_tag="`kubectl get alamedaservices -n $fed_ns -o custom-columns=VERSION:.spec.version 2>/dev/null|grep -v VERSION|head -1`"
+backup_dbs=("alameda_cluster_status" "alameda_cluster_resource" "alameda_application" "alameda_config" "alameda_target" "alameda_profile" "alameda_automation" "alameda_user")
+[ "$max_wait_pods_ready_time" = "" ] && max_wait_pods_ready_time=900
 
-function patch::pvs() {
-  for pv in $(kubectl get pv -o=jsonpath='{.items[?(@.spec.claimRef.namespace=="federatorai")].metadata.name}'); do
-    kubectl patch pv $pv -p '{"spec":{"persistentVolumeReclaimPolicy":"Retain", "claimRef": {"resourceVersion":"", "uid":""}}}'
-  done
-}
-
-function restore::backup::crs() {
-  until kubectl apply -f "$RESTORE_CFG_DIR"; do
-    echo "CRDs or webhook is not ready, retrying..."
-    sleep 30
-  done
-}
-
-function restore() {
-  RESTORE_DIR="$1"
-  if [ "$RESTORE_DIR" = "" ]; then
-    echo "Please give the restore folder"
-    exit 1
-  fi
-  if [ ! -d "$RESTORE_DIR" ]; then
-    echo "Restore folder $RESTORE_DIR is not existed"
-    exit 1
-  fi
-  RESTORE_CFG_DIR="$RESTORE_DIR/configs"
-  RESTORE_INFO_DIR="$RESTORE_DIR/infos"
-  RESTORE_UPSTREAM_DIR="$RESTORE_DIR/upstream"
-
-  ORIGIN_OP_UPSTREAM_DIR=`mktemp -d -p "$RESTORE_DIR"`
-
-  if ! find $RESTORE_UPSTREAM_DIR | grep -q "deployments_.*_${OP_NAME}.yaml"; then
-    echo "Operator deployment restore config is not found"
-    exit 1
-  fi
-  OP_FILE=$(find $RESTORE_UPSTREAM_DIR | grep "deployments_.*_${OP_NAME}.yaml")
-
-  if ! find $RESTORE_DIR | grep -q "alamedaservices_.*.yaml"; then
-    echo "Service restore config is not found"
-    exit 1
-  fi
-  SVC_FILE=$(find $RESTORE_DIR | grep "alamedaservices_.*.yaml")
-
-  echo "Download origin operator upstream files and apply"
-  download::and::apply::op::upstream
-  echo "Restore service"
-  restore::service
-  echo "Patch pv if necessary"
-  patch::pvs
-  echo "Restore CRs"
-  restore::backup::crs
-  echo "Restore complete"
-}
-
-function show::usage() {
-  cat << __EOF__
-
-    Usage:
-      -b,    backup, cannot use with restore(-r) at the same time
-      -r,    restore, cannot use with backup(-b) at the same time
-      -d,    backup or restore folder
-
-__EOF__
-  exit 1
-}
-
-function on::exit() {
-  local ret=$?
-  rm -rf "$TEMP_DIR" "$ORIGIN_OP_UPSTREAM_DIR"
-  trap - EXIT
-  exit $ret
-}
-trap on::exit EXIT
+if [ "$fed_ns" = "" ]; then
+    echo -e "\n$(tput setaf 1)Error! Failed to locate installed Federator.ai$(tput sgr 0)"
+    exit 3
+fi
 
 unameOut="$(uname -s)"
 case "${unameOut}" in
@@ -324,41 +407,62 @@ case "${unameOut}" in
         ;;
 esac
 
-if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
-  IS_BACKUP="false"
-  IS_RESTORE="false"
-  OP_NAME=federatorai-operator
-  while getopts "d:t:br" arg; do
-    case "${arg}" in
-      b)
-        IS_BACKUP="true"
-        ;;
-      r)
-        IS_RESTORE="true"
-        ;;
-      d)
-        USER_SPECIFIC_DIR=${OPTARG}
-        ;;
-      t)
-        SCRIPT_TAG=${OPTARG}
-        ;;
+if [ "$machine_type" = "Linux" ]; then
+    script_located_path=$(dirname $(readlink -f "$0"))
+else
+    # Mac
+    script_located_path=$(dirname $(realpath "$0"))
+fi
+
+while getopts "brd:h" o; do
+    case "${o}" in
+        b)
+            do_backup="y"
+            ;;
+        r)
+            do_restore="y"
+            ;;
+        d)
+            specific_dir=${OPTARG}
+            ;;
+        h)
+            show_usage
+            exit
+            ;;
+        *)
+            echo "Error! wrong parameter."
+            exit 3
+            ;;
     esac
-  done
+done
 
-  if [ "$IS_BACKUP" = "true" -a "$IS_RESTORE" = "true" ]; then
-    show::usage
+if [ "$do_backup" = "" ] && [ "$do_restore" = "" ]; then
+    echo -e "\n$(tput setaf 1)Error! Please specify the job you want to run (backup/restore).$(tput sgr 0)"
+    show_usage
     exit 1
-  fi
+fi
 
-  if [ "$IS_BACKUP" = "true" ]; then
-    backup "$USER_SPECIFIC_DIR"
-  elif [ "$IS_RESTORE"="true" ]; then
-    if [ "$USER_SPECIFIC_DIR" = "" ]; then
-      restore "$(dirname "${BASH_SOURCE}")"
-    else
-      restore "$USER_SPECIFIC_DIR"
-    fi
-  else
-    show::usage
-  fi
+if [ "$do_backup" = "y" ] && [ "$do_restore" = "y" ]; then
+    echo -e "\n$(tput setaf 1)Error! Backup and restore can't be run at the same time.$(tput sgr 0)"
+    show_usage
+    exit 1
+fi
+
+if [ "$specific_dir" = "" ]; then
+    echo -e "\n$(tput setaf 1)Error! Please specify backup/restore folder.$(tput sgr 0)"
+    show_usage
+    exit 1
+fi
+
+if [ "$do_restore" = "y" ] && [ ! -d "$specific_dir" ]; then
+    echo -e "\n$(tput setaf 1)Error! Restore folder doesn't exist.$(tput sgr 0)"
+    exit 1
+fi
+
+if [ "$do_backup" = "y" ]; then
+    backup
+fi
+
+if [ "$do_restore" = "y" ]; then
+    restore
 fi
