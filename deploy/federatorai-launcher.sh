@@ -143,6 +143,44 @@ get_build_tag()
     cd $file_folder
 }
 
+check_previous_build_tag_and_do_download_for_upgrade(){
+    previous_fed_ns="`kubectl get alamedaservice --all-namespaces 2>/dev/null|tail -1|awk '{print $1}'`"
+    if [ "$previous_fed_ns" = "" ]; then
+        # Skip due to fresh install
+        return 0
+    fi
+    previous_fed_tag="`kubectl get alamedaservices -n $previous_fed_ns -o custom-columns=VERSION:.spec.version 2>/dev/null|grep -v VERSION|head -1`"
+    if [[ $previous_fed_tag =~ ^dev- ]]; then
+        # Skip due to dev build found
+        return 0
+    fi
+
+    previous_full_tag=$(echo "$previous_fed_tag"|cut -d '-' -f1)           # Delete - and after
+    previous_tag_first_digit=${previous_full_tag%%.*}                         # Delete first dot and what follows.
+    previous_tag_last_digit=${previous_full_tag##*.}                          # Delete up to last dot.
+    previous_tag_middle_digit=${previous_full_tag##$previous_tag_first_digit.}         # Delete first number and dot.
+    previous_tag_middle_digit=${previous_tag_middle_digit%%.$previous_tag_last_digit}  # Delete dot and last number.
+    previous_tag_first_digit=$(echo $previous_tag_first_digit|cut -d 'v' -f2) # Delete v
+
+    if [ "0$previous_tag_first_digit" -eq "4" ] && [ "0$tag_first_digit" -ge "5" ]; then
+        # Prevent 4.x upgrade to 5.x or later
+        echo -e "\n$(tput setaf 1)Error! Upgrade from Federator.ai 4.x version to 5.x version or later is not supported.$(tput sgr 0)"
+        exit 3
+    fi
+
+    if [ "0$previous_tag_first_digit" -ge "5" ] && [ "0$tag_middle_digit" -gt "0$previous_tag_middle_digit" ]; then
+        # Download backup script of previous version.
+        backup_script_path="$(dirname "$(realpath $file_folder)")/$previous_fed_tag/scripts"
+        mkdir -p $backup_script_path
+        cd $backup_script_path
+        if ! curl -sL --fail https://raw.githubusercontent.com/containers-ai/prophetstor/${previous_fed_tag}/deploy/backup-restore.sh -O; then
+            echo -e "\n$(tput setaf 1)Abort, download backup-restore.sh file failed!!!$(tput sgr 0)"
+            exit 1
+        fi
+        cd - > /dev/null
+    fi
+}
+
 get_repo_url()
 {
     while [ "$repo_url" = "" ] # prevent 'enter' is pressed without input
@@ -341,6 +379,7 @@ go_interactive()
 
     get_build_tag
     download_files
+    check_previous_build_tag_and_do_download_for_upgrade
 
     while [ "$enable_private_repo" != "y" ] && [ "$enable_private_repo" != "n" ]
     do
