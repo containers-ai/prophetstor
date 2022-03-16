@@ -454,44 +454,27 @@ backup_configuration()
 {
     script_name="backup-restore.sh"
     backup_folder="$save_path/configuration_backup"
-    default="y"
-    read -r -p "$(tput setaf 2)Do you want to backup your configuration before upgrading Federator.ai? [default: $default]: $(tput sgr 0)" do_backup </dev/tty
-    do_backup=${do_backup:-$default}
-    do_backup=$(echo "$do_backup" | tr '[:upper:]' '[:lower:]')
-    if [ "$do_backup" = "y" ]; then
-        if [ ! -f "$script_located_path/$script_name" ]; then
-            echo -e "\n$(tput setaf 1)Error! Failed to locate script $script_located_path/$script_name$(tput sgr 0)"
-            default="n"
-            read -r -p "$(tput setaf 2)Do you want to skip backup configuration process? [default: $default]: $(tput sgr 0)" skip_backup </dev/tty
-            skip_backup=${skip_backup:-$default}
-            skip_backup=$(echo "$skip_backup" | tr '[:upper:]' '[:lower:]')
-            if [ "$skip_backup" = "y" ]; then
-                return
-            else
-                # skip_backup = 'n'
-                echo "Please make sure script $script_name and install.sh are in the same folder."
-                echo -e "$(tput setaf 1)Abort installation.$(tput sgr 0)"
-                exit 3
-            fi
-        fi
+    script_path="$(dirname "$(dirname "$(realpath $script_located_path)")")/$previous_tag/scripts/$script_name"
 
-        default="$backup_folder"
-        read -r -p "$(tput setaf 2)Please enter the path for storing backup configuration: [default: $default] $(tput sgr 0)" backup_path </dev/tty
-        backup_path=${backup_path:-$default}
-        backup_path=$(echo "$backup_path" | tr '[:upper:]' '[:lower:]')
-        backup_folder=$backup_path
-        mkdir -p $backup_folder
-        echo "Backup configuration..."
-        bash $script_located_path/$script_name -b -d $backup_path -t $tag_number
-        if [ "$?" != "0" ]; then
-            echo -e "\n$(tput setaf 1)Error! Failed to do configuration backup.$(tput sgr 0)"
-            exit 8
-        fi
-        echo "Done."
-    else
-        # do_backup = 'n'
-        return
+    if [ ! -f "$script_path" ]; then
+        echo -e "\n$(tput setaf 1)Error! Configuration Backup can't be done due to lack of needed script ($script_path).$(tput sgr 0)"
+        exit 3
     fi
+
+    default="$backup_folder"
+    read -r -p "$(tput setaf 2)Please enter the path for storing backup configuration: [default: $default] $(tput sgr 0)" backup_path </dev/tty
+    backup_path=${backup_path:-$default}
+    backup_path=$(echo "$backup_path" | tr '[:upper:]' '[:lower:]')
+    backup_folder=$backup_path
+    mkdir -p $backup_folder
+    echo "Backup configuration..."
+    bash $script_path -b -d $backup_path
+    if [ "$?" != "0" ]; then
+        echo -e "\n$(tput setaf 1)Error! Failed to do configuration backup.$(tput sgr 0)"
+        exit 8
+    fi
+    echo "Done."
+
 }
 
 # get_recommended_prometheus_url()
