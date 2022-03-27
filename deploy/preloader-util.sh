@@ -547,7 +547,7 @@ scale_up_pods()
     echo "Done"
 }
 
-reschedule_dispatcher()
+OBSOLETED_reschedule_dispatcher()
 {
     start=`date +%s`
     echo -e "\n$(tput setaf 6)Rescheduling alameda-ai dispatcher...$(tput sgr 0)"
@@ -650,17 +650,18 @@ patch_agent_for_preloader()
     local _period="@every 10m"
 
     start=`date +%s`
-    [ "${_mode}" = "true" ] && echo -e "\n$(tput setaf 6)Updating Agent to compute monthly/weekly cost recommendation every ${_period}) for preloader...$(tput sgr 0)"
+    [ "${_mode}" = "true" ] && echo -e "\n$(tput setaf 6)Updating Agent to compute monthly/weekly cost recommendation every `echo ${_period} | sed -e 's/@every //g'` for preloader...$(tput sgr 0)"
 
     # Need federatorai-operator ready for webhook service to validate alamedaservice
     wait_until_pods_ready 600 30 $install_namespace
 
     flag_updated="n"
     for key in FEDERATORAI_AGENT_INPUT_JOBS_COST_ANALYSIS_HIGH_MONTHLY_SCHEDULE_SPEC FEDERATORAI_AGENT_INPUT_JOBS_COST_ANALYSIS_HIGH_WEEKLY_SCHEDULE_SPEC; do
-        if [ "${_mode}" != "true" ]; then
+        if [ "${_mode}" = "true" ]; then
+            alamedaservice_set_component_env federatoraiAgent ${key} "${_period}"
+        else
             alamedaservice_set_component_env federatoraiAgent ${key} ""
         fi
-        alamedaservice_set_component_env federatoraiAgent ${key} "${_period}"
     done
     wait_until_pods_ready 600 30 $install_namespace
 
@@ -668,6 +669,34 @@ patch_agent_for_preloader()
     end=`date +%s`
     duration=$((end-start))
     echo "Duration patch_agent_for_preloader = $duration" >> $debug_log
+}
+
+patch_ai_dispatcher_for_preloader()
+{
+    local _mode="$1"
+    local _period="600"
+
+    start=`date +%s`
+    [ "${_mode}" = "true" ] && echo -e "\n$(tput setaf 6)Updating AI Dispatcher to compute daily/monthly/weekly prediction every ${_period}s for preloader...$(tput sgr 0)"
+
+    # Need federatorai-operator ready for webhook service to validate alamedaservice
+    wait_until_pods_ready 600 30 $install_namespace
+
+    flag_updated="n"
+    # To shorten CI running time, need to compute prediction in shorter time for different intervals
+    for key in ALAMEDA_AI_DISPATCHER_JOB_INTERVAL_DAILY ALAMEDA_AI_DISPATCHER_JOB_INTERVAL_WEEKLY ALAMEDA_AI_DISPATCHER_JOB_INTERVAL_MONTHLY; do
+        if [ "${_mode}" = "true" ]; then
+            alamedaservice_set_component_env alameda-dispatcher ${key} "${_period}"
+        else
+            alamedaservice_set_component_env alameda-dispatcher ${key} ""
+        fi
+    done
+    wait_until_pods_ready 600 30 $install_namespace
+
+    echo "Done."
+    end=`date +%s`
+    duration=$((end-start))
+    echo "Duration patch_ai_dispatcher_for_preloader = $duration" >> $debug_log
 }
 
 patch_data_adapter_for_preloader()
@@ -2202,6 +2231,7 @@ fi
 if [ "$enable_preloader" = "y" ]; then
     enable_preloader_in_alamedaservice
     patch_agent_for_preloader "true"
+    patch_ai_dispatcher_for_preloader "true"
 fi
 
 if [ "$run_ab_from_preloader" = "y" ]; then
@@ -2256,6 +2286,7 @@ if [ "$disable_preloader" = "y" ]; then
     scale_up_pods
     #switch_alameda_executor_in_alamedaservice "off"
     patch_agent_for_preloader "false"
+    patch_ai_dispatcher_for_preloader "false"
     disable_preloader_in_alamedaservice
 fi
 
