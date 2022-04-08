@@ -168,7 +168,7 @@ check_previous_build_tag_and_do_download_for_upgrade(){
         exit 3
     fi
 
-    if [ "0$previous_tag_first_digit" -ge "5" ] && [ "0$tag_middle_digit" -gt "0$previous_tag_middle_digit" ]; then
+    if [ "0$previous_tag_first_digit" -ge "5" ]; then
         # Download backup script of previous version.
         backup_script_path="$(dirname "$(realpath $file_folder)")/$previous_fed_tag/scripts"
         mkdir -p $backup_script_path
