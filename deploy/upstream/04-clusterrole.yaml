@@ -3,6 +3,8 @@ kind: ClusterRole
 metadata:
   creationTimestamp: null
   name: federatorai-operator
+  labels:
+    app: alameda
 rules:
 - apiGroups:
   - ""
@@ -203,4 +205,6 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: alameda-gc
+  labels:
+    app: alameda
 rules: []

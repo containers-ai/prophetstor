@@ -7,6 +7,8 @@ metadata:
     controller-gen.kubebuilder.io/version: v0.6.2
   creationTimestamp: null
   name: alamedaservices.federatorai.containers.ai
+  labels:
+    app: alameda
 spec:
   additionalPrinterColumns:
   - JSONPath: .spec.enableExecution
@@ -48,6 +50,10 @@ spec:
           properties:
             alameda-dispatcher:
               properties:
+                annotations:
+                  additionalProperties:
+                    type: string
+                  type: object
                 bootstrap:
                   properties:
                     image:
@@ -169,6 +175,10 @@ spec:
                   description: PullPolicy describes a policy for if/when to pull a
                     container image
                   type: string
+                labels:
+                  additionalProperties:
+                    type: string
+                  type: object
                 replicas:
                   format: int32
                   minimum: 0
@@ -229,6 +239,10 @@ spec:
               type: object
             alamedaAi:
               properties:
+                annotations:
+                  additionalProperties:
+                    type: string
+                  type: object
                 bootstrap:
                   properties:
                     image:
@@ -350,6 +364,10 @@ spec:
                   description: PullPolicy describes a policy for if/when to pull a
                     container image
                   type: string
+                labels:
+                  additionalProperties:
+                    type: string
+                  type: object
                 replicas:
                   format: int32
                   minimum: 0
@@ -410,6 +428,10 @@ spec:
               type: object
             alamedaDatahub:
               properties:
+                annotations:
+                  additionalProperties:
+                    type: string
+                  type: object
                 bootstrap:
                   properties:
                     image:
@@ -531,6 +553,10 @@ spec:
                   description: PullPolicy describes a policy for if/when to pull a
                     container image
                   type: string
+                labels:
+                  additionalProperties:
+                    type: string
+                  type: object
                 replicas:
                   format: int32
                   minimum: 0
@@ -591,6 +617,10 @@ spec:
               type: object
             alamedaExecutor:
               properties:
+                annotations:
+                  additionalProperties:
+                    type: string
+                  type: object
                 bootstrap:
                   properties:
                     image:
@@ -712,6 +742,10 @@ spec:
                   description: PullPolicy describes a policy for if/when to pull a
                     container image
                   type: string
+                labels:
+                  additionalProperties:
+                    type: string
+                  type: object
                 replicas:
                   format: int32
                   minimum: 0
@@ -772,6 +806,10 @@ spec:
               type: object
             alamedaInfluxdb:
               properties:
+                annotations:
+                  additionalProperties:
+                    type: string
+                  type: object
                 bootstrap:
                   properties:
                     image:
@@ -893,6 +931,10 @@ spec:
                   description: PullPolicy describes a policy for if/when to pull a
                     container image
                   type: string
+                labels:
+                  additionalProperties:
+                    type: string
+                  type: object
                 replicas:
                   format: int32
                   minimum: 0
@@ -953,6 +995,10 @@ spec:
               type: object
             alamedaNotifier:
               properties:
+                annotations:
+                  additionalProperties:
+                    type: string
+                  type: object
                 bootstrap:
                   properties:
                     image:
@@ -1074,6 +1120,10 @@ spec:
                   description: PullPolicy describes a policy for if/when to pull a
                     container image
                   type: string
+                labels:
+                  additionalProperties:
+                    type: string
+                  type: object
                 replicas:
                   format: int32
                   minimum: 0
@@ -1134,6 +1184,10 @@ spec:
               type: object
             alamedaRabbitMQ:
               properties:
+                annotations:
+                  additionalProperties:
+                    type: string
+                  type: object
                 bootstrap:
                   properties:
                     image:
@@ -1255,6 +1309,10 @@ spec:
                   description: PullPolicy describes a policy for if/when to pull a
                     container image
                   type: string
+                labels:
+                  additionalProperties:
+                    type: string
+                  type: object
                 replicas:
                   format: int32
                   minimum: 0
@@ -1312,6 +1370,10 @@ spec:
                     - usage
                     type: object
                   type: array
+              type: object
+            annotations:
+              additionalProperties:
+                type: string
               type: object
             enableExecution:
               type: boolean
@@ -1423,6 +1485,10 @@ spec:
               type: array
             fedemeter:
               properties:
+                annotations:
+                  additionalProperties:
+                    type: string
+                  type: object
                 bootstrap:
                   properties:
                     image:
@@ -1544,6 +1610,10 @@ spec:
                   description: PullPolicy describes a policy for if/when to pull a
                     container image
                   type: string
+                labels:
+                  additionalProperties:
+                    type: string
+                  type: object
                 replicas:
                   format: int32
                   minimum: 0
@@ -1604,6 +1674,10 @@ spec:
               type: object
             fedemeterInfluxdb:
               properties:
+                annotations:
+                  additionalProperties:
+                    type: string
+                  type: object
                 bootstrap:
                   properties:
                     image:
@@ -1725,6 +1799,10 @@ spec:
                   description: PullPolicy describes a policy for if/when to pull a
                     container image
                   type: string
+                labels:
+                  additionalProperties:
+                    type: string
+                  type: object
                 replicas:
                   format: int32
                   minimum: 0
@@ -1785,6 +1863,10 @@ spec:
               type: object
             federatoraiAgent:
               properties:
+                annotations:
+                  additionalProperties:
+                    type: string
+                  type: object
                 bootstrap:
                   properties:
                     image:
@@ -1906,6 +1988,10 @@ spec:
                   description: PullPolicy describes a policy for if/when to pull a
                     container image
                   type: string
+                labels:
+                  additionalProperties:
+                    type: string
+                  type: object
                 replicas:
                   format: int32
                   minimum: 0
@@ -1966,6 +2052,10 @@ spec:
               type: object
             federatoraiAgentPreloader:
               properties:
+                annotations:
+                  additionalProperties:
+                    type: string
+                  type: object
                 bootstrap:
                   properties:
                     image:
@@ -2087,6 +2177,10 @@ spec:
                   description: PullPolicy describes a policy for if/when to pull a
                     container image
                   type: string
+                labels:
+                  additionalProperties:
+                    type: string
+                  type: object
                 replicas:
                   format: int32
                   minimum: 0
@@ -2147,6 +2241,10 @@ spec:
               type: object
             federatoraiAlertDetector:
               properties:
+                annotations:
+                  additionalProperties:
+                    type: string
+                  type: object
                 bootstrap:
                   properties:
                     image:
@@ -2268,6 +2366,10 @@ spec:
                   description: PullPolicy describes a policy for if/when to pull a
                     container image
                   type: string
+                labels:
+                  additionalProperties:
+                    type: string
+                  type: object
                 replicas:
                   format: int32
                   minimum: 0
@@ -2328,6 +2430,10 @@ spec:
               type: object
             federatoraiAlertManager:
               properties:
+                annotations:
+                  additionalProperties:
+                    type: string
+                  type: object
                 bootstrap:
                   properties:
                     image:
@@ -2449,6 +2555,10 @@ spec:
                   description: PullPolicy describes a policy for if/when to pull a
                     container image
                   type: string
+                labels:
+                  additionalProperties:
+                    type: string
+                  type: object
                 replicas:
                   format: int32
                   minimum: 0
@@ -2509,6 +2619,10 @@ spec:
               type: object
             federatoraiBackend:
               properties:
+                annotations:
+                  additionalProperties:
+                    type: string
+                  type: object
                 bootstrap:
                   properties:
                     image:
@@ -2630,6 +2744,10 @@ spec:
                   description: PullPolicy describes a policy for if/when to pull a
                     container image
                   type: string
+                labels:
+                  additionalProperties:
+                    type: string
+                  type: object
                 replicas:
                   format: int32
                   minimum: 0
@@ -2690,6 +2808,10 @@ spec:
               type: object
             federatoraiDataAdapter:
               properties:
+                annotations:
+                  additionalProperties:
+                    type: string
+                  type: object
                 bootstrap:
                   properties:
                     image:
@@ -2811,6 +2933,10 @@ spec:
                   description: PullPolicy describes a policy for if/when to pull a
                     container image
                   type: string
+                labels:
+                  additionalProperties:
+                    type: string
+                  type: object
                 replicas:
                   format: int32
                   minimum: 0
@@ -2871,6 +2997,10 @@ spec:
               type: object
             federatoraiFrontend:
               properties:
+                annotations:
+                  additionalProperties:
+                    type: string
+                  type: object
                 bootstrap:
                   properties:
                     image:
@@ -2992,6 +3122,10 @@ spec:
                   description: PullPolicy describes a policy for if/when to pull a
                     container image
                   type: string
+                labels:
+                  additionalProperties:
+                    type: string
+                  type: object
                 replicas:
                   format: int32
                   minimum: 0
@@ -3052,6 +3186,10 @@ spec:
               type: object
             federatoraiPostgreSQL:
               properties:
+                annotations:
+                  additionalProperties:
+                    type: string
+                  type: object
                 bootstrap:
                   properties:
                     image:
@@ -3173,6 +3311,10 @@ spec:
                   description: PullPolicy describes a policy for if/when to pull a
                     container image
                   type: string
+                labels:
+                  additionalProperties:
+                    type: string
+                  type: object
                 replicas:
                   format: int32
                   minimum: 0
@@ -3233,6 +3375,10 @@ spec:
               type: object
             federatoraiRecommendDispatcher:
               properties:
+                annotations:
+                  additionalProperties:
+                    type: string
+                  type: object
                 bootstrap:
                   properties:
                     image:
@@ -3354,6 +3500,10 @@ spec:
                   description: PullPolicy describes a policy for if/when to pull a
                     container image
                   type: string
+                labels:
+                  additionalProperties:
+                    type: string
+                  type: object
                 replicas:
                   format: int32
                   minimum: 0
@@ -3414,6 +3564,10 @@ spec:
               type: object
             federatoraiRecommendWorker:
               properties:
+                annotations:
+                  additionalProperties:
+                    type: string
+                  type: object
                 bootstrap:
                   properties:
                     image:
@@ -3535,6 +3689,10 @@ spec:
                   description: PullPolicy describes a policy for if/when to pull a
                     container image
                   type: string
+                labels:
+                  additionalProperties:
+                    type: string
+                  type: object
                 replicas:
                   format: int32
                   minimum: 0
@@ -3595,6 +3753,10 @@ spec:
               type: object
             federatoraiRest:
               properties:
+                annotations:
+                  additionalProperties:
+                    type: string
+                  type: object
                 bootstrap:
                   properties:
                     image:
@@ -3716,6 +3878,10 @@ spec:
                   description: PullPolicy describes a policy for if/when to pull a
                     container image
                   type: string
+                labels:
+                  additionalProperties:
+                    type: string
+                  type: object
                 replicas:
                   format: int32
                   minimum: 0
@@ -3776,6 +3942,10 @@ spec:
               type: object
             imageLocation:
               type: string
+            labels:
+              additionalProperties:
+                type: string
+              type: object
             resources:
               description: ResourceRequirements describes the compute resource requirements.
               properties:

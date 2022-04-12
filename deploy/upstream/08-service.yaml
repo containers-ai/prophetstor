@@ -2,6 +2,7 @@ apiVersion: v1
 kind: Service
 metadata:
   labels:
+    app: alameda
     component: federatorai-operator
   name: federatorai-operator-service
   namespace: federatorai
@@ -11,4 +12,4 @@ spec:
     targetPort: 50443
   selector:
     name: federatorai-operator
-    app: Federator.ai
+    app: alameda

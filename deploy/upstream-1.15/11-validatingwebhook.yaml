@@ -3,6 +3,8 @@ kind: ValidatingWebhookConfiguration
 metadata:
   creationTimestamp: null
   name: federatorai-operator-servicesvalidation
+  labels:
+    app: alameda
 webhooks:
 - clientConfig:
     caBundle: Cg==
