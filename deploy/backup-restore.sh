@@ -1,364 +1,382 @@
 #!/usr/bin/env bash
-set -e
 
-function number::of::spaces() {
-  echo "$1" | tr -cd ' ' | wc -c|sed 's/[ \t]*//g'
-}
-
-function neat::yaml() {
-  #tab=$(printf '\t')
-  local tab="  "
-
-  local status="^status:"
-  local ownerrefs="^${tab}ownerReferences:"
-  local generation="^${tab}generation:"
-  local managedfields="^${tab}managedFields:"
-  local creattimestamp="^${tab}creationTimestamp:"
-  local resourcever="^${tab}resourceVersion:"
-  local selflink="^${tab}selfLink:"
-  local uid="^${tab}uid:"
-  local rmfields="$status\|$ownerrefs\|$generation\|$managedfields\|$creattimestamp\|$resourcever\|$selflink\|$uid"
-
-  local skip="false"
-  local currmfield=""
-
-  while IFS= read -r; do
-    if [ "$skip" = "true" ]; then
-      local chkpos=$(number::of::spaces "$currmfield")
-      chkpos=$((chkpos+1))
-      local chchk="$(echo "$REPLY" | cut -c$chkpos)"
-      if [ "$chchk" != " " -a "$chchk" != "-" ]; then
-        if ! echo "$REPLY" | grep -q "$rmfields"; then
-          skip="false"
-          echo "$REPLY"
-        fi
-        continue
-      fi
-    fi
-    if echo "$REPLY" | grep -q "$rmfields"; then
-      currmfield="$REPLY"
-      skip="true"
-      continue
-    fi
-    if [ "$skip" = "false" ]; then
-      echo "$REPLY"
-    fi
-  done <<< "$1"
-}
-
-function download::github::assets() {
-  local account="$1"
-  local repo="$2"
-  local tagorbranch="$3"
-  local relativedir="$(echo $4 | sed 's|^/||' | sed 's|/$||')"
-  local opfiles=""
-
-  opfiles=`curl --silent https://api.github.com/repos/${account}/${repo}/contents/${relativedir}?ref=${tagorbranch} 2>&1|grep "\"name\":"|cut -d ':' -f2|cut -d '"' -f2`
-  if [ "$opfiles" = "" ]; then
-    echo -e "\n$(tput setaf 1)Abort, download ${relativedir} file list of ${repo} failed!!!$(tput sgr 0)"
-    echo "Please check tag name and network"
-    exit 1
-  fi
-
-  for file in `echo $opfiles`; do
-    echo "Downloading file $file ..."
-    if ! curl -sL --fail https://raw.githubusercontent.com/${account}/${repo}/${tagorbranch}/${relativedir}/${file} -O; then
-      echo -e "\n$(tput setaf 1)Abort, download file failed!!!$(tput sgr 0)"
-      echo "Please check tag name and network"
-      exit 1
-    fi
-  done
-}
-
-function get::installed::ns() {
-  if ! kubectl get sts --all-namespaces | grep -q "alameda-influxdb\|fedemeter-influxdb"; then
-    echo "cannot find installed namespace" >&2
-    return 1
-  fi
-
-  local retns=$(kubectl get sts --all-namespaces | grep "alameda-influxdb\|fedemeter-influxdb" | head -1 | awk '{print $1}')
-  echo $retns
-  return 0
-}
-
-function backup::ns::cr() {
-  for nsres in $(kubectl api-resources --namespaced=true 2>/dev/null | grep \\.containers\\.ai | awk '{print $1}'); do
-    if [ "$nsres" = "alamedarecommendations" ]; then
-      continue
-    fi
-
-    # to prevent from Error "executing template: not in range, nothing to end"
-    if [ "$(kubectl get $nsres --all-namespaces -o=name | wc -l|sed 's/[ \t]*//g')" = "0" ]; then
-      continue
-    fi
-    kubectl get $nsres --all-namespaces --sort-by=.metadata.creationTimestamp \
-      -o=jsonpath="{range .items[*]}kubectl -n {.metadata.namespace} get $nsres {.metadata.name} {'\n'}{end}" \
-       | while IFS= read -r cmd ; do
-
-      ns=$(eval "${cmd} -ojsonpath={.metadata.namespace}")
-      name=$(eval "${cmd} -ojsonpath={.metadata.name}")
-      opfile="$TEMP_CFG_DIR/${nsres}_${ns}_${name}.yaml"
-      if [ "$nsres" = "alamedaservices" ]; then
-        opfile="$TEMP_DIR/${nsres}_${ns}_${name}.yaml"
-      fi
-
-      neat::yaml "`eval ${cmd} -oyaml`" > "$opfile"
-      # only backup oldest service
-      if [ "$nsres" = "alamedaservices" ]; then
-        break
-      fi
-    done
-  done
-}
-
-function backup::cr() {
-  for res in $(kubectl api-resources --namespaced=false 2>/dev/null | grep \\.containers\\.ai | awk '{print $1}'); do
-    # to prevent from Error "executing template: not in range, nothing to end"
-    if [ "$(kubectl get $res -o=name | wc -l|sed 's/[ \t]*//g')" = "0" ]; then
-      continue
-    fi
-    kubectl get $res --sort-by=.metadata.creationTimestamp \
-      -o=jsonpath="{range .items[*]}kubectl get $res {.metadata.name} {'\n'}{end}" | while IFS= read -r cmd ; do
-
-      name=$(eval "${cmd} -ojsonpath={.metadata.name}")
-      opfile="$TEMP_CFG_DIR/${res}_${name}.yaml"
-      neat::yaml "`eval ${cmd} -oyaml`" > "$opfile"
-    done
-  done
-}
-
-function backup::cluster::info::cm() {
-  local cns=default
-  local cname=cluster-info
-  if kubectl -n $cns get cm $cname | grep -q $cname; then
-    neat::yaml "`kubectl -n $cns get cm $cname -oyaml`" > $TEMP_INFO_DIR/configmaps_${cns}_${cname}.yaml
-  fi
-}
-
-function backup::op::deploy() {
-  local opfile="$TEMP_UPSTREAM_DIR/deployments_${INSTALLED_NS}_${OP_NAME}.yaml"
-  neat::yaml "`kubectl -n $INSTALLED_NS get deploy $OP_NAME -oyaml`" > "$opfile"
-}
-
-function save::to::backup::dir() {
-  local backupts="$(date +%s)"
-  local dirname="federatorai-backup-$backupts"
-  if [ "$machine_type" = "Linux" ]; then
-    local time="$(date -d @$backupts)"
-  else
-    local time="$(date -u -r $backupts)"
-  fi
-  local backdir="${USER_DEF_SAVED_DIR:-/tmp}/$dirname"
-  local opfile="$TEMP_UPSTREAM_DIR/deployments_${INSTALLED_NS}_${OP_NAME}.yaml"
-
-  cat > $TEMP_DIR/info.txt << EOF
-version: $(parse::image::tag "$(get::op::image::name "$opfile")")
-time: $time
-script version: $SCRIPT_TAG
-EOF
-
-  mv "$TEMP_DIR" "$backdir"
-  md5sum `find "$backdir" -type f` > "$backdir/md5sum.txt"
-  echo "backup yamls saved to folder $backdir"
-}
-
-function backup() {
-  USER_DEF_SAVED_DIR="$1"
-  TEMP_DIR=`mktemp -d`
-  if [ "$USER_DEF_SAVED_DIR" != "" ]; then
-    if [ "$machine_type" = "Linux" ]; then
-      TEMP_DIR=`mktemp -d -p "$USER_DEF_SAVED_DIR"`
-    else
-      TMP_FOLDER_NAME=`basename $TEMP_DIR`
-      mv $TEMP_DIR $USER_DEF_SAVED_DIR
-      TEMP_DIR="$USER_DEF_SAVED_DIR/$TMP_FOLDER_NAME"
-    fi
-  fi
-
-  INSTALLED_NS="$(get::installed::ns)"
-  TEMP_CFG_DIR="$TEMP_DIR/configs"
-  TEMP_INFO_DIR="$TEMP_DIR/infos"
-  TEMP_UPSTREAM_DIR="$TEMP_DIR/upstream"
-  mkdir -p "$TEMP_CFG_DIR" "$TEMP_INFO_DIR" "$TEMP_UPSTREAM_DIR"
-
-  cp "${BASH_SOURCE[0]}" "$TEMP_DIR"
-  backup::ns::cr
-  backup::cr
-  backup::cluster::info::cm
-  backup::op::deploy
-  save::to::backup::dir
-}
-
-function get::op::image::name() {
-  local opimage="$(grep "image:" "$1" | head -1)"
-  echo $opimage | sed 's/image: //'
-}
-
-function get::op::ns() {
-  local opns="$(grep "namespace:" "$1" | head -1)"
-  echo $opns | sed 's/namespace: //'
-}
-
-function parse::image::prefix::url() {
-  echo "$1" | awk -F/$(echo "$1" | awk -F/ '{print $NF}') '{print $1}'
-}
-
-function parse::image::tag() {
-  echo "$1" | awk -F: '{print $2}'
-}
-
-function download::and::apply::op::upstream() {
-  local opimgname="$(get::op::image::name "$OP_FILE")"
-  local opns="$(get::op::ns "$OP_FILE")"
-  local imgprefixurl="$(echo $(parse::image::prefix::url "$opimgname"))"
-  local imagetag="$(echo $(parse::image::tag "$opimgname"))"
-  local repo=prophetstor
-
-  if echo "$imagetag" | grep "^v4.2\|^v4.3"; then
-    repo=federatorai-operator
-  fi
-  cd "$ORIGIN_OP_UPSTREAM_DIR"
-  download::github::assets containers-ai "$repo" "$imagetag" deploy/upstream
-  if [ "$machine_type" = "Linux" ]; then
-    sed -i "s/name:.*/name: ${opns}/g" 00*.yaml
-    sed -i "s|\bnamespace:.*|namespace: ${opns}|g" *.yaml
-  else
-    # Mac
-    sed -i "" "s/name:.*/name: ${opns}/g" 00*.yaml
-    sed -i "" "s| namespace:.*| namespace: ${opns}|g" *.yaml
-  fi
-  cd -
-
-  cp "$OP_FILE" "$(grep -rl image:.*federatorai-operator "$ORIGIN_OP_UPSTREAM_DIR")"
-  kubectl apply -f "$ORIGIN_OP_UPSTREAM_DIR"
-}
-
-function restore::service() {
-  until kubectl apply -f "$SVC_FILE"; do
-    echo "Service CRD or webhook is not ready, retrying..."
-    sleep 30
-  done
-}
-
-function patch::pvs() {
-  for pv in $(kubectl get pv -o=jsonpath='{.items[?(@.spec.claimRef.namespace=="federatorai")].metadata.name}'); do
-    kubectl patch pv $pv -p '{"spec":{"persistentVolumeReclaimPolicy":"Retain", "claimRef": {"resourceVersion":"", "uid":""}}}'
-  done
-}
-
-function restore::backup::crs() {
-  until kubectl apply -f "$RESTORE_CFG_DIR"; do
-    echo "CRDs or webhook is not ready, retrying..."
-    sleep 30
-  done
-}
-
-function restore() {
-  RESTORE_DIR="$1"
-  if [ "$RESTORE_DIR" = "" ]; then
-    echo "Please give the restore folder"
-    exit 1
-  fi
-  if [ ! -d "$RESTORE_DIR" ]; then
-    echo "Restore folder $RESTORE_DIR is not existed"
-    exit 1
-  fi
-  RESTORE_CFG_DIR="$RESTORE_DIR/configs"
-  RESTORE_INFO_DIR="$RESTORE_DIR/infos"
-  RESTORE_UPSTREAM_DIR="$RESTORE_DIR/upstream"
-
-  ORIGIN_OP_UPSTREAM_DIR=`mktemp -d -p "$RESTORE_DIR"`
-
-  if ! find $RESTORE_UPSTREAM_DIR | grep -q "deployments_.*_${OP_NAME}.yaml"; then
-    echo "Operator deployment restore config is not found"
-    exit 1
-  fi
-  OP_FILE=$(find $RESTORE_UPSTREAM_DIR | grep "deployments_.*_${OP_NAME}.yaml")
-
-  if ! find $RESTORE_DIR | grep -q "alamedaservices_.*.yaml"; then
-    echo "Service restore config is not found"
-    exit 1
-  fi
-  SVC_FILE=$(find $RESTORE_DIR | grep "alamedaservices_.*.yaml")
-
-  echo "Download origin operator upstream files and apply"
-  download::and::apply::op::upstream
-  echo "Restore service"
-  restore::service
-  echo "Patch pv if necessary"
-  patch::pvs
-  echo "Restore CRs"
-  restore::backup::crs
-  echo "Restore complete"
-}
-
-function show::usage() {
-  cat << __EOF__
+show_usage()
+{
+    cat << __EOF__
 
     Usage:
-      -b,    backup, cannot use with restore(-r) at the same time
-      -r,    restore, cannot use with backup(-b) at the same time
-      -d,    backup or restore folder
+        Scenario:
+        i.  Backup
+            [Requirement]:
+            --backup
+            --url <Rest API URL>                             [e.g., --url https://172.31.2.49:31011]
+            --path <Backup folder path to store backup file> [e.g., --path /opt/backup]
+            --annotation "<Backup annotation>"               [e.g., --annotation "annotation inside double quotes"]
+
+            [Optional]:
+            --cluster-identifier "<Identify>"
+            [e.g., --cluster-identifier "identifier inside double quotes"]
+
+        ii. Restore
+            [Requirement]:
+            --restore
+            --url <Rest API URL>                             [e.g., --url https://172.31.2.49:31011]
+            --path <Restore file absolute path>
+            [e.g., --path /opt/backup/f8ai-172.31.2.49-2022-03-30-08-55-33-766596203-5.1.0.bak]
+
+        [Optional]:
+        # If user/password info isn't provided, program will run into interactive mode
+        --user <account to login into REST API>              [e.g., --user admin]
+        --password <pw>                                      [e.g., --password password]
 
 __EOF__
-  exit 1
 }
 
-function on::exit() {
-  local ret=$?
-  rm -rf "$TEMP_DIR" "$ORIGIN_OP_UPSTREAM_DIR"
-  trap - EXIT
-  exit $ret
+wait_until_job_done()
+{
+    job="$1"
+    period="$2"
+    interval="$3"
+    job_id="$4"
+
+    for ((i=0; i<$period; i+=$interval)); do
+        if [ "$job" = "backup" ]; then
+            exec_cmd="curl -sS -k -X GET \"$api_url/apis/v1/configurations/backups/$job_id/progress\" -H \"accept: application/json\" -H \"Authorization: Bearer $access_token\""
+        else
+            exec_cmd="curl -sS -k -X GET \"$api_url/apis/v1/configurations/restores/$job_id/progress\" -H \"accept: application/json\" -H \"Authorization: Bearer $access_token\""
+        fi
+        rest_output=$(eval $exec_cmd)
+
+        if [ "$?" != "0" ]; then
+            echo -e "\n$(tput setaf 1)Failed to get $job (id: $job_id) progress from REST API.$(tput sgr 0)"
+            exit 3
+        fi
+        progress=$(echo "$rest_output" | grep -o "\"progress\":[0-9]*"|cut -d ':' -f2)
+        if [ "$progress" = "" ]; then
+            echo -e "\n$(tput setaf 1)Failed to retrieve $job (id: $job_id) progress.$(tput sgr 0)"
+            exit 3
+        fi
+
+        if [ "$progress" = "100" ]; then
+            echo -e "$job (id: $job_id) is done."
+            if [ "$job" = "backup" ]; then
+                # Get file path
+                backup_file_name=$(echo "$rest_output"|grep -o "\"file_path\":\"[^\"]*\""|cut -d ':' -f2|sed 's/"//g'|awk -F'/' '{print $NF}')
+                if [ "$backup_file_name" = "" ]; then
+                    err_code="13"
+                    echo -e "\n$(tput setaf 1)Failed to retrieve backup file name.$(tput sgr 0)"
+                    exit 3
+                fi
+            fi
+            return 0
+        fi
+        echo "Waiting for $job to be ready..."
+        sleep "$interval"
+    done
+    echo -e "\n$(tput setaf 1)Error! Waited for $period seconds, but $job (id: $job_id) is not ready yet.$(tput sgr 0)"
+    exit 31
 }
-trap on::exit EXIT
 
-unameOut="$(uname -s)"
-case "${unameOut}" in
-    Linux*)
-        machine_type=Linux;;
-    Darwin*)
-        machine_type=Mac;;
-    *)
-        echo -e "\n$(tput setaf 1)Error! Unsupported machine type (${unameOut}).$(tput sgr 0)"
-        exit
-        ;;
-esac
-
-if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
-  IS_BACKUP="false"
-  IS_RESTORE="false"
-  OP_NAME=federatorai-operator
-  while getopts "d:t:br" arg; do
-    case "${arg}" in
-      b)
-        IS_BACKUP="true"
-        ;;
-      r)
-        IS_RESTORE="true"
-        ;;
-      d)
-        USER_SPECIFIC_DIR=${OPTARG}
-        ;;
-      t)
-        SCRIPT_TAG=${OPTARG}
-        ;;
-    esac
-  done
-
-  if [ "$IS_BACKUP" = "true" -a "$IS_RESTORE" = "true" ]; then
-    show::usage
-    exit 1
-  fi
-
-  if [ "$IS_BACKUP" = "true" ]; then
-    backup "$USER_SPECIFIC_DIR"
-  elif [ "$IS_RESTORE"="true" ]; then
-    if [ "$USER_SPECIFIC_DIR" = "" ]; then
-      restore "$(dirname "${BASH_SOURCE}")"
-    else
-      restore "$USER_SPECIFIC_DIR"
+prepare_folder(){
+    # Prepare external backup folder
+    if [ ! -d "$specific_path" ]; then
+        mkdir -p $specific_path
+        if [ "$?" != 0 ]; then
+            echo -e "\n$(tput setaf 1)Error! Failed to create backup folder ($specific_path).$(tput sgr 0)"
+            exit 3
+        fi
     fi
-  else
-    show::usage
-  fi
+}
+
+get_login_token(){
+    auth_string="${login_account}:${login_password}"
+    auth_cipher=$(echo -n "$auth_string"|base64)
+    if [ "$auth_cipher" = "" ]; then
+        echo -e "\n$(tput setaf 1)Failed to encode login string using base64 command.$(tput sgr 0)"
+        exit 3
+    fi
+
+    rest_output=$(curl -sS -k -X POST "$api_url/apis/v1/users/login" -H "accept: application/json" -H "authorization: Basic ${auth_cipher}")
+    if [ "$?" != "0" ]; then
+        echo -e "\n$(tput setaf 1)Failed to login to REST API.$(tput sgr 0)"
+        exit 3
+    fi
+    access_token="$(echo $rest_output|tr -d '\n'|grep -o "\"accessToken\":[^\"]*\"[^\"]*\""|sed -E 's/".*".*"(.*)"/\1/')"
+    if [ "$access_token" = "null" ] || [ "$access_token" = "" ]; then
+        echo -e "\n$(tput setaf 1)Failed to get access token.$(tput sgr 0)"
+        exit 3
+    fi
+}
+
+backup(){
+    prepare_folder
+    get_login_token
+
+    #
+    # Trigger backup job
+    #
+    echo "Starting backup job..."
+    exec_cmd="curl -sS -k -X PUT \"$api_url/apis/v1/configurations/backups\" -H \"accept: application/json\" -H \"Authorization: Bearer $access_token\" -H \"Content-Type: application/json\" -d \"{\\\"annotation\\\": \\\"$annotation\\\", \\\"cluster_identifier\\\": \\\"$cluster_identifier\\\", \\\"username\\\": \\\"$login_account\\\"}\""
+    rest_output=$(eval $exec_cmd)
+    if [ "$?" != "0" ]; then
+        echo -e "\n$(tput setaf 1)Failed to trigger backup job(Command: $exec_cmd)$(tput sgr 0)"
+        exit 3
+    fi
+
+    backup_series_id=$(echo "$rest_output"|grep -o "backup-series-id\":\"[^\"]*\""|cut -d ':' -f2|sed 's/"//g')
+    if [ "$backup_series_id" = "" ]; then
+        echo -e "\n$(tput setaf 1)Failed to retrieve backup series id.$(tput sgr 0)"
+        exit 3
+    fi
+
+    wait_until_job_done "backup" $max_wait_time 10 "$backup_series_id"
+
+    #
+    # Download backup file
+    #
+    cd $specific_path
+    exec_cmd="curl -sS -k -X GET \"$api_url/apis/v1/configurations/backups/$backup_series_id/file\" -H \"accept: application/json\" -H \"Authorization: Bearer $access_token\" -o $backup_file_name"
+    rest_output=$(eval $exec_cmd)
+    if [ "$?" != "0" ]; then
+        echo -e "\n$(tput setaf 1)Error, Failed to download backup (id: $backup_series_id) file.$(tput sgr 0)"
+        cd - > /dev/null
+        exit 3
+    fi
+    cd - > /dev/null
+    #
+    # Verify backup file
+    #
+    sh $specific_path/$backup_file_name --check >/dev/null 2>&1
+    if [ "$?" != "0" ]; then
+        echo -e "\n$(tput setaf 1)Error, MD5 checksum verification is failed (file: $specific_path/$backup_file_name).$(tput sgr 0)"
+        exit 3
+    fi
+
+    echo -e "\n$(tput setaf 6)Backup Federator.ai successfully. (File: $specific_path/$backup_file_name)$(tput sgr 0)"
+}
+
+restore(){
+    get_login_token
+    echo "Starting restore job..."
+    file_name=$(echo $specific_path|awk -F'/' '{print $NF}')
+    #
+    # Upload backup file
+    #
+    exec_cmd="curl -sS -k -X POST \"$api_url/apis/v1/configurations/restores\" -H \"accept: application/json\" -H \"Authorization: Bearer $access_token\" -H \"Content-Type: multipart/form-data\" -F \"file=@$specific_path\""
+    rest_output=$(eval $exec_cmd)
+    if [ "$?" != "0" ]; then
+        echo -e "\n$(tput setaf 1)Error, Failed to upload backup file ($specific_path).$(tput sgr 0)"
+        exit 3
+    fi
+    #
+    # Trigger restore
+    #
+    exec_cmd="curl -sS -k -X PUT \"$api_url/apis/v1/configurations/restores\" -H \"accept: application/json\" -H \"Authorization: Bearer $access_token\" -H \"Content-Type: application/json\" -d \"{\\\"file_name\\\": \\\"$file_name\\\"}\""
+    rest_output=$(eval $exec_cmd)
+    if [ "$?" != "0" ]; then
+        echo -e "\n$(tput setaf 1)Error, Failed to trigger restore job.$(tput sgr 0)"
+        exit 3
+    fi
+    restore_series_id=$(echo "$rest_output"|grep -o "\"restore-series-id\":\"[^\"]*\""|cut -d ':' -f2|sed 's/"//g')
+    if [ "$restore_series_id" = "" ]; then
+        echo -e "\n$(tput setaf 1)Failed to retrieve restore series id.$(tput sgr 0)"
+        exit 3
+    fi
+
+    echo "Waiting for REST API respond..."
+    sleep 30
+    response="n"
+    for i in `seq 1 29`
+    do
+        token=$(curl -sS -k -X POST "$api_url/apis/v1/users/login" -H "accept: application/json" -H "authorization: Basic ${auth_cipher}"|tr -d '\n'|grep -o "\"accessToken\":[^\"]*\"[^\"]*\""|sed -E 's/".*".*"(.*)"/\1/')
+        if [ "$token" != "" ]; then
+            response="y"
+            break
+        fi
+        echo "Waiting for REST API respond..."
+        sleep 30
+    done
+    if [ "$response" = "n" ]; then
+        echo -e "\n$(tput setaf 1)Error! Waited for 900 seconds, but REST API is not ready yet.$(tput sgr 0)"
+        exit 3
+    else
+        echo "Done."
+    fi
+
+    wait_until_job_done "restore" $max_wait_time 10 "$restore_series_id"
+    echo -e "\n$(tput setaf 6)Restore Federator.ai successfully.$(tput sgr 0)"
+}
+
+type curl > /dev/null 2>&1
+if [ "$?" != "0" ];then
+    echo -e "\n$(tput setaf 1)curl command is needed for this tool.$(tput sgr 0)"
+    exit 3
+fi
+
+type base64 > /dev/null 2>&1
+if [ "$?" != "0" ];then
+    echo -e "\n$(tput setaf 1)base64 command is needed for this tool.$(tput sgr 0)"
+    exit 3
+fi
+
+type awk > /dev/null 2>&1
+if [ "$?" != "0" ];then
+    echo -e "\n$(tput setaf 1)awk command is needed for this tool.$(tput sgr 0)"
+    exit 3
+fi
+
+while getopts "h-:" o; do
+    case "${o}" in
+        -)
+            case "${OPTARG}" in
+                url)
+                    api_url="${!OPTIND}"; OPTIND=$(( $OPTIND + 1 ))
+                    if [ "$api_url" = "" ]; then
+                        echo -e "\n$(tput setaf 1)Missing --${OPTARG} value.$(tput sgr 0)"
+                        show_usage
+                        exit 3
+                    fi
+                    ;;
+                user)
+                    login_account="${!OPTIND}"; OPTIND=$(( $OPTIND + 1 ))
+                    if [ "$login_account" = "" ]; then
+                        echo -e "\n$(tput setaf 1)Missing --${OPTARG} value.$(tput sgr 0)"
+                        show_usage
+                        exit 3
+                    fi
+                    ;;
+                password)
+                    login_password="${!OPTIND}"; OPTIND=$(( $OPTIND + 1 ))
+                    if [ "$login_password" = "" ]; then
+                        echo -e "\n$(tput setaf 1)Missing --${OPTARG} value.$(tput sgr 0)"
+                        show_usage
+                        exit 3
+                    fi
+                    ;;
+                annotation)
+                    annotation="${!OPTIND}"; OPTIND=$(( $OPTIND + 1 ))
+                    if [ "$annotation" = "" ]; then
+                        echo -e "\n$(tput setaf 1)Missing --${OPTARG} value.$(tput sgr 0)"
+                        show_usage
+                        exit 3
+                    fi
+                    ;;
+                cluster-identifier)
+                    cluster_identifier="${!OPTIND}"; OPTIND=$(( $OPTIND + 1 ))
+                    if [ "$cluster_identifier" = "" ]; then
+                        echo -e "\n$(tput setaf 1)Missing --${OPTARG} value.$(tput sgr 0)"
+                        show_usage
+                        exit 3
+                    fi
+                    ;;
+                path)
+                    specific_path="${!OPTIND}"; OPTIND=$(( $OPTIND + 1 ))
+                    if [ "$specific_path" = "" ]; then
+                        echo -e "\n$(tput setaf 1)Missing --${OPTARG} value.$(tput sgr 0)"
+                        show_usage
+                        exit 3
+                    fi
+                    ;;
+                backup)
+                    do_backup="y"
+                    ;;
+                restore)
+                    do_restore="y"
+                    ;;
+                help)
+                    show_usage
+                    exit 0
+                    ;;
+                *)
+                    echo -e "\n$(tput setaf 1)Unknown option --${OPTARG}.$(tput sgr 0)"
+                    show_usage
+                    exit 3
+                    ;;
+            esac;;
+        h)
+            show_usage
+            exit 0
+            ;;
+        *)
+            echo -e "\n$(tput setaf 1)Wrong parameter.$(tput sgr 0)"
+            show_usage
+            exit 3
+            ;;
+    esac
+done
+
+[ "$max_wait_time" = "" ] && max_wait_time=600
+
+if [ "$do_backup" != "y" ] && [ "$do_restore" != "y" ]; then
+    echo -e "\n$(tput setaf 1)Error, Please specify the job you want to run (backup/restore).$(tput sgr 0)"
+    show_usage
+    exit 3
+fi
+
+if [ "$do_backup" = "y" ] && [ "$do_restore" = "y" ]; then
+    echo -e "\n$(tput setaf 1)Error, Backup and restore can't be run at the same time.$(tput sgr 0)"
+    exit 3
+fi
+
+if [ "$do_backup" = "y" ]; then
+    if [ "$specific_path" = "" ]; then
+        echo -e "\n$(tput setaf 1)Error! Please specify backup target folder.$(tput sgr 0)"
+        show_usage
+        exit 1
+    fi
+
+    if [ "$annotation" = "" ]; then
+        echo -e "\n$(tput setaf 1)Error, Missing annotation info.$(tput sgr 0)"
+        show_usage
+        exit 3
+    fi
+fi
+
+if [ "$do_restore" = "y" ]; then
+    if [ ! -f "$specific_path" ]; then
+      echo -e "\n$(tput setaf 1)Error! Restore file doesn't exist.$(tput sgr 0)"
+      exit 1
+    fi
+    sh $specific_path --check >/dev/null 2>&1
+    if [ "$?" != "0" ]; then
+        echo -e "\n$(tput setaf 1)Error, MD5 checksum verification is failed (file: $specific_path).$(tput sgr 0)"
+        exit 3
+    fi
+fi
+
+if [ "$api_url" = "" ]; then
+    echo -e "\n$(tput setaf 1)Error, Missing REST API info.$(tput sgr 0)"
+    show_usage
+    exit 3
+fi
+
+if [ "$cluster_identifier" = "" ]; then
+    if [[ $api_url =~ ^http[s]?://[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+$ ]]; then
+        # http://ip:port, parse cluster_identifier
+        cluster_identifier=$(echo $api_url|cut -d '/' -f3|cut -d ':' -f1)
+    else
+        # e.g. federatorai-rest-federatorai.apps.ocp4.172-31-7-16.nip.io
+        cluster_identifier=$(echo $api_url|cut -d '.' -f2-)
+    fi
+    if [ "$cluster_identifier" = "" ]; then
+        echo -e "\n$(tput setaf 1)Failed to parse cluster identifier. Please specify it through parameter (--cluster-identifier)$(tput sgr 0)"
+        exit 3
+    fi
+fi
+
+if [ "$login_account" = "" ]; then
+    read -r -p "$(tput setaf 2)Please enter the REST API login account: $(tput sgr 0) " login_account </dev/tty
+fi
+
+if [ "$login_password" = "" ]; then
+    read -s -p "$(tput setaf 2)Please enter the REST API login password: $(tput sgr 0) " login_password </dev/tty
+    echo
+fi
+
+if [ "$do_backup" = "y" ]; then
+    backup
+fi
+
+if [ "$do_restore" = "y" ]; then
+    restore
 fi

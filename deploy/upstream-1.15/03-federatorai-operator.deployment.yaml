@@ -5,7 +5,7 @@ metadata:
   namespace: federatorai
   labels:
     name: federatorai-operator
-    app: alameda
+    app: Federator.ai
 spec:
   replicas: 1
   strategy:
@@ -13,12 +13,11 @@ spec:
   selector:
     matchLabels:
       name: federatorai-operator
-      app: alameda
   template:
     metadata:
       labels:
         name: federatorai-operator
-        app: alameda
+        app: Federator.ai
     spec:
       securityContext:
         fsGroup: 1001

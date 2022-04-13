@@ -7,8 +7,6 @@ metadata:
     controller-gen.kubebuilder.io/version: v0.7.0
   creationTimestamp: null
   name: alamedaservices.federatorai.containers.ai
-  labels:
-    app: alameda
 spec:
   group: federatorai.containers.ai
   names:

@@ -7,8 +7,6 @@ metadata:
     controller-gen.kubebuilder.io/version: v0.6.2
   creationTimestamp: null
   name: alamedaservices.federatorai.containers.ai
-  labels:
-    app: alameda
 spec:
   additionalPrinterColumns:
   - JSONPath: .spec.enableExecution
