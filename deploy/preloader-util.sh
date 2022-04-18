@@ -1996,7 +1996,6 @@ case "${unameOut}" in
         ;;
 esac
 
-
 kubectl version|grep -q "^Server"
 if [ "$?" != "0" ];then
     echo -e "\nPlease login to Kubernetes first."
@@ -2004,10 +2003,22 @@ if [ "$?" != "0" ];then
 fi
 
 install_namespace="`kubectl get pods --all-namespaces |grep "alameda-datahub-"|awk '{print $1}'|head -1`"
-
 if [ "$install_namespace" = "" ];then
     echo -e "\n$(tput setaf 1)Error! Please Install Federatorai before running this script.$(tput sgr 0)"
     exit 3
+fi
+
+# argument '-a' must co-exists with '-u'
+if [ "${cluster_name_specified}" = "y" -a "${auth_user_pass_specified}" != "y" ]; then
+    echo -e "\n$(tput setaf 1)Error! Missing '-u' argument.$(tput sgr 0)"
+    show_usage
+    exit 3
+fi
+
+if [ "${auth_user_pass_specified}" = "y" ]; then
+    auth_username="`echo \"${u_arg}\" | xargs | tr ':' ' ' | awk '{print $1}'`"
+    len="`echo \"${auth_username}:\" | wc -m|sed 's/[ \t]*//g'`"
+    auth_password="`echo \"${u_arg}\" | xargs | cut -c${len}-`"
 fi
 
 check_federatorai_cluster_type
@@ -2029,19 +2040,6 @@ if [ "$k8s_enabled" = "true" ]; then
     if [ "$install_nginx" = "y" ] && [ "$cluster_name_specified" != "y" ]; then
         check_cluster_name_not_empty
     fi
-fi
-
-# argument '-a' must co-exists with '-u'
-if [ "${cluster_name_specified}" = "y" -a "${auth_user_pass_specified}" != "y" ]; then
-    echo -e "\n$(tput setaf 1)Error! Missing '-u' argument.$(tput sgr 0)"
-    show_usage
-    exit 3
-fi
-
-if [ "${auth_user_pass_specified}" = "y" ]; then
-    auth_username="`echo \"${u_arg}\" | xargs | tr ':' ' ' | awk '{print $1}'`"
-    len="`echo \"${auth_username}:\" | wc -m|sed 's/[ \t]*//g'`"
-    auth_password="`echo \"${u_arg}\" | xargs | cut -c${len}-`"
 fi
 
 if [ "$cluster_name_specified" = "y" ]; then
