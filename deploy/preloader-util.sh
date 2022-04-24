@@ -30,6 +30,7 @@ show_usage()
             [-b] # Retrigger ab test inside preloader pod
             [-g ab_traffic_ratio] # ab test traffic ratio (default:4000) [e.g., -g 4000]
             [-t replica number] # Nginx default replica number (default:5) [e.g., -t 5]
+            [-s switch] # Specify enable execution value on Nginx (default: false) [e.g., -s true]
 
 __EOF__
     exit 1
@@ -1444,7 +1445,7 @@ add_alamedascaler_for_nginx()
         # Create new scaler
         json_data="{\"data\":[{\"object_meta\":{\"name\":\"${alamedascaler_name}\",\"namespace\":\"${install_namespace}\"\
         ,\"nodename\":\"\",\"clustername\":\"\",\"uid\":\"\",\"creationtimestamp\":0},\"target_cluster_name\":\"${cluster_name}\",\
-        \"correlation_analysis\":1,\"controllers\":[{\"evictable\":{\"value\":${evictable_option}},\"enable_execution\":{\"value\":false},\
+        \"correlation_analysis\":1,\"controllers\":[{\"evictable\":{\"value\":${evictable_option}},\"enable_execution\":{\"value\":${enable_execution}},\
         \"scaling_type\":${autoscaling_method},\"application_type\":\"generic\",\"generic\":{\"target\":{\"namespace\":\"${nginx_ns}\",\
         \"name\":\"${nginx_name}\",\"controller_kind\":${kind_type}},\"hpa_parameters\":{\"min_replicas\":{\"value\":1},\
         \"max_replicas\":40}},\"metrics\":[${metrics_record}]}]}]}"
@@ -2109,26 +2110,6 @@ else
     replica_number="5"
 fi
 
-# if [ "$autoscaling_specified" = "y" ]; then
-#     autoscaling_method=$x_arg
-#     if [ "$autoscaling_method" != "vpa" ] && [ "$autoscaling_method" != "hpa" ]; then
-#         echo -e "\n$(tput setaf 1) Pod autoscaling method needs to be \"vpa\" or \"hpa\".$(tput sgr 0)" && show_usage
-#     fi
-# else
-#     autoscaling_method="hpa"
-# fi
-if [ "$disable_all_node_metrics" = "y" ]; then
-    # For data verifier
-    # PredictOnly
-    autoscaling_method="1"
-    evictable_option="false"
-    enable_execution="false"
-else
-    # HPA
-    autoscaling_method="2"
-    evictable_option="true"
-fi
-
 if [ "$nginx_name_specified" = "y" ]; then
     nginx_name=$n_arg
     if [ "$nginx_name" = "" ]; then
@@ -2206,8 +2187,29 @@ fi
 current_location=`pwd`
 if [ "$enable_execution_specified" = "y" ]; then
     enable_execution="$s_arg"
+    if [ "$enable_execution" != "true" ] && [ "$enable_execution" != "false" ]; then
+        echo -e "\n$(tput setaf 1) Error! [-s] Enable execution specified value can only be true or false.$(tput sgr 0)"
+        exit 3
+    fi
+
 else
     enable_execution="true"
+fi
+
+if [ "$disable_all_node_metrics" = "y" ]; then
+    # For data verifier
+    # PredictOnly
+    if [ "$enable_execution_specified" = "y" ] && [ "$enable_execution" = "true" ]; then
+        echo -e "\n$(tput setaf 1) Error! [-j] can't run with [-s true].$(tput sgr 0)"
+        exit 3
+    fi
+    autoscaling_method="1"
+    evictable_option="false"
+    enable_execution="false"
+else
+    # HPA
+    autoscaling_method="2"
+    evictable_option="true"
 fi
 
 if [ "$k8s_enabled" = "true" ]; then
@@ -2278,23 +2280,6 @@ if [ "$run_preloader_with_normal_mode" = "y" ] || [ "$run_preloader_with_histori
         if [ "$demo_nginx_exist" = "true" ] && [ "$k8s_enabled" = "true" ]; then
             get_cluster_name_from_alamedascaler
             get_datasource_in_alamedaorganization
-
-            if [ "$data_source_type" = "datadog" ]; then
-                if [ "$enable_execution_specified" = "y" ]; then
-                    enable_execution="$s_arg"
-                else
-                    enable_execution="false"
-                fi
-            elif [ "$data_source_type" = "prometheus" ]; then
-                echo ""
-            elif [ "$data_source_type" = "sysdig" ]; then
-                # Not sure for now
-                if [ "$enable_execution_specified" = "y" ]; then
-                    enable_execution="$s_arg"
-                else
-                    enable_execution="false"
-                fi
-            fi
             add_alamedascaler_for_nginx
         fi
         run_preloader_command "historical_only"
