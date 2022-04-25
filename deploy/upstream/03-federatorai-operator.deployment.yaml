@@ -25,6 +25,7 @@ spec:
       initContainers:
         - name: upgrader
           image: quay.io/prophetstor/federatorai-operator-ubi:latest
+          imagePullPolicy: IfNotPresent
           args:
           - "upgrade"
           env:
