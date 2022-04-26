@@ -1431,44 +1431,51 @@ add_alamedascaler_for_nginx()
             exit 8
             ;;
     esac
-    if [ "$(find_current_scalers '1')" = "n" ]; then
-        # Retrieve metrics
-        rest_pod_name="`kubectl get pods -n ${install_namespace} | grep "federatorai-rest-" | awk '{print $1}' | head -1`"
-        json_data="{\"cluster_name\": \"${cluster_name}\", \"data_source\": ${data_source_id}}"
-        get_result=$(kubectl -n ${install_namespace} exec -t ${rest_pod_name} -- \
-          curl -s -X POST -v -H "Content-Type: application/json" \
-            -u "${auth_username}:${auth_password}" \
-            -d "${json_data}" \
-            http://127.0.0.1:5055/apis/v1/configs/allow_metrics)
-        metrics_record=$(echo "${get_result}" | jq ".data[] | select (.representative.Name == \"cpu\")" 2> /dev/null)
 
-        # Create new scaler
-        json_data="{\"data\":[{\"object_meta\":{\"name\":\"${alamedascaler_name}\",\"namespace\":\"${install_namespace}\"\
-        ,\"nodename\":\"\",\"clustername\":\"\",\"uid\":\"\",\"creationtimestamp\":0},\"target_cluster_name\":\"${cluster_name}\",\
-        \"correlation_analysis\":1,\"controllers\":[{\"evictable\":{\"value\":${evictable_option}},\"enable_execution\":{\"value\":${enable_execution}},\
-        \"scaling_type\":${autoscaling_method},\"application_type\":\"generic\",\"generic\":{\"target\":{\"namespace\":\"${nginx_ns}\",\
-        \"name\":\"${nginx_name}\",\"controller_kind\":${kind_type}},\"hpa_parameters\":{\"min_replicas\":{\"value\":1},\
-        \"max_replicas\":40}},\"metrics\":[${metrics_record}]}]}]}"
-
-        rest_pod_name="`kubectl get pods -n ${install_namespace} | grep "federatorai-rest-" | awk '{print $1}' | head -1`"
-        create_response="$(kubectl -n ${install_namespace} exec -t ${rest_pod_name} -- \
+    # Retrieve metrics
+    rest_pod_name="`kubectl get pods -n ${install_namespace} | grep "federatorai-rest-" | awk '{print $1}' | head -1`"
+    json_data="{\"cluster_name\": \"${cluster_name}\", \"data_source\": ${data_source_id}}"
+    get_result=$(kubectl -n ${install_namespace} exec -t ${rest_pod_name} -- \
         curl -s -X POST -v -H "Content-Type: application/json" \
-            -u "${auth_username}:${auth_password}" \
-            -d "${json_data}" \
-            http://127.0.0.1:5055/apis/v1/configs/scaler 2>&1)"
-        if [ "`echo \"${create_response}\" | grep 'HTTP/1.1 200 '`" = "" ]; then
-            echo -e "\n$(tput setaf 1)Error! Create alamedascaler for NGINX app failed.$(tput sgr 0)"
-            echo -e "The request response shows as following.\n${create_response}\n"
-            leave_prog
-            exit 8
-        fi
-        if [ "$(find_current_scalers '5')" = "n" ]; then
-            echo -e "\n$(tput setaf 1)Error! Failed to find new created NGINX alamedascaler.$(tput sgr 0)"
-            leave_prog
-            exit 8
-        fi
-        sleep 10
+        -u "${auth_username}:${auth_password}" \
+        -d "${json_data}" \
+        http://127.0.0.1:5055/apis/v1/configs/allow_metrics)
+    metrics_record=$(echo "${get_result}" | jq ".data[] | select (.representative.Name == \"cpu\")" 2> /dev/null)
+
+    # Create new scaler
+    json_data="{\"data\":[{\"object_meta\":{\"name\":\"${alamedascaler_name}\",\"namespace\":\"${install_namespace}\"\
+    ,\"nodename\":\"\",\"clustername\":\"\",\"uid\":\"\",\"creationtimestamp\":0},\"target_cluster_name\":\"${cluster_name}\",\
+    \"correlation_analysis\":1,\"controllers\":[{\"evictable\":{\"value\":${evictable_option}},\"enable_execution\":{\"value\":${enable_execution}},\
+    \"scaling_type\":${autoscaling_method},\"application_type\":\"generic\",\"generic\":{\"target\":{\"namespace\":\"${nginx_ns}\",\
+    \"name\":\"${nginx_name}\",\"controller_kind\":${kind_type}},\"hpa_parameters\":{\"min_replicas\":{\"value\":1},\
+    \"max_replicas\":40}},\"metrics\":[${metrics_record}]}]}]}"
+
+    if [ "$(find_current_scalers '1')" = "n" ]; then
+        curl_method="POST"
+    else
+        # previous alamedascaler existed. Do update
+        curl_method="PUT"
     fi
+
+    create_response="$(kubectl -n ${install_namespace} exec -t ${rest_pod_name} -- \
+    curl -s -X ${curl_method} -v -H "Content-Type: application/json" \
+        -u "${auth_username}:${auth_password}" \
+        -d "${json_data}" \
+        http://127.0.0.1:5055/apis/v1/configs/scaler 2>&1)"
+    if [ "`echo \"${create_response}\" | grep 'HTTP/1.1 200 '`" = "" ]; then
+        echo -e "\n$(tput setaf 1)Error! Create/Update alamedascaler for NGINX app failed.$(tput sgr 0)"
+        echo -e "The request response shows as following.\n${create_response}\n"
+        leave_prog
+        exit 8
+    fi
+
+    if [ "$(find_current_scalers '5')" = "n" ]; then
+        echo -e "\n$(tput setaf 1)Error! Failed to find new created NGINX alamedascaler.$(tput sgr 0)"
+        leave_prog
+        exit 8
+    fi
+    sleep 10
+
 
     # Change namespace to 'monitoring' instead of default 'collecting' state
     # rest api to update namespace state
