@@ -136,8 +136,19 @@ pods_ready()
 
 restore_postgresql(){
     echo "Restoring PostgreSQL backup files..."
-    kubectl -n $fed_ns exec $postgresql_name -- dropdb -U postgres federatorai
-    if [ "$?" != 0 ]; then
+    drop_db_fail="true"
+    for i in `seq 1 10`
+    do
+        kubectl -n $fed_ns exec $postgresql_name -- psql -c "SELECT pg_terminate_backend(pg_stat_activity.pid) FROM pg_stat_activity WHERE datname='federatorai' AND pid<>pg_backend_pid();" > /dev/null && \
+        kubectl -n $fed_ns exec $postgresql_name -- dropdb -U postgres federatorai
+        if [ "$?" = "0" ]; then
+            drop_db_fail="false"
+            break;
+        fi
+        sleep 3
+    done
+
+    if [ "$drop_db_fail" = "true" ]; then
         echo -e "\n$(tput setaf 1)Error! Failed to drop federatorai db in PostgreSQL.$(tput sgr 0)"
         exit 3
     fi
@@ -166,7 +177,7 @@ restore_influxdb(){
     # Drop databases
     for db_name in $(echo "$db_name_all")
     do
-        kubectl -n $fed_ns exec $influxdb_name -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -execute "drop database $db_name" >/dev/null
+        kubectl -n $fed_ns exec $influxdb_name -- influx -ssl -unsafeSsl -precision rfc3339 -username $influxdb_username -password $influxdb_password -execute "drop database $db_name" >/dev/null
         if [ "$?" != 0 ]; then
             echo -e "\n$(tput setaf 1)Error! Failed to drop influxdb database ($db_name).$(tput sgr 0)"
             exit 3
@@ -181,6 +192,18 @@ restore_influxdb(){
             echo -e "\n$(tput setaf 1)Error! Failed to restore influxdb database ($db_name).$(tput sgr 0)"
             exit 3
         fi
+    done
+
+    # Delete legacy data in databases which may came from later version.
+    target_databases="$(kubectl exec $influxdb_name -n $fed_ns -- influx -ssl -unsafeSsl -precision rfc3339 -username $influxdb_username -password $influxdb_password -execute "show databases"|egrep $future_records_db_name)"
+    measurement_list=("application_0" "application_1" "application_2")
+    echo "Cleaning legacy data points..."
+    for db in `echo "$target_databases"`
+    do
+        for measurement in "${measurement_list[@]}"
+        do
+            kubectl exec $influxdb_name -n $fed_ns -- influx -ssl -unsafeSsl -precision rfc3339 -username $influxdb_username -password $influxdb_password -database $db -execute "delete from $measurement where \"time\" > '$current_time'"
+        done
     done
     echo -e "Done.\n"
 }
@@ -294,6 +317,16 @@ compress_files(){
     fi
 }
 
+get_influxdb_credential(){
+    env_output="$(kubectl -n $fed_ns exec $influxdb_name -- env)"
+    influxdb_username="$(echo "$env_output"|grep INFLUXDB_ADMIN_USER|cut -d '=' -f2)"
+    influxdb_password="$(echo "$env_output"|grep INFLUXDB_ADMIN_PASSWORD|cut -d '=' -f2)"
+    if [ "$influxdb_username" = "" ] || [ "$influxdb_password" = "" ]; then
+        echo -e "\n$(tput setaf 1)Error! Failed to retrieve InfluxDB admin username or password.$(tput sgr 0)"
+        exit 3
+    fi
+}
+
 prepare_folder(){
     # Prepare external backup folder
     if [ ! -d "$specific_dir" ]; then
@@ -340,7 +373,7 @@ backup_influxdb(){
     for db_name in "${backup_dbs[@]}"
     do
         # Check if database has measurement(s)
-        measurements=$(kubectl -n $fed_ns exec $influxdb_name -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database $db_name -execute "show measurements")
+        measurements=$(kubectl -n $fed_ns exec $influxdb_name -- influx -ssl -unsafeSsl -precision rfc3339 -username $influxdb_username -password $influxdb_password -database $db_name -execute "show measurements")
         if [ "$measurements" = "" ]; then
             # If database is empty, skill backup to prevent restore failure.
             continue
@@ -388,6 +421,8 @@ postgresql_internal_folder="/var/lib/postgresql/data/backup"
 fed_ns="`kubectl get alamedaservice --all-namespaces 2>/dev/null|tail -1|awk '{print $1}'`"
 fed_tag="`kubectl get alamedaservices -n $fed_ns -o custom-columns=VERSION:.spec.version 2>/dev/null|grep -v VERSION|head -1`"
 backup_dbs=("alameda_cluster_status" "alameda_cluster_resource" "alameda_application" "alameda_config" "alameda_target" "alameda_profile" "alameda_automation" "alameda_user")
+future_records_db_name="metric_instance_prediction|metric_instance_recommendation|metric_instance_planning"
+current_time="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 [ "$max_wait_pods_ready_time" = "" ] && max_wait_pods_ready_time=900
 
 if [ "$fed_ns" = "" ]; then
@@ -458,6 +493,8 @@ if [ "$do_restore" = "y" ] && [ ! -d "$specific_dir" ]; then
     echo -e "\n$(tput setaf 1)Error! Restore folder doesn't exist.$(tput sgr 0)"
     exit 1
 fi
+
+get_influxdb_credential
 
 if [ "$do_backup" = "y" ]; then
     backup

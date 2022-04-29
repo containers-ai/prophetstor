@@ -5,7 +5,7 @@ target_config_info='{
   "rest_api_url": "https://172.31.2.41:31011",
   "login_account": "",
   "login_password": "",
-  "resource_type": "controller", # controller or namespace
+  "resource_type": "controller", # controller or namespace or application
   "iac_command": "script", # script or terraform
   "kubeconfig_path": "", # optional # kubeconfig file path
   "planning_target":
@@ -317,6 +317,319 @@ rest_api_login()
     show_info "Done."
 }
 
+do_application_way(){
+    show_info "Getting the information of controller under application ..."
+    exec_cmd="curl -sS -k -X GET \"$api_url/apis/v1/configs/scaler\" -H \"accept: application/json\" -H \"Authorization: Bearer $access_token\""
+    rest_output=$(eval $exec_cmd)
+
+    if [ "$?" != "0" ]; then
+        err_code="3"
+        show_error "Failed to get clusters info using REST API (Command: $exec_cmd)" $err_code
+        exit $err_code
+    fi
+
+    scaler_all="$rest_output"
+
+    # check if return is '"plannings":[]}'
+    scaler_count=${#scaler_all}
+    if [ "$scaler_all" = "" ] || [ "$scaler_count" -le "18" ]; then
+        err_code="1"
+        show_error "Scaler info is empty." $err_code
+        show_detail_to_stderr "REST API output: ${rest_output}"
+        exit $err_code
+    fi
+
+    data=$(tokenize_json "$scaler_all"| parse_json_begin)
+    err_code="$?"
+    if [ "$err_code" != "0" ]; then
+        show_error "Failed to parse json output (scaler result)." $err_code
+        exit $err_code
+    fi
+    #echo "$data"
+    scaler_record_no=$(echo "$data"|cut -d ',' -f2|sort -n -r|head -1)
+    scaler_found="n"
+    controller_name_array=()
+    controller_namespace_array=()
+    controller_kind_array=()
+    controller_profile_array=()
+    profile_array=()
+
+    for scaler_index in `seq 0 $scaler_record_no`
+    do
+        obj_name=$(get_valued_from_parsed_json "$data" "\[\"data\",$scaler_index,\"object_meta\",\"name\"\]")
+        target_cluster_name=$(get_valued_from_parsed_json "$data" "\[\"data\",$scaler_index,\"target_cluster_name\"\]")
+        if [ "$obj_name" = "$resource_name" ] && [ "$target_cluster_name" = "$cluster_name" ]; then
+            scaler_found="y"
+            controller_record_no=$(echo "$data"|grep "\[\"data\",$scaler_index,\"controllers\","|cut -d ',' -f4|sort -n -r|head -1)
+
+            doable_controller_found="n"
+            for controller_index in `seq 0 $controller_record_no`
+            do
+                application_type=$(get_valued_from_parsed_json "$data" "\[\"data\",$scaler_index,\"controllers\",$controller_index,\"application_type\"\]")
+                #echo "application_type=$controller_index  $application_type"
+                scaling_type=$(get_valued_from_parsed_json "$data" "\[\"data\",$scaler_index,\"controllers\",$controller_index,\"scaling_type\"\]")
+                #echo "scaling_type=$controller_index  $scaling_type"
+                if [ "$application_type" = "generic" ] && [ "$scaling_type" = "1" ]; then
+                    doable_controller_found="y"
+                    controller_name=$(get_valued_from_parsed_json "$data" "\[\"data\",$scaler_index,\"controllers\",$controller_index,\"generic\",\"target\",\"name\"\]")
+                    #echo "controller_name=$controller_index  $controller_name"
+                    controller_namespace=$(get_valued_from_parsed_json "$data" "\[\"data\",$scaler_index,\"controllers\",$controller_index,\"generic\",\"target\",\"namespace\"\]")
+                    controller_kind=$(get_valued_from_parsed_json "$data" "\[\"data\",$scaler_index,\"controllers\",$controller_index,\"generic\",\"target\",\"controller_kind\"\]")
+
+                    [ "$controller_kind" = "1" ] && controller_kind="deployment"
+                    [ "$controller_kind" = "2" ] && controller_kind="statefulset"
+                    [ "$controller_kind" = "3" ] && controller_kind="deploymentconfig"
+                    #echo "$controller_name  $controller_namespace  $controller_kind"
+                    controller_name_array+=( "$controller_name" )
+                    controller_namespace_array+=( "$controller_namespace" )
+                    controller_kind_array+=( "$controller_kind" )
+                fi
+            done
+            break
+        fi
+    done
+    if [ "$scaler_found" != "y" ]; then
+        err_code="1"
+        show_error "Failed to locate application info in scaler settings." $err_code
+        exit $err_code
+    fi
+    if [ "$doable_controller_found" != "y" ]; then
+        err_code="1"
+        show_error "No suitable controller (Generic, Non HPA) found under application." $err_code
+        exit $err_code
+    fi
+
+    # Get controller allocation (profile) info
+    exec_cmd="curl -sS -k -X GET \"$api_url/apis/v1/autoprovision/allocations/controllers\" -H \"accept: application/json\" -H \"Authorization: Bearer $access_token\""
+    rest_output=$(eval $exec_cmd)
+
+    if [ "$?" != "0" ]; then
+        err_code="3"
+        show_error "Failed to get autoprovision allocation info using REST API (Command: $exec_cmd)" $err_code
+        exit $err_code
+    fi
+
+    allocation_all="$rest_output"
+    data=$(tokenize_json "$allocation_all"| parse_json_begin)
+    err_code="$?"
+    if [ "$err_code" != "0" ]; then
+        show_error "Failed to parse json output (allocation result)." $err_code
+        exit $err_code
+    fi
+
+    allocation_record_no=$(echo "$data"|cut -d ',' -f2|sort -n -r|head -1)
+    con_array_len=${#controller_name_array[@]}
+
+    if [ "$allocation_record_no" = "" ]; then
+        for con_index in `seq 0 $(( con_array_len - 1 ))`
+        do
+            controller_profile_array+=( "noprofilematch" )
+        done
+    else
+        for con_index in `seq 0 $(( con_array_len - 1 ))`
+        do
+            profile_found="n"
+            con_name=${controller_name_array[con_index]}
+            con_namespace=${controller_namespace_array[con_index]}
+            con_kind=${controller_kind_array[con_index]}
+            for allocation_index in `seq 0 $allocation_record_no`
+            do
+                #echo "allocation_index = $allocation_index"
+                tmp_c_name=$(get_valued_from_parsed_json "$data" "\[\"data\",$allocation_index,\"name\"\]")
+                tmp_c_namespace=$(get_valued_from_parsed_json "$data" "\[\"data\",$allocation_index,\"namespace\"\]")
+                tmp_cluster_name=$(get_valued_from_parsed_json "$data" "\[\"data\",$allocation_index,\"cluster_name\"\]")
+                tmp_profile_name=$(get_valued_from_parsed_json "$data" "\[\"data\",$allocation_index,\"profile_name\"\]")
+                tmp_profile_type=$(get_valued_from_parsed_json "$data" "\[\"data\",$allocation_index,\"profile_type\"\]")
+                tmp_c_kind=$(get_valued_from_parsed_json "$data" "\[\"data\",$allocation_index,\"kind\"\]")
+                tmp_c_kind="$(echo "$tmp_c_kind" | tr '[:upper:]' '[:lower:]')"
+                if [ "$tmp_cluster_name" = "$cluster_name" ] && [ "$tmp_c_name" = "$con_name" ] && [ "$tmp_c_namespace" = "$con_namespace" ] && [ "$tmp_profile_type" = "k8s" ] && [ "$tmp_c_kind" = "$con_kind" ]; then
+                    profile_found="y"
+                    controller_profile_array+=( "$tmp_profile_name" )
+                fi
+            done
+            if [ "$profile_found" != "y" ]; then
+                controller_profile_array+=( "noprofilematch" )
+            fi
+        done
+    fi
+
+    get_profile_detail
+
+    for con_index in `seq 0 $(( con_array_len - 1 ))`
+    do
+        export resource_type=controller
+        export resource_name=${controller_name_array[con_index]}
+        export target_namespace=${controller_namespace_array[con_index]}
+        export owner_reference_kind=${controller_kind_array[con_index]}
+
+        show_info "Cluster name = $cluster_name"
+        show_info "Resource type = $resource_type"
+        show_info "Resource name = $resource_name"
+        show_info "Kind = $owner_reference_kind"
+        show_info "Namespace = $target_namespace"
+
+        c_profile_name=${controller_profile_array[con_index]}
+        if [ "$c_profile_name" != "noprofilematch" ]; then
+            for profile in "${profile_array[@]}"
+            do
+                p_name=$(echo "$profile"|cut -d ',' -f1)
+                if [ "$c_profile_name" = "$p_name" ]; then
+                    export readable_granularity=$(echo "$profile"|cut -d ',' -f2)
+                    export cpu_headroom=$(echo "$profile"|cut -d ',' -f3)
+                    export min_cpu=$(echo "$profile"|cut -d ',' -f4)
+                    export max_cpu=$(echo "$profile"|cut -d ',' -f5)
+                    export memory_headroom=$(echo "$profile"|cut -d ',' -f6)
+                    export min_memory=$(echo "$profile"|cut -d ',' -f7)
+                    export max_memory=$(echo "$profile"|cut -d ',' -f8)
+                    export trigger_condition=$(echo "$profile"|cut -d ',' -f9)
+                    break
+                fi
+            done
+        else
+            # reset
+            export readable_granularity=$app_granularity
+            unset cpu_headroom
+            unset cpu_headroom_mode
+            unset min_cpu
+            unset max_cpu
+            unset memory_headroom
+            unset memory_headroom_mode
+            unset min_memory
+            unset max_memory
+            unset trigger_condition
+        fi
+        parse_condition
+        normal_way
+    done
+}
+
+get_profile_detail(){
+    # Get profile detail
+    exec_cmd="curl -sS -k -X GET \"$api_url/apis/v1/autoprovision/profiles?profile_type=k8s&task_type=auto_provision\" -H \"accept: application/json\" -H \"Authorization: Bearer $access_token\""
+    rest_output=$(eval $exec_cmd)
+
+    if [ "$?" != "0" ]; then
+        err_code="3"
+        show_error "Failed to get profile info using REST API (Command: $exec_cmd)" $err_code
+        exit $err_code
+    fi
+
+    profile_all="$rest_output"
+    data=$(tokenize_json "$profile_all"| parse_json_begin)
+    err_code="$?"
+    if [ "$err_code" != "0" ]; then
+        show_error "Failed to parse json output (profile result)." $err_code
+        exit $err_code
+    fi
+
+    profile_record_no=$(echo "$data"|cut -d ',' -f2|sort -n -r|head -1)
+
+    if [ "$profile_record_no" != "" ]; then
+        for profile_index in `seq 0 $profile_record_no`
+        do
+            tmp_p_name=$(get_valued_from_parsed_json "$data" "\[\"data\",$profile_index,\"name\"\]")
+            tmp_p_recommendation_window=$(get_valued_from_parsed_json "$data" "\[\"data\",$profile_index,\"recommendation_window\"\]")
+
+            tmp_p_cpu_headroom=$(get_valued_from_parsed_json "$data" "\[\"data\",$profile_index,\"cpu_headroom\"\]")
+            if [[ $tmp_p_cpu_headroom =~ ^[0-9]+m$ ]]; then
+                # Remove last 'm'
+                if [ "$machine_type" = "Linux" ]; then
+                    tmp_p_cpu_headroom=`echo ${tmp_p_cpu_headroom::-1}`
+                else
+                    # Mac
+                    tmp_p_cpu_headroom=`echo "${tmp_p_cpu_headroom%?}"`
+                fi
+            fi
+
+            tmp_p_cpu_minimum=$(get_valued_from_parsed_json "$data" "\[\"data\",$profile_index,\"cpu_minimum\"\]")
+            if [[ $tmp_p_cpu_minimum =~ ^[0-9]+$ ]]; then
+                # Convert to mCore
+                tmp_p_cpu_minimum=$(( tmp_p_cpu_minimum * 1000 ))
+            elif [[ $tmp_p_cpu_minimum =~ ^[0-9]+m$ ]]; then
+                # Remove last 'm'
+                if [ "$machine_type" = "Linux" ]; then
+                    tmp_p_cpu_minimum=`echo ${tmp_p_cpu_minimum::-1}`
+                else
+                    # Mac
+                    tmp_p_cpu_minimum=`echo "${tmp_p_cpu_minimum%?}"`
+                fi
+            fi
+
+            tmp_p_cpu_maximum=$(get_valued_from_parsed_json "$data" "\[\"data\",$profile_index,\"cpu_maximum\"\]")
+            if [[ $tmp_p_cpu_maximum =~ ^[0-9]+$ ]]; then
+                # Convert to mCore
+                tmp_p_cpu_maximum=$(( tmp_p_cpu_maximum * 1000 ))
+            elif [[ $tmp_p_cpu_maximum =~ ^[0-9]+m$ ]]; then
+                # Remove last 'm'
+                if [ "$machine_type" = "Linux" ]; then
+                    tmp_p_cpu_maximum=`echo ${tmp_p_cpu_maximum::-1}`
+                else
+                    # Mac
+                    tmp_p_cpu_maximum=`echo "${tmp_p_cpu_maximum%?}"`
+                fi
+            fi
+
+            tmp_p_memory_headroom=$(get_valued_from_parsed_json "$data" "\[\"data\",$profile_index,\"memory_headroom\"\]")
+            if [[ $tmp_p_memory_headroom =~ ^[0-9]+Mi$ ]] || [[ $tmp_p_memory_headroom =~ ^[0-9]+Gi$ ]]; then
+                if [ "$machine_type" = "Linux" ]; then
+                    tmp_h=`echo ${tmp_p_memory_headroom::-2}`
+                else
+                    # Mac
+                    tmp_h=`echo "${tmp_p_memory_headroom%??}"`
+                fi
+            fi
+            if [[ $tmp_p_memory_headroom =~ ^[0-9]+Mi$ ]]; then
+                # Convert Mi to byte
+                tmp_p_memory_headroom=$(( tmp_h * 1024 * 1024 ))
+            elif [[ $tmp_p_memory_headroom =~ ^[0-9]+Gi$ ]]; then
+                # Convert Gi to byte
+                tmp_p_memory_headroom=$(( tmp_h * 1024 * 1024 * 1024 ))
+            fi
+
+            tmp_p_memory_minimum=$(get_valued_from_parsed_json "$data" "\[\"data\",$profile_index,\"memory_minimum\"\]")
+            if [[ $tmp_p_memory_minimum =~ ^[0-9]+Mi$ ]] || [[ $tmp_p_memory_minimum =~ ^[0-9]+Gi$ ]]; then
+                if [ "$machine_type" = "Linux" ]; then
+                    tmp_h=`echo ${tmp_p_memory_minimum::-2}`
+                else
+                    # Mac
+                    tmp_h=`echo "${tmp_p_memory_minimum%??}"`
+                fi
+            fi
+            if [[ $tmp_p_memory_minimum =~ ^[0-9]+Mi$ ]]; then
+                # Convert Mi to byte
+                tmp_p_memory_minimum=$(( tmp_h * 1024 * 1024 ))
+            elif [[ $tmp_p_memory_minimum =~ ^[0-9]+Gi$ ]]; then
+                # Convert Gi to byte
+                tmp_p_memory_minimum=$(( tmp_h * 1024 * 1024 * 1024 ))
+            fi
+
+            tmp_p_memory_maximum=$(get_valued_from_parsed_json "$data" "\[\"data\",$profile_index,\"memory_maximum\"\]")
+            if [[ $tmp_p_memory_maximum =~ ^[0-9]+Mi$ ]] || [[ $tmp_p_memory_maximum =~ ^[0-9]+Gi$ ]]; then
+                if [ "$machine_type" = "Linux" ]; then
+                    tmp_h=`echo ${tmp_p_memory_maximum::-2}`
+                else
+                    # Mac
+                    tmp_h=`echo "${tmp_p_memory_maximum%??}"`
+                fi
+            fi
+            if [[ $tmp_p_memory_maximum =~ ^[0-9]+Mi$ ]]; then
+                # Convert Mi to byte
+                tmp_p_memory_maximum=$(( tmp_h * 1024 * 1024 ))
+            elif [[ $tmp_p_memory_maximum =~ ^[0-9]+Gi$ ]]; then
+                # Convert Gi to byte
+                tmp_p_memory_maximum=$(( tmp_h * 1024 * 1024 * 1024 ))
+            fi
+
+            tmp_p_trigger_condition=$(get_valued_from_parsed_json "$data" "\[\"data\",$profile_index,\"trigger_condition\"\]")
+            if [ "$tmp_p_trigger_condition" = "-1" ]; then
+                tmp_p_trigger_condition=""
+            fi
+
+            profile_array+=( "$tmp_p_name,$tmp_p_recommendation_window,$tmp_p_cpu_headroom,$tmp_p_cpu_minimum,$tmp_p_cpu_maximum,$tmp_p_memory_headroom,$tmp_p_memory_minimum,$tmp_p_memory_maximum,$tmp_p_trigger_condition" )
+        done
+    fi
+}
+
 rest_api_check_cluster_name()
 {
     show_info "Getting the cluster name of the planning target ..."
@@ -346,74 +659,8 @@ rest_api_check_cluster_name()
     show_info "Done."
 }
 
-get_info_from_config()
+parse_condition()
 {
-    show_info "Getting the $resource_type info of the planning target..."
-
-    resource_name=$(parse_value_from_target_var "resource_name")
-    if [ "$resource_name" = "" ]; then
-        err_code="2"
-        show_error "Failed to get resource name of the planning target from target_config_info." $err_code
-        exit $err_code
-    fi
-
-    if [ "$resource_type" = "controller" ]; then
-        owner_reference_kind=$(parse_value_from_target_var "kind")
-        if [ "$owner_reference_kind" = "" ]; then
-            err_code="2"
-            show_error "Failed to get controller kind of the planning target from target_config_info." $err_code
-            exit $err_code
-        fi
-
-        owner_reference_kind="$(echo "$owner_reference_kind" | tr '[:upper:]' '[:lower:]')"
-        if [ "$owner_reference_kind" = "statefulset" ] && [ "$owner_reference_kind" = "deployment" ] && [ "$owner_reference_kind" = "deploymentconfig" ]; then
-            err_code="2"
-            show_error "Only support controller type equals Statefulset/Deployment/DeploymentConfig." $err_code
-            exit $err_code
-        fi
-
-        target_namespace=$(parse_value_from_target_var "namespace")
-        if [ "$target_namespace" = "" ]; then
-            err_code="2"
-            show_error "Failed to get namespace of the planning target from target_config_info." $err_code
-            exit $err_code
-        fi
-    else
-        # resource_type = namespace
-        # target_namespace is resource_name
-        target_namespace=$resource_name
-    fi
-
-    iac_command=$(parse_value_from_target_var "iac_command")
-    iac_command="$(echo "$iac_command" | tr '[:upper:]' '[:lower:]')"
-    if [ "$iac_command" = "" ]; then
-        err_code="2"
-        show_error "Failed to get iac_command from target_config_info." $err_code
-        exit $err_code
-    elif [ "$iac_command" != "script" ] && [ "$iac_command" != "terraform" ]; then
-        err_code="2"
-        show_error "Only support iac_command equals 'script' or 'terraform'." $err_code
-        exit $err_code
-    fi
-
-    readable_granularity=$(parse_value_from_target_var "time_interval")
-    readable_granularity="$(echo "$readable_granularity" | tr '[:upper:]' '[:lower:]')"
-    if [ "$readable_granularity" = "" ]; then
-        err_code="2"
-        show_error "Failed to get time interval of the planning target from target_config_info." $err_code
-        exit $err_code
-    fi
-
-    min_cpu=$(parse_value_from_target_var "min_cpu")
-    max_cpu=$(parse_value_from_target_var "max_cpu")
-    cpu_headroom=$(parse_value_from_target_var "cpu_headroom")
-    min_memory=$(parse_value_from_target_var "min_memory")
-    max_memory=$(parse_value_from_target_var "max_memory")
-    memory_headroom=$(parse_value_from_target_var "memory_headroom")
-    trigger_condition=$(parse_value_from_target_var "trigger_condition")
-    limits_only=$(parse_value_from_target_var "limits_only")
-    requests_only=$(parse_value_from_target_var "requests_only")
-
     if [[ ! $min_cpu =~ ^[0-9]+$ ]]; then min_cpu=""; fi
     if [[ ! $max_cpu =~ ^[0-9]+$ ]]; then max_cpu=""; fi
     if [[ $cpu_headroom =~ ^[0-9]+[%]$ ]]; then
@@ -457,13 +704,6 @@ get_info_from_config()
     if [[ ! $trigger_condition =~ ^[0-9]+$ ]]; then trigger_condition=""; fi
     [ "$trigger_condition" = "0" ] && trigger_condition=""
 
-    if [ "$limits_only" != 'y' ] && [ "$limits_only" != 'n' ]; then
-        limits_only="n"
-    fi
-    if [ "$requests_only" != 'y' ] && [ "$requests_only" != 'n' ]; then
-        requests_only="n"
-    fi
-
     if [ "$readable_granularity" = "daily" ]; then
         granularity="3600"
     elif [ "$readable_granularity" = "weekly" ]; then
@@ -476,13 +716,6 @@ get_info_from_config()
         exit $err_code
     fi
 
-    show_info "Cluster name = $cluster_name"
-    show_info "Resource type = $resource_type"
-    show_info "Resource name = $resource_name"
-    if [ "$resource_type" = "controller" ]; then
-        show_info "Kind = $owner_reference_kind"
-        show_info "Namespace = $target_namespace"
-    fi
     show_info "Time interval = $readable_granularity"
     show_info "min_cpu = $min_cpu"
     show_info "max_cpu = $max_cpu"
@@ -492,6 +725,111 @@ get_info_from_config()
     show_info "max_memory = $max_memory"
     show_info "memory_headroom = $memory_headroom"
     show_info "memory_headroom_mode = $memory_headroom_mode"
+    show_info "trigger_condition = $trigger_condition"
+}
+
+get_info_from_config()
+{
+    show_info "Getting the $resource_type info of the planning target..."
+
+    resource_name=$(parse_value_from_target_var "resource_name")
+    if [ "$resource_name" = "" ]; then
+        err_code="2"
+        show_error "Failed to get resource name of the planning target from target_config_info." $err_code
+        exit $err_code
+    fi
+
+    iac_command=$(parse_value_from_target_var "iac_command")
+    iac_command="$(echo "$iac_command" | tr '[:upper:]' '[:lower:]')"
+    if [ "$iac_command" = "" ]; then
+        err_code="2"
+        show_error "Failed to get iac_command from target_config_info." $err_code
+        exit $err_code
+    elif [ "$iac_command" != "script" ] && [ "$iac_command" != "terraform" ]; then
+        err_code="2"
+        show_error "Only support iac_command equals 'script' or 'terraform'." $err_code
+        exit $err_code
+    fi
+
+    if [ "$resource_type" = "controller" ]; then
+        owner_reference_kind=$(parse_value_from_target_var "kind")
+        if [ "$owner_reference_kind" = "" ]; then
+            err_code="2"
+            show_error "Failed to get controller kind of the planning target from target_config_info." $err_code
+            exit $err_code
+        fi
+
+        owner_reference_kind="$(echo "$owner_reference_kind" | tr '[:upper:]' '[:lower:]')"
+        if [ "$owner_reference_kind" = "statefulset" ] && [ "$owner_reference_kind" = "deployment" ] && [ "$owner_reference_kind" = "deploymentconfig" ]; then
+            err_code="2"
+            show_error "Only support controller type equals Statefulset/Deployment/DeploymentConfig." $err_code
+            exit $err_code
+        fi
+
+        target_namespace=$(parse_value_from_target_var "namespace")
+        if [ "$target_namespace" = "" ]; then
+            err_code="2"
+            show_error "Failed to get namespace of the planning target from target_config_info." $err_code
+            exit $err_code
+        fi
+    elif [ "$resource_type" = "namespace" ]; then
+        # resource_type = namespace
+        # target_namespace is resource_name
+        target_namespace=$resource_name
+    elif [ "$resource_type" = "application" ]; then
+        if [ "$iac_command" = "terraform" ]; then
+            err_code="3"
+            show_error "terraform in resource_type (application mode) is not yet supported." $err_code
+            exit $err_code
+        fi
+    else
+        err_code="2"
+        show_error "Only support resource type equals controller/namespace/application." $err_code
+        exit $err_code
+    fi
+
+    readable_granularity=$(parse_value_from_target_var "time_interval")
+    readable_granularity="$(echo "$readable_granularity" | tr '[:upper:]' '[:lower:]')"
+    if [ "$resource_type" = "application" ]; then
+        if [ "$readable_granularity" = "" ]; then
+            readable_granularity="daily"
+            app_granularity="daily"
+        else
+            app_granularity=$readable_granularity
+        fi
+    elif [ "$resource_type" != "application" ] && [ "$readable_granularity" = "" ]; then
+        err_code="2"
+        show_error "Failed to get time interval of the planning target from target_config_info." $err_code
+        exit $err_code
+    fi
+
+    min_cpu=$(parse_value_from_target_var "min_cpu")
+    max_cpu=$(parse_value_from_target_var "max_cpu")
+    cpu_headroom=$(parse_value_from_target_var "cpu_headroom")
+    min_memory=$(parse_value_from_target_var "min_memory")
+    max_memory=$(parse_value_from_target_var "max_memory")
+    memory_headroom=$(parse_value_from_target_var "memory_headroom")
+    trigger_condition=$(parse_value_from_target_var "trigger_condition")
+    limits_only=$(parse_value_from_target_var "limits_only")
+    requests_only=$(parse_value_from_target_var "requests_only")
+
+    if [ "$limits_only" != 'y' ] && [ "$limits_only" != 'n' ]; then
+        limits_only="n"
+    fi
+    if [ "$requests_only" != 'y' ] && [ "$requests_only" != 'n' ]; then
+        requests_only="n"
+    fi
+
+    show_info "Cluster name = $cluster_name"
+    show_info "Resource type = $resource_type"
+    show_info "Resource name = $resource_name"
+    if [ "$resource_type" = "controller" ]; then
+        show_info "Kind = $owner_reference_kind"
+        show_info "Namespace = $target_namespace"
+    fi
+
+    parse_condition
+
     show_info "Done."
 }
 
@@ -599,7 +937,7 @@ get_container_number_and_name_list(){
         container_str=$($kube_cmd -n $target_namespace get $query_type ${resource_name} -o jsonpath='{.spec.template.spec.containers[*].name}')
         if [ "$container_str" = "" ]; then
             err_code="3"
-            show_error "Failed to get container list (ns $target_namespace, $query_type, name ${resource_name})" $err_code
+            show_error "Failed to get container list (namespace:$target_namespace, kind:$query_type, name:${resource_name})" $err_code
             exit $err_code
         fi
         container_array=(`echo "$container_str"`)
@@ -1822,6 +2160,40 @@ connection_test()
     rest_api_login
 }
 
+normal_way(){
+    if [ "$resource_type" = "controller" ];then
+        if [ "$DEMO_MODE" != "y" ]; then
+            get_controller_resources_from_kubecmd "before"
+            get_planning_from_api
+        else
+            get_planning_from_api
+            get_controller_resources_from_kubecmd "before"
+        fi
+    elif [ "$resource_type" = "namespace" ]; then
+        get_namespace_quota_from_kubecmd "before"
+        get_planning_from_api
+    else
+        err_code="3"
+        show_error "Only support resource_type equals 'controller' or 'namespace'." $err_code
+        exit $err_code
+    fi
+
+    if [ "$do_dry_run" = "y" ]; then
+        update_target_resources "dry_run"
+    else
+        update_target_resources "normal"
+    fi
+
+    if [ "$iac_command" = "script" ]; then
+        if [ "$resource_type" = "controller" ];then
+            get_controller_resources_from_kubecmd "after"
+        else
+            # resource_type = namespace
+            get_namespace_quota_from_kubecmd "after"
+        fi
+    fi
+}
+
 # json parser parameter
 NO_HEAD=0
 NORMALIZE_SOLIDUS=0
@@ -2062,34 +2434,8 @@ rest_api_check_cluster_name
 container_resource_array=()
 container_planning_array=()
 
-if [ "$resource_type" = "controller" ];then
-    if [ "$DEMO_MODE" != "y" ]; then
-        get_controller_resources_from_kubecmd "before"
-        get_planning_from_api
-    else
-        get_planning_from_api
-        get_controller_resources_from_kubecmd "before"
-    fi
-elif [ "$resource_type" = "namespace" ]; then
-    get_namespace_quota_from_kubecmd "before"
-    get_planning_from_api
+if [ "$resource_type" = "application" ];then
+    do_application_way
 else
-    err_code="3"
-    show_error "Only support resource_type equals 'controller' or 'namespace'." $err_code
-    exit $err_code
-fi
-
-if [ "$do_dry_run" = "y" ]; then
-    update_target_resources "dry_run"
-else
-    update_target_resources "normal"
-fi
-
-if [ "$iac_command" = "script" ]; then
-    if [ "$resource_type" = "controller" ];then
-        get_controller_resources_from_kubecmd "after"
-    else
-        # resource_type = namespace
-        get_namespace_quota_from_kubecmd "after"
-    fi
+    normal_way
 fi
