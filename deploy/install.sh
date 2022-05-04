@@ -307,14 +307,11 @@ wait_until_cr_ready()
 
   for ((i=0; i<$period; i+=$interval)); do
     # check if cr data is filled
-    pass="y"
-    tenancy_cluster="$(kubectl exec alameda-influxdb-0 -n $namespace -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database alameda_config -execute "select * from tenancy_cluster where global_config='true'"|tail -n+4)"
-    if [ "$tenancy_cluster" = "" ]; then
-        pass="n"
-    fi
-    tenancy_organization=$(kubectl exec alameda-influxdb-0 -n $namespace -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database alameda_config -execute "select * from tenancy_organization"|tail -n+4)
-    if [ "$tenancy_organization" = "" ]; then
-        pass="n"
+    pass="n"
+    tenancy_cluster="$(kubectl exec federatorai-postgresql-0 -n $namespace -- psql federatorai -c "select count(*) from configuration.clusters where global_config=true;"|tail -n 3|head -n 1|xargs)"
+    tenancy_organization=$(kubectl exec federatorai-postgresql-0 -n $namespace -- psql federatorai -c "select count(*) from configuration.organizations;"|tail -n 3|head -n 1|xargs)
+    if [ "0${tenancy_organization}" -gt "0" ] && [ "0${tenancy_cluster}" -gt "0" ]; then
+        pass="y"
     fi
     if [ "$pass" = "y" ]; then
         echo -e "\nThe default alamedaorganization under namespace $namespace is ready."
@@ -440,57 +437,84 @@ get_datadog_agent_info()
     dd_cluster_name="$(kubectl get deploy $dd_cluster_agent_deploy_name -n $dd_namespace -o jsonpath='{range .spec.template.spec.containers[*]}{.env[?(@.name=="DD_CLUSTER_NAME")].value}' 2>/dev/null | awk '{print $1}')"
 }
 
-download_cr_files()
-{
-    cr_files=( "alamedadetection.yaml" "alamedanotificationchannel.yaml" "alamedanotificationtopic.yaml" )
-
-    for file_name in "${cr_files[@]}"
-    do
-        cp $tgz_folder_name/deploy/example/$file_name .
-    done
-}
-
 backup_configuration()
 {
     script_name="backup-restore.sh"
     backup_folder="$save_path/configuration_backup"
-    default="y"
-    read -r -p "$(tput setaf 2)Do you want to backup your configuration before upgrading Federator.ai? [default: $default]: $(tput sgr 0)" do_backup </dev/tty
-    do_backup=${do_backup:-$default}
-    do_backup=$(echo "$do_backup" | tr '[:upper:]' '[:lower:]')
-    if [ "$do_backup" = "y" ]; then
-        if [ ! -f "$script_located_path/$script_name" ]; then
-            echo -e "\n$(tput setaf 1)Error! Failed to locate script $script_located_path/$script_name$(tput sgr 0)"
-            default="n"
-            read -r -p "$(tput setaf 2)Do you want to skip backup configuration process? [default: $default]: $(tput sgr 0)" skip_backup </dev/tty
-            skip_backup=${skip_backup:-$default}
-            skip_backup=$(echo "$skip_backup" | tr '[:upper:]' '[:lower:]')
-            if [ "$skip_backup" = "y" ]; then
-                return
-            else
-                # skip_backup = 'n'
-                echo "Please make sure script $script_name and install.sh are in the same folder."
-                echo -e "$(tput setaf 1)Abort installation.$(tput sgr 0)"
-                exit 3
+    script_path="$(dirname "$(dirname "$(realpath $script_located_path)")")/$previous_tag/scripts/$script_name"
+    ask_continue="n"
+
+    default="$backup_folder"
+    read -r -p "$(tput setaf 2)Please enter the path for storing backup configuration: [default: $default] $(tput sgr 0)" backup_path </dev/tty
+    backup_path=${backup_path:-$default}
+    backup_path=$(echo "$backup_path" | tr '[:upper:]' '[:lower:]')
+    backup_folder=$backup_path
+    mkdir -p $backup_folder
+    if [ ! -f "$script_path" ]; then
+        echo "Backup configuration..."
+        echo -e "\n$(tput setaf 1)Warning! Configuration Backup can't be done due to lack of needed script ($script_path).$(tput sgr 0)"
+        ask_continue="y"
+    else
+        ask_entrypoint="n"
+        # Try to find entrypoint
+        if [ "$openshift_minor_version" = "" ]; then
+            # K8S
+            dashboard_node_port=$(kubectl -n $install_namespace get svc|grep "federatorai-dashboard-frontend"|grep "NodePort"|awk '{print $5}'|grep "TCP"|head -1|cut -d '/' -f1|cut -d ':' -f2)
+            if [ "$dashboard_node_port" != "" ]; then
+                node_ip=$(kubectl get nodes -o wide|tail -n+2|awk '{print $6}'|head -1)
+                if [ "$node_ip" != "" ]; then
+                    dashboard_entrypoint="https://${node_ip}:${dashboard_node_port}"
+                fi
+            fi
+        else
+            # OpenShift
+            dashboard_entrypoint=$(kubectl -n $install_namespace get route|grep "federatorai-dashboard-frontend"|awk '{print $2}')
+            if [ "$dashboard_entrypoint" != "" ]; then
+                dashboard_entrypoint="https://$dashboard_entrypoint"
             fi
         fi
 
-        default="$backup_folder"
-        read -r -p "$(tput setaf 2)Please enter the path for storing backup configuration: [default: $default] $(tput sgr 0)" backup_path </dev/tty
-        backup_path=${backup_path:-$default}
-        backup_path=$(echo "$backup_path" | tr '[:upper:]' '[:lower:]')
-        backup_folder=$backup_path
-        mkdir -p $backup_folder
-        echo "Backup configuration..."
-        bash $script_located_path/$script_name -b -d $backup_path -t $tag_number
-        if [ "$?" != "0" ]; then
-            echo -e "\n$(tput setaf 1)Error! Failed to do configuration backup.$(tput sgr 0)"
-            exit 8
+        if [ "$dashboard_entrypoint" = "" ]; then
+            # Auto find failed.
+            ask_entrypoint="y"
+        else
+            rest_ping_test=$(curl --connect-timeout 5 -sS -k -X POST ${dashboard_entrypoint}/apis/v1/users/login -H 'accept: application/json' -H 'authorization: Basic test='|grep -i "Invalid value of key")
+            if [ "$rest_ping_test" = "" ]; then
+                # Auto find failed.
+                ask_entrypoint="y"
+            fi
         fi
-        echo "Done."
-    else
-        # do_backup = 'n'
-        return
+
+        if [ "$ask_entrypoint" = "y" ]; then
+            read -r -p "$(tput setaf 2)Please enter the entrypoint of Federator.ai dashboard? [e.g. https://172.31.3.41:31012] $(tput sgr 0)" dashboard_entrypoint </dev/tty
+        fi
+        read -r -p "$(tput setaf 2)Please enter the dashboard login account: $(tput sgr 0) " login_account </dev/tty
+        read -s -p "$(tput setaf 2)Please enter the dashboard login password: $(tput sgr 0) " login_password </dev/tty
+        echo
+        echo "Backup configuration..."
+        annotation="${previous_tag}-`date +%Y%m%d%H%M%S`"
+        full_v="${source_tag_first_digit}${source_tag_middle_digit}${source_tag_last_digit}"
+        if [ "0${full_v}" -ge "510" ]; then
+            bash $script_path --backup --url $dashboard_entrypoint --path $backup_path --annotation "$annotation" --user $login_account --password $login_password
+        else
+            bash $script_path -b -d $backup_path
+        fi
+
+        if [ "$?" != "0" ]; then
+            echo -e "\n$(tput setaf 1)Warning! Configuration backup failed.$(tput sgr 0)"
+            ask_continue="y"
+        fi
+    fi
+
+    if [ "$ask_continue" = "y" ]; then
+        default="n"
+        read -r -p "$(tput setaf 2)Do you want to continue Federator.ai upgrade process?: [default: $default] $(tput sgr 0)" continue_upgrade </dev/tty
+        continue_upgrade=${continue_upgrade:-$default}
+        continue_upgrade=$(echo "$continue_upgrade" | tr '[:upper:]' '[:lower:]')
+        if [ "$continue_upgrade" != "y" ]; then
+            echo -e "\n$(tput setaf 1)Abort.$(tput sgr 0)"
+            exit 3
+        fi
     fi
 }
 
@@ -983,6 +1007,12 @@ fi
 
 if [ "$need_upgrade" = "y" ];then
     source_full_tag=$(echo "$previous_tag"|cut -d '-' -f1)
+    source_build_tag=$(echo "$previous_tag"|cut -d '-' -f2|sed 's/b//')
+    if [ "$source_build_tag" = "ga" ]; then
+        source_build_tag="9999"
+    elif ! [[ $source_build_tag =~ ^[0-9]+$ ]]; then
+        source_build_tag=""
+    fi
     if [[ $source_full_tag =~ ^[^v].* ]]; then
         source_tag_first_digit=""
         source_tag_middle_digit=""
@@ -996,6 +1026,12 @@ if [ "$need_upgrade" = "y" ];then
     fi
 
     target_full_tag=$(echo "$tag_number"|cut -d '-' -f1)
+    target_build_tag=$(echo "$tag_number"|cut -d '-' -f2|sed 's/b//')
+    if [ "$target_build_tag" = "ga" ]; then
+        target_build_tag="9999"
+    elif ! [[ $target_build_tag =~ ^[0-9]+$ ]]; then
+        target_build_tag=""
+    fi
     if [[ $target_full_tag =~ ^[^v].* ]]; then
         target_tag_first_digit=""
         target_tag_middle_digit=""
@@ -1008,9 +1044,12 @@ if [ "$need_upgrade" = "y" ];then
         target_tag_first_digit=$(echo $target_tag_first_digit|cut -d 'v' -f2)
     fi
 
-    # Only do backup when major or middle digit bigger than previous build
-    if [ "0${target_tag_first_digit}" -gt "0${source_tag_first_digit}" ] || [ "0${target_tag_middle_digit}" -gt "0${source_tag_middle_digit}" ]; then
-        backup_configuration
+    # Do backup when major/middle/last digit or build tag changed.
+    if [ "$target_tag_first_digit" != "" ] && [ "$target_tag_middle_digit" != "" ] && [ "$target_tag_last_digit" != "" ] && \
+       [ "$source_tag_first_digit" != "" ] && [ "$source_tag_middle_digit" != "" ] && [ "$source_tag_last_digit" != "" ]; then
+        if [ "0${target_tag_first_digit}" -ne "0${source_tag_first_digit}" ] || [ "0${target_tag_middle_digit}" -ne "0${source_tag_middle_digit}" ] || [ "0${target_tag_last_digit}" -ne "0${source_tag_last_digit}" ] || [ "0${target_build_tag}" -ne "0${source_build_tag}" ]; then
+            backup_configuration
+        fi
     fi
 fi
 
@@ -1216,7 +1255,6 @@ if [ "$ALAMEDASERVICE_FILE_PATH" = "" ]; then
     if [ "$offline_mode_enabled" != "y" ]; then
         echo -e "\nDownloading Federator.ai alamedaservice sample file ..."
         cp $tgz_folder_name/deploy/example/$alamedaservice_example .
-        download_cr_files
         echo "Done"
     else
         # Offline Mode
@@ -1654,7 +1692,6 @@ __EOF__
     fi
 else
     echo -e "\nDownloading Federator.ai CR sample files ..."
-    download_cr_files
     echo "Done"
     kubectl apply -f $ALAMEDASERVICE_FILE_PATH >/dev/null
     if [ "$?" != "0" ]; then

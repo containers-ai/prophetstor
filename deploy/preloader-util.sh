@@ -36,6 +36,46 @@ __EOF__
     exit 1
 }
 
+fedai_rest_get()
+{
+    local ret=1
+    local resp=""
+    local url="http://127.0.0.1:5055$1"
+
+    # Retry 6 times
+    for i in 1 2 3 4 5 6; do
+        rest_pod_name=$(kubectl get pods -n ${install_namespace} -o name | grep 'pod/federatorai-rest-' | head -1)
+        resp=$(kubectl -n ${install_namespace} exec -t ${rest_pod_name} -- \
+            curl -s -k --max-time 120 --retry-max-time 5 --connect-timeout 30 \
+              -u "${auth_username}:${auth_password}" \
+              -H "Content-Type: application/json" \
+              "${url}" 2>&1)
+        ret=$?
+        [ "${ret}" = "0" ] && echo "${resp}" && return 0
+        sleep 30
+    done
+    return ${ret}
+}
+
+psql_query()
+{
+    local ret=1
+    local result=""
+    local sql_str="$1"
+
+    # Retry 6 times
+    for i in 1 2 3 4 5 6; do
+        postgresql_pod_name="federatorai-postgresql-0"
+        resp=$(kubectl -n ${install_namespace} exec -t ${postgresql_pod_name} -- \
+            psql --dbname=federatorai --no-psqlrc --single-transaction --tuples-only --no-align --field-separator="|" \
+              --command "${sql_str}" 2>&1)
+        ret=$?
+        [ "${ret}" = "0" ] && echo "${resp}" && return 0
+        sleep 30
+    done
+    return ${ret}
+}
+
 pods_ready()
 {
   [[ "$#" == 0 ]] && return 0
@@ -110,37 +150,28 @@ check_version()
 
 wait_until_pods_ready()
 {
-  local period="$1"
-  local interval="$2"
-  local namespace="$3"
-
-  sleep "$interval"
-  for ((i=0; i<${period}; i+=${interval})); do
-    for j in deployment statefulset daemonset; do
-        result=""
-        while read name ready total junk; do
-            if [ "${ready}" != "${total}" ]; then
-                result="${name} "
-            fi
-        done<<<"$(kubectl -n ${namespace} get $j 2>&1 | egrep -v "^NAME |^No resources" | tr '/' ' ')"
-
-        if [ "${result}" != "" ]; then
-            break
-        fi
-    done
-    if [ "${result}" = "" ]; then
-        echo -e "\nAll resources in ${namespace} are ready."
-        return 0
-    fi
-    echo "Waiting for the following resources in namespace ${namespace} to be ready ..."
-    echo "${result}"
+    local period="$1"
+    local interval="$2"
+    local namespace="$3"
 
     sleep "$interval"
-  done
+    for ((i=0; i<${period}; i+=${interval})); do
+        result=$(set +x; (kubectl -n ${namespace} get deployment; \
+                  kubectl -n ${namespace} get statefulset; \
+                  kubectl -n ${namespace} get daemonset) 2>&1 \
+                  | egrep -v "^No resources found|^NAME | 0/0 | 1/1 | 2/2" | awk '{print $1}' | xargs)
+        if [ "${result}" = "" ]; then
+            echo -e "\nAll resources in ${namespace} are ready."
+            return 0
+        fi
+        echo "Waiting for the following resources in namespace ${namespace} to be ready ..."
+        echo -e "  ${result}\n"
+        sleep "$interval"
+    done
 
-  echo -e "\n$(tput setaf 1)Warning!! Waited for ${period} seconds, but all pods are not ready yet. Please check ${namespace} namespace$(tput sgr 0)"
-  leave_prog
-  exit 4
+    echo -e "\n$(tput setaf 1)Warning!! Waited for ${period} seconds, but all pods are not ready yet. Please check ${namespace} namespace$(tput sgr 0)"
+    leave_prog
+    exit 4
 }
 
 wait_until_data_pump_finish()
@@ -254,22 +285,14 @@ _do_cluster_status_verify()
     for i in $(seq 1 $repeat_count)
     do
         if [ "$mode" = "vm" ]; then
-            # VM
-            if [ "$(kubectl exec $influxdb_pod_name -n $install_namespace -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database alameda_cluster_status -format 'csv' -execute "select * from node where type='vm'" 2>/dev/null|sed 1d|wc -l|sed 's/[ \t]*//g')" -gt "0" ]; then
-                result="ok"
-            fi
+            # Found if any nodes exists inside the cluster
+            resp=$(fedai_rest_get "/apis/v1/resources/clusters/${cluster_name}/nodes?type=vm")
+            node_id_list=$(echo "${resp}" | jq -r '.data[].node_id')
+            [ "${node_id_list}" != "" ] && result="ok"
         else
-            # K8S
-            if [ "$demo_nginx_exist" = "true" ]; then
-                kubectl exec $influxdb_pod_name -n $install_namespace -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database alameda_cluster_status -execute "select * from pod" 2>/dev/null |grep -q "${alamedascaler_name}"
-                if [ "$?" = "0" ]; then
-                    result="ok"
-                fi
-            else
-                if [ "$(kubectl exec $influxdb_pod_name -n $install_namespace -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database alameda_cluster_status -format 'csv' -execute "select * from pod" 2>/dev/null|sed 1d|wc -l|sed 's/[ \t]*//g')" -gt "0" ]; then
-                    result="ok"
-                fi
-            fi
+            # K8S - Do nothing for now
+            # TODO: verify pods exists inside the cluster for this alamedascaler
+            result="ok"
         fi
 
         if [ "$result" != "ok" ]; then
@@ -288,9 +311,9 @@ _do_cluster_status_verify()
         else
             # K8S
             if [ "$demo_nginx_exist" = "true" ]; then
-                echo -e "\n$(tput setaf 1)Error! Failed to find alamedascaler ($alamedascaler_name) status in alameda_cluster_status..pod$(tput sgr 0)"
+                echo -e "\n$(tput setaf 1)Error! Failed to find alamedascaler ($alamedascaler_name) status$(tput sgr 0)"
             else
-                echo -e "\n$(tput setaf 1)Error! Failed to get any pod record in alameda_cluster_status..pod$(tput sgr 0)"
+                echo -e "\n$(tput setaf 1)Error! Failed to get any pod record$.(tput sgr 0)"
             fi
         fi
         leave_prog
@@ -548,7 +571,7 @@ scale_up_pods()
     echo "Done"
 }
 
-reschedule_dispatcher()
+OBSOLETED_reschedule_dispatcher()
 {
     start=`date +%s`
     echo -e "\n$(tput setaf 6)Rescheduling alameda-ai dispatcher...$(tput sgr 0)"
@@ -651,17 +674,18 @@ patch_agent_for_preloader()
     local _period="@every 10m"
 
     start=`date +%s`
-    [ "${_mode}" = "true" ] && echo -e "\n$(tput setaf 6)Updating Agent to compute monthly/weekly cost recommendation every ${_period}) for preloader...$(tput sgr 0)"
+    [ "${_mode}" = "true" ] && echo -e "\n$(tput setaf 6)Updating Agent to compute monthly/weekly cost recommendation every `echo ${_period} | sed -e 's/@every //g'` for preloader...$(tput sgr 0)"
 
     # Need federatorai-operator ready for webhook service to validate alamedaservice
     wait_until_pods_ready 600 30 $install_namespace
 
     flag_updated="n"
     for key in FEDERATORAI_AGENT_INPUT_JOBS_COST_ANALYSIS_HIGH_MONTHLY_SCHEDULE_SPEC FEDERATORAI_AGENT_INPUT_JOBS_COST_ANALYSIS_HIGH_WEEKLY_SCHEDULE_SPEC; do
-        if [ "${_mode}" != "true" ]; then
+        if [ "${_mode}" = "true" ]; then
+            alamedaservice_set_component_env federatoraiAgent ${key} "${_period}"
+        else
             alamedaservice_set_component_env federatoraiAgent ${key} ""
         fi
-        alamedaservice_set_component_env federatoraiAgent ${key} "${_period}"
     done
     wait_until_pods_ready 600 30 $install_namespace
 
@@ -669,6 +693,34 @@ patch_agent_for_preloader()
     end=`date +%s`
     duration=$((end-start))
     echo "Duration patch_agent_for_preloader = $duration" >> $debug_log
+}
+
+patch_ai_dispatcher_for_preloader()
+{
+    local _mode="$1"
+    local _period="600"
+
+    start=`date +%s`
+    [ "${_mode}" = "true" ] && echo -e "\n$(tput setaf 6)Updating AI Dispatcher to compute daily/monthly/weekly prediction every ${_period}s for preloader...$(tput sgr 0)"
+
+    # Need federatorai-operator ready for webhook service to validate alamedaservice
+    wait_until_pods_ready 600 30 $install_namespace
+
+    flag_updated="n"
+    # To shorten CI running time, need to compute prediction in shorter time for different intervals
+    for key in ALAMEDA_AI_DISPATCHER_JOB_INTERVAL_DAILY ALAMEDA_AI_DISPATCHER_JOB_INTERVAL_WEEKLY ALAMEDA_AI_DISPATCHER_JOB_INTERVAL_MONTHLY; do
+        if [ "${_mode}" = "true" ]; then
+            alamedaservice_set_component_env alameda-dispatcher ${key} "${_period}"
+        else
+            alamedaservice_set_component_env alameda-dispatcher ${key} ""
+        fi
+    done
+    wait_until_pods_ready 600 30 $install_namespace
+
+    echo "Done."
+    end=`date +%s`
+    duration=$((end-start))
+    echo "Duration patch_ai_dispatcher_for_preloader = $duration" >> $debug_log
 }
 
 patch_data_adapter_for_preloader()
@@ -787,24 +839,23 @@ patch_datahub_back_to_normal()
 
 check_federatorai_cluster_type()
 {
+    vm_enabled="false"
+    k8s_enabled="false"
+
     echo -e "\n$(tput setaf 6)Checking Federator.ai cluster type...$(tput sgr 0)"
-    influxdb_pod_name="$(kubectl get pods -n $install_namespace |grep "alameda-influxdb-"|awk '{print $1}'|head -1)"
-    cluster_output="$(kubectl exec $influxdb_pod_name -n $install_namespace -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database alameda_cluster_status -format 'csv' -execute "select * from cluster"|tail -n+2|awk -F',' '{print $9}')"
 
-    if [ "$(echo "$cluster_output"|grep "vm"|head -1)" != "" ]; then
-        vm_enabled="true"
-    else
-        vm_enabled="false"
-    fi
-
-    if [ "$(echo "$cluster_output"|grep "k8s"|head -1)" != "" ]; then
-        k8s_enabled="true"
-    else
-        k8s_enabled="false"
-    fi
-
+    resp=$(fedai_rest_get /apis/v1/resources/clusters)
+    # Retry until cluster become active, REST will response also the inactive-clusters
+    for i in `seq 1 12`; do
+        resp='{"data":[]}'
+        [ "`echo \"${resp}\" | jq '.data'`" != "[]" ] && break
+        sleep 10
+        resp=$(fedai_rest_get /apis/v1/resources/clusters)
+    done
+    [ "`echo \"${resp}\" | jq '.data[].type' 2> /dev/null | grep 'k8s' 2> /dev/null`" != "" ] && k8s_enabled="true"
+    [ "`echo \"${resp}\" | jq '.data[].type' 2> /dev/null | grep 'vm' 2> /dev/null`" != "" ] && vm_enabled="true"
     if [ "$vm_enabled" = "false" ] && [ "$k8s_enabled" = "false" ]; then
-        echo -e "\n$(tput setaf 1)Error! Failed to get cluster type from influxdb db (alameda_cluster_status) measurement (cluster).$(tput sgr 0)"
+        echo -e "\n$(tput setaf 1)Error! Failed to get cluster type.$(tput sgr 0)"
         exit 8
     fi
     echo "k8s_enabled = $k8s_enabled"
@@ -1280,9 +1331,16 @@ get_datadog_agent_info()
 
 get_cluster_name_from_alamedascaler()
 {
-    cluster_name=$(kubectl exec alameda-influxdb-0 -n ${install_namespace} -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database alameda_target -execute "select resource_k8s_min_replicas,cluster_name from controller where \"alameda_scaler_name\"='$alamedascaler_name' and \"namespace\"='$nginx_ns' and \"kind\"='$kind_name'"|tail -n+4|awk '{print $3}'|head -1)
-    if [ "$cluster_name" = "" ]; then
-        echo -e "\n$(tput setaf 1)Error! Failed to get cluster name in alameda_target..controller by alamedascaler ($alamedascaler_name).$(tput sgr 0)"
+    resp=$(fedai_rest_get /apis/v1/configs/scaler)
+    # Retry until cluster become active, REST will response also the inactive-clusters
+    for i in `seq 1 12`; do
+        [ "`echo \"${resp}\" | jq '.data'`" != "[]" ] && break
+        sleep 10
+        resp=$(fedai_rest_get /apis/v1/configs/scaler)
+    done
+    cluster_name=$(echo "${resp}" | jq -r '.data[] | select(.object_meta.name=="'${alamedascaler_name}'") | .target_cluster_name')
+    if [ "${cluster_name}" = "" ]; then
+        echo -e "\n$(tput setaf 1)Error! Failed to get cluster name of alamedascaler ($alamedascaler_name).$(tput sgr 0)"
         exit 3
     fi
 }
@@ -1290,9 +1348,9 @@ get_cluster_name_from_alamedascaler()
 get_datasource_in_alamedaorganization()
 {
     # Get cluster specific data source setting
-    data_source_type=$(kubectl exec alameda-influxdb-0 -n ${install_namespace} -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database alameda_config -execute "select data_source from tenancy_cluster where \"name\"='$cluster_name' and \"global_config\"='false' and \"type\"='k8s'"|tail -n+4|awk '{print $2}'|head -1)
+    data_source_type=$(psql_query "select data_source from configuration.clusters where cluster_name='"${cluster_name}"'")
     if [ "$data_source_type" = "" ]; then
-        echo -e "\n$(tput setaf 1)Error! Failed to find data source of cluster ($cluster_name) in alameda_config..tenancy_cluster$(tput sgr 0)"
+        echo -e "\n$(tput setaf 1)Error! Failed to find data source of cluster ($cluster_name)$(tput sgr 0)"
         echo -e "$(tput setaf 1)Remember to configure cluster through GUI before running preloader script or check specified cluster name.$(tput sgr 0)"
         exit 3
     fi
@@ -1946,7 +2004,6 @@ case "${unameOut}" in
         ;;
 esac
 
-
 kubectl version|grep -q "^Server"
 if [ "$?" != "0" ];then
     echo -e "\nPlease login to Kubernetes first."
@@ -1954,10 +2011,22 @@ if [ "$?" != "0" ];then
 fi
 
 install_namespace="`kubectl get pods --all-namespaces |grep "alameda-datahub-"|awk '{print $1}'|head -1`"
-
 if [ "$install_namespace" = "" ];then
     echo -e "\n$(tput setaf 1)Error! Please Install Federatorai before running this script.$(tput sgr 0)"
     exit 3
+fi
+
+# argument '-a' must co-exists with '-u'
+if [ "${cluster_name_specified}" = "y" -a "${auth_user_pass_specified}" != "y" ]; then
+    echo -e "\n$(tput setaf 1)Error! Missing '-u' argument.$(tput sgr 0)"
+    show_usage
+    exit 3
+fi
+
+if [ "${auth_user_pass_specified}" = "y" ]; then
+    auth_username="`echo \"${u_arg}\" | xargs | tr ':' ' ' | awk '{print $1}'`"
+    len="`echo \"${auth_username}:\" | wc -m|sed 's/[ \t]*//g'`"
+    auth_password="`echo \"${u_arg}\" | xargs | cut -c${len}-`"
 fi
 
 check_federatorai_cluster_type
@@ -1979,19 +2048,6 @@ if [ "$k8s_enabled" = "true" ]; then
     if [ "$install_nginx" = "y" ] && [ "$cluster_name_specified" != "y" ]; then
         check_cluster_name_not_empty
     fi
-fi
-
-# argument '-a' must co-exists with '-u'
-if [ "${cluster_name_specified}" = "y" -a "${auth_user_pass_specified}" != "y" ]; then
-    echo -e "\n$(tput setaf 1)Error! Missing '-u' argument.$(tput sgr 0)"
-    show_usage
-    exit 3
-fi
-
-if [ "${auth_user_pass_specified}" = "y" ]; then
-    auth_username="`echo \"${u_arg}\" | xargs | tr ':' ' ' | awk '{print $1}'`"
-    len="`echo \"${auth_username}:\" | wc -m|sed 's/[ \t]*//g'`"
-    auth_password="`echo \"${u_arg}\" | xargs | cut -c${len}-`"
 fi
 
 if [ "$cluster_name_specified" = "y" ]; then
@@ -2211,6 +2267,7 @@ fi
 if [ "$enable_preloader" = "y" ]; then
     enable_preloader_in_alamedaservice
     patch_agent_for_preloader "true"
+    patch_ai_dispatcher_for_preloader "true"
 fi
 
 if [ "$run_ab_from_preloader" = "y" ]; then
@@ -2248,6 +2305,7 @@ if [ "$disable_preloader" = "y" ]; then
     scale_up_pods
     #switch_alameda_executor_in_alamedaservice "off"
     patch_agent_for_preloader "false"
+    patch_ai_dispatcher_for_preloader "false"
     disable_preloader_in_alamedaservice
 fi
 

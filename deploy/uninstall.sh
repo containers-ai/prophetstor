@@ -79,10 +79,69 @@ download_operator_yaml_if_needed()
     fi
 }
 
+remove_operator_ns_yaml()
+{
+    check_passed="y"
+    all_res="$(kubectl -n ${installed_namespace} get all 2>/dev/null)"
+    if [ "$all_res" != "" ]; then
+        check_passed="n"
+    fi
+
+    if [ "$check_passed" = "y" ]; then
+        pvc="$(kubectl -n ${installed_namespace} get pvc 2>/dev/null)"
+        if [ "$pvc" != "" ]; then
+            check_passed="n"
+        fi
+    fi
+
+    if [ "$check_passed" = "y" ]; then
+        for serviceaccount in `kubectl -n ${installed_namespace} get serviceaccount -o name`
+        do
+            if [ "$serviceaccount" != "serviceaccount/default" ] && [ "$serviceaccount" != "serviceaccount/builder" ] && [ "$serviceaccount" != "serviceaccount/deployer" ]; then
+                check_passed="n"
+                break
+            fi
+        done
+    fi
+
+    if [ "$check_passed" = "y" ]; then
+        for configmap in `kubectl -n ${installed_namespace} get configmap -o name`
+        do
+            if [ "$configmap" != "configmap/kube-root-ca.crt" ] && [ "$configmap" != "configmap/openshift-service-ca.crt" ]; then
+                check_passed="n"
+                break
+            fi
+        done
+    fi
+
+    if [ "$check_passed" = "y" ]; then
+        all_secret=$(kubectl -n $installed_namespace get secret -o name)
+        for secret in `echo "$all_secret"`
+        do
+            secret_type="$(kubectl -n $installed_namespace get $secret -o jsonpath='{.type}')"
+            if ! [[ $secret_type =~ ^kubernetes.io/.*$ ]]; then
+                check_passed="n"
+                break
+            fi
+        done
+    fi
+    if [ "$check_passed" = "y" ]; then
+        # No resource left in namespace which is not belongs to Federator.ai
+        kubectl delete -f $namespace_yaml
+    else
+        echo -e "$(tput setaf 3)\nNamespace $installed_namespace is not deleted since some resources existed.$(tput sgr 0)"
+    fi
+}
+
 remove_operator_yaml()
 {
     for yaml_fn in `ls [0-9]*yaml | sort -n -r`
     do
+        # Move deleting 00-namespace.yaml to the last
+        if [[ $yaml_fn =~ ^00-.*$ ]]; then
+            namespace_yaml="$yaml_fn"
+            continue
+        fi
         echo -e "$(tput setaf 2)\nDeleting $yaml_fn ...$(tput sgr 0)"
         if [[ $yaml_fn =~ ^04-.*$ ]]; then
             kubectl delete -f ${yaml_fn} --ignore-not-found=true
@@ -95,33 +154,77 @@ remove_operator_yaml()
     done
 }
 
-wait_until_namespace_removed()
+wait_until_cr_removed()
 {
-  period="$1"
-  interval="$2"
+    period="$1"
+    interval="$2"
 
-  for ((i=0; i<$period; i+=$interval)); do
-
-    # check if namespace still exist
-    kubectl get ns "$installed_namespace" 2>/dev/null |grep -q "$installed_namespace"
-    if [ "$?" != "0" ]; then
-        echo -e "\n$(tput setaf 6)Namespace $installed_namespace is removed successfully.$(tput sgr 0)"
-        return 0
-    else
-        echo "Waiting for the namespace to be removed..."
+    cluster_resource_list=("clusterrole" "clusterrolebinding")
+    for cluster_resource in "${cluster_resource_list[@]}"
+    do
+        check_passed="n"
+        for ((i=0; i<$period; i+=$interval))
+        do
+            all_cluster_res=$(kubectl get $cluster_resource | grep "^${installed_namespace}-"|awk '{print $1}')
+            if [ "$all_cluster_res" != "" ]; then
+                echo -e "\nWaiting for $cluster_resource to be removed..."
+                do_wait_cluster="y"
+                sleep "$interval"
+            else
+                check_passed="y"
+                break
+            fi
+        done
+        if [ "$check_passed" = "n" ]; then
+            echo -e "\n$(tput setaf 1)Warning!! Waited for $period seconds, but $cluster_resource still exist.$(tput sgr 0)"
+            return 0
+        fi
+    done
+    if [ "$do_wait_cluster" = "y" ]; then
+        echo "Done"
     fi
+}
 
-    sleep "$interval"
-  done
+wait_until_resource_removed()
+{
+    period="$1"
+    interval="$2"
 
-  echo -e "\n$(tput setaf 1)Warning!! Waited for $period seconds, but namespace $installed_namespace still exist.$(tput sgr 0)"
-  #exit 4
+    resource_list=("configmap" "serviceaccount" "service" "deployment" "statefulset" "rolebinding" "role" "persistentvolumeclaim")
+    for resource in "${resource_list[@]}"
+    do
+        all_res=$(kubectl -n $installed_namespace get $resource -o name)
+        for res in `echo "$all_res"`
+        do
+            check_passed="n"
+            for ((i=0; i<$period; i+=$interval))
+            do
+                owner_kind=$(kubectl -n $installed_namespace get $res -o jsonpath='{.metadata.ownerReferences[0].kind}' 2>/dev/null)
+                if [ "$owner_kind" = "AlamedaService" ]; then
+                    echo -e "\nWaiting for $res to be removed..."
+                    do_wait_resource="y"
+                    sleep "$interval"
+                else
+                    check_passed="y"
+                    break
+                fi
+            done
+            if [ "$check_passed" = "n" ]; then
+                echo -e "\n$(tput setaf 1)Warning!! Waited for $period seconds, but $res still exist.$(tput sgr 0)"
+                # Continue to delete crd
+                return 0
+            fi
+        done
+    done
+    if [ "$do_wait_resource" = "y" ]; then
+        echo "Done"
+    fi
 }
 
 which curl > /dev/null 2>&1
 if [ "$?" != "0" ];then
     echo -e "\n$(tput setaf 1)Abort, \"curl\" command is needed for this tool.$(tput sgr 0)"
-    exit
+    exit 3
 fi
 
 operator_folder="operator"
@@ -169,7 +272,7 @@ if [ "$installed_namespace" = "" ]; then
     exit
 fi
 
-all_fed_pv="$(kubectl get pv --output jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.claimRef.namespace}{"\n"}'|grep "$installed_namespace")"
+all_fed_pv="$(kubectl get pv --output jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.claimRef.name}{"\t"}{.spec.claimRef.namespace}{"\n"}'|grep "$installed_namespace")"
 if [ "$all_fed_pv" != "" ]; then
     default="y"
     read -r -p "$(tput setaf 2)Do you want to preserve your Federator.ai persistent volumes? [default: $default]: $(tput sgr 0)" do_preserve </dev/tty
@@ -185,14 +288,17 @@ if [ "$all_fed_pv" != "" ]; then
         exit 3
     fi
 
-    while read pv_name _junk; do
-        echo "Patching pv ${pv_name} ..."
-        kubectl patch pv ${pv_name} -p "{\"spec\":{\"persistentVolumeReclaimPolicy\":\"$policy\"}}"
-        if [ "$?" != "0" ]; then
-            echo -e "$(tput setaf 1)Error in patching pv ${pv_name}$(tput sgr 0)"
-            exit 3
+    while read pv_name pvc_name _junk; do
+        pvc_kind=$(kubectl -n $installed_namespace get pvc $pvc_name --output jsonpath='{.metadata.ownerReferences[0].kind}')
+        if [ "$pvc_kind" = "AlamedaService" ]; then
+            echo "Patching pv ${pv_name} policy to '$policy'..."
+            kubectl patch pv $pv_name -p "{\"spec\":{\"persistentVolumeReclaimPolicy\":\"$policy\"}}"
+            if [ "$?" != "0" ]; then
+                echo -e "$(tput setaf 1)Error in patching pv ${pv_name}$(tput sgr 0)"
+                exit 3
+            fi
+            echo "Done."
         fi
-        echo "Done."
     done <<< "$(echo "$all_fed_pv")"
 fi
 
@@ -227,7 +333,16 @@ if [ "$offline_mode" = "y" ]; then
     for yaml_file in `ls ../$operator_folder/[0-9]*yaml|sort -n -r`
     do
         echo -e "$(tput setaf 2)\nDeleting $yaml_file ...$(tput sgr 0)"
-        kubectl delete -f $yaml_file
+        # Move deleting 00-namespace.yaml to the last
+        if [[ $yaml_fn =~ 00-.*$ ]]; then
+            namespace_yaml="$yaml_fn"
+            continue
+        fi
+        if [[ $yaml_file =~ 04-.*$ ]]; then
+            kubectl delete -f ${yaml_file} --ignore-not-found=true
+        else
+            kubectl delete -f ${yaml_file}
+        fi
         if [ "$?" != "0" ]; then
             echo -e "$(tput setaf 1)Error in removing $yaml_file$(tput sgr 0)"
         fi
@@ -286,8 +401,11 @@ else
     download_operator_yaml_if_needed
     remove_all_alamedaservice
     remove_operator_yaml
-    cd - > /dev/null
 fi
 
-wait_until_namespace_removed 900 60
+wait_until_resource_removed 900 60
 remove_containersai_crds
+wait_until_cr_removed 900 30
+
+remove_operator_ns_yaml
+cd - > /dev/null
