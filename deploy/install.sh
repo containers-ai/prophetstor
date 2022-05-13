@@ -1260,7 +1260,7 @@ if [ "$ALAMEDASERVICE_FILE_PATH" = "" ]; then
         # Offline Mode
         # Copy CR yamls
         echo "Copying Federator.ai CR yamls ..."
-        if [[ "`ls ${script_located_path}/../yamls/alameda*.yaml 2>/dev/null|wc -l`" -lt "4" ]]; then
+        if [[ "`ls ${script_located_path}/../yamls/alameda*.yaml 2>/dev/null|wc -l`" -lt "1" ]]; then
             echo -e "\n$(tput setaf 1)Error! Failed to locate Federator.ai CR yaml files$(tput sgr 0)"
             echo "Please make sure you extract the offline install package and execute install.sh under scripts folder  "
             exit 1
