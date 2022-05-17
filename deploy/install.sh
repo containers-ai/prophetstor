@@ -35,22 +35,63 @@
 
 pods_ready()
 {
-  [[ "$#" == 0 ]] && return 0
+    [[ "$#" == 0 ]] && return 1
 
-  namespace="$1"
-  kubectl get pod -n $namespace \
-    '-o=go-template={{range .items}}{{.metadata.name}}{{"\t"}}{{range .status.conditions}}{{if eq .type "Ready"}}{{.status}}{{"\t"}}{{end}}{{end}}{{.status.phase}}{{"\t"}}{{if .status.reason}}{{.status.reason}}{{end}}{{"\n"}}{{end}}' \
-      | while read name status phase reason _junk; do
-          if [ "$status" != "True" ]; then
-            msg="Waiting for pod $name in namespace $namespace to be ready."
-            [ "$phase" != "" ] && msg="$msg phase: [$phase]"
-            [ "$reason" != "" ] && msg="$msg reason: [$reason]"
-            echo "$msg"
-            return 1
-          fi
-        done || return 1
+    namespace="$1"
+    pod_list=$(kubectl -n fed get pods -o name|cut -d '/' -f2)
+    for pod_name in `echo "$pod_list"`
+    do
+        echo $pod_check_list|grep -w -q "$pod_name"
+        if [ "$?" = "0" ];then
+            # Already in check list.
+            continue
+        fi
+        res_kind=$(kubectl -n $namespace get pod $pod_name -o jsonpath='{.metadata.ownerReferences[0].kind}' 2>/dev/null)
+        res_name=$(kubectl -n $namespace get pod $pod_name -o jsonpath='{.metadata.ownerReferences[0].name}' 2>/dev/null)
+        if [ "$res_kind" = "ReplicaSet" ]; then
+            deploy_kind=$(kubectl -n $namespace get rs $res_name -o jsonpath='{.metadata.ownerReferences[0].kind}' 2>/dev/null)
+            deploy_name=$(kubectl -n $namespace get rs $res_name -o jsonpath='{.metadata.ownerReferences[0].name}' 2>/dev/null)
+            if [ "$deploy_kind" = "Deployment" ]; then
+                owner_reference_kind=$(kubectl -n $namespace get deploy $deploy_name -o jsonpath='{.metadata.ownerReferences[0].kind}' 2>/dev/null)
+                owner_reference_name=$(kubectl -n $namespace get deploy $deploy_name -o jsonpath='{.metadata.ownerReferences[0].name}' 2>/dev/null)
+                if [ "$owner_reference_kind" = "AlamedaService" ] && [ "$owner_reference_name" = "my-alamedaservice" ]; then
+                    # Add pod into check list if not already exist
+                    echo $pod_check_list|grep -w -q "$pod_name"
+                    if [ "$?" != "0" ];then
+                        pod_check_list+=( "$pod_name" )
+                    fi
+                fi
+            fi
+        elif [ "$res_kind" = "StatefulSet" ]; then
+            owner_reference_kind=$(kubectl -n $namespace get sts $res_name -o jsonpath='{.metadata.ownerReferences[0].kind}' 2>/dev/null)
+            owner_reference_name=$(kubectl -n $namespace get sts $res_name -o jsonpath='{.metadata.ownerReferences[0].name}' 2>/dev/null)
+            if [ "$owner_reference_kind" = "AlamedaService" ] && [ "$owner_reference_name" = "my-alamedaservice" ]; then
+                # Add pod into check list if not already exist
+                echo $pod_check_list|grep -w -q "$pod_name"
+                if [ "$?" != "0" ];then
+                    pod_check_list+=( "$pod_name" )
+                fi
+            fi
+        fi
+    done
 
-  return 0
+    kubectl get pod -n $namespace \
+        '-o=go-template={{range .items}}{{.metadata.name}}{{"\t"}}{{range .status.conditions}}{{if eq .type "Ready"}}{{.status}}{{"\t"}}{{end}}{{end}}{{.status.phase}}{{"\t"}}{{if .status.reason}}{{.status.reason}}{{end}}{{"\n"}}{{end}}' \
+        | while read name_ status phase reason _junk; do
+            if [ "$status" != "True" ]; then
+                echo $pod_check_list|grep -w -q "$name_"
+                if [ "$?" = "0" ];then
+                    # Pod exist in check list, print wait msg
+                    msg="Waiting for pod $name_ in namespace $namespace to be ready."
+                    [ "$phase" != "" ] && msg="$msg phase: [$phase]"
+                    [ "$reason" != "" ] && msg="$msg reason: [$reason]"
+                    echo "$msg"
+                    return 1
+                fi
+            fi
+            done || return 1
+
+    return 0
 }
 
 leave_prog()
@@ -269,7 +310,7 @@ wait_until_pods_ready()
   interval="$2"
   namespace="$3"
   target_pod_number="$4"
-
+  pod_check_list=()
   wait_pod_creating=1
   for ((i=0; i<$period; i+=$interval)); do
 
@@ -277,7 +318,7 @@ wait_until_pods_ready()
         # check if pods created
         if [[ "`kubectl get po -n $namespace 2>/dev/null|wc -l`" -ge "$target_pod_number" ]]; then
             wait_pod_creating=0
-            echo -e "\nChecking pods..."
+            echo -e "Checking pods..."
         else
             echo "Waiting for pods in namespace $namespace to be created..."
         fi
@@ -372,21 +413,6 @@ get_restapi_route()
             echo "========================================"
         fi
     fi
-}
-
-restart_data_adapter_pod()
-{
-    adapter_pod_name=`kubectl get pods -n $install_namespace -o name |grep "federatorai-data-adapter-"|cut -d '/' -f2`
-    if [ "$adapter_pod_name" = "" ]; then
-        echo -e "\n$(tput setaf 1)Error! Failed to get Federator.ai data adapter pod name!$(tput sgr 0)"
-        exit 2
-    fi
-    kubectl delete pod $adapter_pod_name -n $install_namespace
-    if [ "$?" != "0" ]; then
-        echo -e "\n$(tput setaf 1)Error! Failed to delete Federator.ai data adapter pod $adapter_pod_name$(tput sgr 0)"
-        exit 8
-    fi
-    wait_until_pods_ready $max_wait_pods_ready_time 30 $install_namespace 5
 }
 
 check_previous_alamedascaler()
@@ -1241,13 +1267,12 @@ if [ "$?" != "0" ]; then
     exit 8
 fi
 
+check_if_pod_match_expected_version "federatorai-operator" $max_wait_pods_ready_time 30 $install_namespace
+wait_until_single_pod_become_ready "federatorai-operator" $max_wait_pods_ready_time 30 $install_namespace
+
 if [ "$need_upgrade" != "y" ];then
-    wait_until_pods_ready $max_wait_pods_ready_time 30 $install_namespace 1
     echo -e "\n$(tput setaf 6)Install Federator.ai operator $tag_number successfully$(tput sgr 0)"
-else
-    # Upgrade
-    check_if_pod_match_expected_version "federatorai-operator" $max_wait_pods_ready_time 30 $install_namespace
-    wait_until_single_pod_become_ready "federatorai-operator" $max_wait_pods_ready_time 30 $install_namespace
+
 fi
 
 if [ "$ALAMEDASERVICE_FILE_PATH" = "" ]; then
@@ -1702,7 +1727,7 @@ fi
 
 echo "Processing..."
 check_if_pod_match_expected_version "datahub" $max_wait_pods_ready_time 60 $install_namespace
-wait_until_pods_ready $max_wait_pods_ready_time 60 $install_namespace 5
+wait_until_pods_ready $max_wait_pods_ready_time 60 $install_namespace 10
 wait_until_cr_ready $max_wait_pods_ready_time 60 $install_namespace
 
 if [ "$need_upgrade" = "y" ];then
