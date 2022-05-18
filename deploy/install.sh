@@ -38,12 +38,19 @@ pods_ready()
     [[ "$#" == 0 ]] && return 1
 
     namespace="$1"
-    pod_list=$(kubectl -n fed get pods -o name|cut -d '/' -f2)
+    pod_list=$(kubectl -n $namespace get pods -o name|cut -d '/' -f2)
     for pod_name in `echo "$pod_list"`
     do
-        echo $pod_check_list|grep -w -q "$pod_name"
-        if [ "$?" = "0" ];then
-            # Already in check list.
+        ele_found="n"
+        for inside_name in "${pod_check_list[@]}"
+        do
+            if [ "$inside_name" = "$pod_name" ]; then
+                ele_found="y"
+                break
+            fi
+        done
+        if [ "$ele_found" = "y" ];then
+            # Already in check list. Ignore owner checking
             continue
         fi
         res_kind=$(kubectl -n $namespace get pod $pod_name -o jsonpath='{.metadata.ownerReferences[0].kind}' 2>/dev/null)
@@ -55,22 +62,14 @@ pods_ready()
                 owner_reference_kind=$(kubectl -n $namespace get deploy $deploy_name -o jsonpath='{.metadata.ownerReferences[0].kind}' 2>/dev/null)
                 owner_reference_name=$(kubectl -n $namespace get deploy $deploy_name -o jsonpath='{.metadata.ownerReferences[0].name}' 2>/dev/null)
                 if [ "$owner_reference_kind" = "AlamedaService" ] && [ "$owner_reference_name" = "my-alamedaservice" ]; then
-                    # Add pod into check list if not already exist
-                    echo $pod_check_list|grep -w -q "$pod_name"
-                    if [ "$?" != "0" ];then
-                        pod_check_list+=( "$pod_name" )
-                    fi
+                    pod_check_list+=( "$pod_name" )
                 fi
             fi
         elif [ "$res_kind" = "StatefulSet" ]; then
             owner_reference_kind=$(kubectl -n $namespace get sts $res_name -o jsonpath='{.metadata.ownerReferences[0].kind}' 2>/dev/null)
             owner_reference_name=$(kubectl -n $namespace get sts $res_name -o jsonpath='{.metadata.ownerReferences[0].name}' 2>/dev/null)
             if [ "$owner_reference_kind" = "AlamedaService" ] && [ "$owner_reference_name" = "my-alamedaservice" ]; then
-                # Add pod into check list if not already exist
-                echo $pod_check_list|grep -w -q "$pod_name"
-                if [ "$?" != "0" ];then
-                    pod_check_list+=( "$pod_name" )
-                fi
+                pod_check_list+=( "$pod_name" )
             fi
         fi
     done
@@ -79,8 +78,15 @@ pods_ready()
         '-o=go-template={{range .items}}{{.metadata.name}}{{"\t"}}{{range .status.conditions}}{{if eq .type "Ready"}}{{.status}}{{"\t"}}{{end}}{{end}}{{.status.phase}}{{"\t"}}{{if .status.reason}}{{.status.reason}}{{end}}{{"\n"}}{{end}}' \
         | while read name_ status phase reason _junk; do
             if [ "$status" != "True" ]; then
-                echo $pod_check_list|grep -w -q "$name_"
-                if [ "$?" = "0" ];then
+                ele_found="n"
+                for inside_name in "${pod_check_list[@]}"
+                do
+                    if [ "$inside_name" = "$name_" ]; then
+                        ele_found="y"
+                        break
+                    fi
+                done
+                if [ "$ele_found" = "y" ];then
                     # Pod exist in check list, print wait msg
                     msg="Waiting for pod $name_ in namespace $namespace to be ready."
                     [ "$phase" != "" ] && msg="$msg phase: [$phase]"
