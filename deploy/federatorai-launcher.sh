@@ -51,10 +51,16 @@ get_build_tag()
         # Parse tag number from url
         tag_number="$(echo "$ECR_URL" |rev|cut -d':' -f1|rev)"
         url_minus_tag="$(echo "$ECR_URL" |rev|cut -d':' -f2-|rev)"
-        if [ "$tag_number" != "$default_tag" ]; then
-            if [ "$(verify_tag)" = "n" ]; then
-                echo -e "\n$(tput setaf 1)Error! Failed to parse valid version info from env variable ECR_URL ($ECR_URL).$(tput sgr 0)"
-                exit 3
+        if [ "$TEST_TAG" != "" ]; then
+            tag_number="$TEST_TAG"
+            pass="y"
+            SKIP_TAG_NUMBER_CHECK=1
+        else
+            if [ "$tag_number" != "$default_tag" ]; then
+                if [ "$(verify_tag)" = "n" ]; then
+                    echo -e "\n$(tput setaf 1)Error! Failed to parse valid version info from env variable ECR_URL ($ECR_URL).$(tput sgr 0)"
+                    exit 3
+                fi
             fi
         fi
     fi
