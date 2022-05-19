@@ -51,8 +51,8 @@ get_build_tag()
         # Parse tag number from url
         tag_number="$(echo "$ECR_URL" |rev|cut -d':' -f1|rev)"
         url_minus_tag="$(echo "$ECR_URL" |rev|cut -d':' -f2-|rev)"
-        if [ "$TEST_TAG" != "" ]; then
-            tag_number="$TEST_TAG"
+        if [ "$VERSION_TAG" != "" ]; then
+            tag_number="$VERSION_TAG"
             pass="y"
             SKIP_TAG_NUMBER_CHECK=1
         else
