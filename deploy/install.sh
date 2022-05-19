@@ -218,7 +218,7 @@ check_if_pod_match_expected_version()
     namespace="$4"
 
     for ((i=0; i<$period; i+=$interval)); do
-        current_tag="$(kubectl get pod -n $namespace -o custom-columns=NAME:.metadata.name,IMAGE:.spec.containers[*].image | grep "^${pod_name}" | awk '{print $2}'|tr "," "\n"|awk -F'/' '{print $NF}'|cut -d ':' -f2)"
+        current_tag="$(kubectl get pod -n $namespace -o custom-columns=NAME:.metadata.name,IMAGE:.spec.containers[*].image | grep "^${pod_name}" | awk '{print $2}'|tr "," "\n"|grep -v "federatorai-telemetry:"|egrep "alameda-|fedemeter-|federatorai-"|awk -F'/' '{print $NF}'|cut -d ':' -f2)"
         if [ "$current_tag" = "$tag_number" ]; then
             echo -e "\n$pod_name pod is present.\n"
             return 0
