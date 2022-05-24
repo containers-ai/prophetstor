@@ -1,1 +1,1 @@
-LATEST_TAG=v5.1.0-ga
+LATEST_TAG=v5.1.0-p1
