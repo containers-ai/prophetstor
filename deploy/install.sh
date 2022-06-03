@@ -379,9 +379,9 @@ get_grafana_route()
         link=`oc get route -n $1 2>/dev/null|grep "federatorai-dashboard-frontend"|awk '{print $2}'`
         if [ "$link" != "" ] ; then
         echo -e "\n========================================"
-        echo "You can now access GUI through $(tput setaf 6)https://${link} $(tput sgr 0)"
+        echo "You can now access GUI or REST through $(tput setaf 6)https://${link} $(tput sgr 0)"
         echo "The default login credential is $(tput setaf 6)admin/${default_password}$(tput sgr 0)"
-        echo -e "\n$(tput setaf 6)Review the administration guide for further details.$(tput sgr 0)"
+        echo -e "\n$(tput setaf 6)Review the administration guide for further details and the REST API online document can be found in https://${link}/apis/v1/swagger/index.html $(tput sgr 0)"
         echo "========================================"
         else
             echo "Warning! Failed to obtain grafana route address."
@@ -389,33 +389,9 @@ get_grafana_route()
     else
         if [ "$expose_service" = "y" ]; then
             echo -e "\n========================================"
-            echo "You can now access GUI through $(tput setaf 6)https://<YOUR IP>:$dashboard_frontend_node_port $(tput sgr 0)"
+            echo "You can now access GUI or REST through $(tput setaf 6)https://<YOUR IP>:$dashboard_frontend_node_port $(tput sgr 0)"
             echo "The default login credential is $(tput setaf 6)admin/${default_password}$(tput sgr 0)"
-            echo -e "\n$(tput setaf 6)Review the administration guide for further details.$(tput sgr 0)"
-            echo "========================================"
-        fi
-    fi
-}
-
-get_restapi_route()
-{
-    if [ "$openshift_minor_version" != "" ] ; then
-        link=`oc get route -n $1 2>/dev/null|grep "federatorai-rest" |awk '{print $2}'`
-        if [ "$link" != "" ] ; then
-        echo -e "\n========================================"
-        echo "You can now access Federatorai REST API through $(tput setaf 6)https://${link} $(tput sgr 0)"
-        echo "The default login credential is $(tput setaf 6)admin/${default_password}$(tput sgr 0)"
-        echo "The REST API online document can be found in $(tput setaf 6)https://${link}/apis/v1/swagger/index.html $(tput sgr 0)"
-        echo "========================================"
-        else
-            echo "Warning! Failed to obtain Federatorai REST API route address."
-        fi
-    else
-        if [ "$expose_service" = "y" ]; then
-            echo -e "\n========================================"
-            echo "You can now access Federatorai REST API through $(tput setaf 6)https://<YOUR IP>:$rest_api_node_port $(tput sgr 0)"
-            echo "The default login credential is $(tput setaf 6)admin/${default_password}$(tput sgr 0)"
-            echo "The REST API online document can be found in $(tput setaf 6)https://<YOUR IP>:$rest_api_node_port/apis/v1/swagger/index.html $(tput sgr 0)"
+            echo -e "\n$(tput setaf 6)Review the administration guide for further details and the REST API online document can be found in https://<YOUR IP>:$dashboard_frontend_node_port/apis/v1/swagger/index.html $(tput sgr 0)"
             echo "========================================"
         fi
     fi
@@ -520,21 +496,50 @@ backup_configuration()
         if [ "$ask_entrypoint" = "y" ]; then
             read -r -p "$(tput setaf 2)Please enter the entrypoint of Federator.ai dashboard? [e.g. https://172.31.3.41:31012] $(tput sgr 0)" dashboard_entrypoint </dev/tty
         fi
-        read -r -p "$(tput setaf 2)Please enter the dashboard login account: $(tput sgr 0) " login_account </dev/tty
-        read -s -p "$(tput setaf 2)Please enter the dashboard login password: $(tput sgr 0) " login_password </dev/tty
+        read -r -p "$(tput setaf 2)Please enter the REST API login account: $(tput sgr 0) " login_account </dev/tty
+        read -s -p "$(tput setaf 2)Please enter the REST API login password: $(tput sgr 0) " login_password </dev/tty
         echo
-        echo "Backup configuration..."
-        annotation="${previous_tag}-`date +%Y%m%d%H%M%S`"
-        full_v="${source_tag_first_digit}${source_tag_middle_digit}${source_tag_last_digit}"
-        if [ "0${full_v}" -ge "510" ]; then
-            bash $script_path --backup --url $dashboard_entrypoint --path $backup_path --annotation "$annotation" --user $login_account --password $login_password
-        else
-            bash $script_path -b -d $backup_path
-        fi
+        while [ "$key_pass" != "y" ]
+        do
+            read -s -p "$(tput setaf 2)Please enter a key for encrypting backup file (Press Enter to skip): $(tput sgr 0) " encryption_key </dev/tty
+            echo
+            if [ "$encryption_key" != "" ]; then
+                read -s -p "$(tput setaf 2)Please repeat the encryption key: $(tput sgr 0) " repeat_key </dev/tty
+                echo
+                if [ "$encryption_key" != "$repeat_key" ]; then
+                    echo -e "\n$(tput setaf 3)Warning! Enryption keys are not consistent.$(tput sgr 0)"
+                    key_pass="n"
+                else
+                    key_pass="y"
+                fi
+            else
+                # key is empty, exit
+                key_pass="y"
+            fi
+        done
 
-        if [ "$?" != "0" ]; then
+        echo "Backup configuration..."
+        if [ "$login_account" = "" ] || [ "$login_password" = "" ]; then
+            # Skip calling backup script, display warning directly.
             echo -e "\n$(tput setaf 1)Warning! Configuration backup failed.$(tput sgr 0)"
             ask_continue="y"
+        else
+            annotation="${previous_tag}-`date +%Y%m%d%H%M%S`"
+            full_v="${source_tag_first_digit}${source_tag_middle_digit}${source_tag_last_digit}"
+            if [ "0${full_v}" -ge "510" ]; then
+                if [ "$encryption_key" != "" ]; then
+                    bash $script_path --backup --url $dashboard_entrypoint --path $backup_path --annotation "$annotation" --user $login_account --password $login_password --encryption-key $encryption_key
+                else
+                    bash $script_path --backup --url $dashboard_entrypoint --path $backup_path --annotation "$annotation" --user $login_account --password $login_password
+                fi
+            else
+                bash $script_path -b -d $backup_path
+            fi
+
+            if [ "$?" != "0" ]; then
+                echo -e "\n$(tput setaf 1)Warning! Configuration backup failed.$(tput sgr 0)"
+                ask_continue="y"
+            fi
         fi
     fi
 
@@ -1784,7 +1789,6 @@ fi
 default_password=${default_password:-admin}
 
 get_grafana_route $install_namespace
-get_restapi_route $install_namespace
 echo -e "$(tput setaf 6)\nInstall Federator.ai $tag_number successfully$(tput sgr 0)"
 check_previous_alamedascaler
 ###Configure data source from GUI
