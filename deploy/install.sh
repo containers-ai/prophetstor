@@ -499,24 +499,28 @@ backup_configuration()
         read -r -p "$(tput setaf 2)Please enter the REST API login account: $(tput sgr 0) " login_account </dev/tty
         read -s -p "$(tput setaf 2)Please enter the REST API login password: $(tput sgr 0) " login_password </dev/tty
         echo
-        while [ "$key_pass" != "y" ]
-        do
-            read -s -p "$(tput setaf 2)Please enter a key for encrypting backup file (Press Enter to skip): $(tput sgr 0) " encryption_key </dev/tty
-            echo
-            if [ "$encryption_key" != "" ]; then
-                read -s -p "$(tput setaf 2)Please repeat the encryption key: $(tput sgr 0) " repeat_key </dev/tty
+        full_v="${source_tag_first_digit}${source_tag_middle_digit}${source_tag_last_digit}"
+        if [ "0${full_v}" -ge "511" ]; then
+            # Support encryption key function from version v5.1.1
+            while [ "$key_pass" != "y" ]
+            do
+                read -s -p "$(tput setaf 2)Please enter a key for encrypting backup file (Press Enter to skip): $(tput sgr 0) " encryption_key </dev/tty
                 echo
-                if [ "$encryption_key" != "$repeat_key" ]; then
-                    echo -e "\n$(tput setaf 3)Warning! Enryption keys are not consistent.$(tput sgr 0)"
-                    key_pass="n"
+                if [ "$encryption_key" != "" ]; then
+                    read -s -p "$(tput setaf 2)Please repeat the encryption key: $(tput sgr 0) " repeat_key </dev/tty
+                    echo
+                    if [ "$encryption_key" != "$repeat_key" ]; then
+                        echo -e "\n$(tput setaf 3)Warning! Enryption keys are not consistent.$(tput sgr 0)"
+                        key_pass="n"
+                    else
+                        key_pass="y"
+                    fi
                 else
+                    # key is empty, exit
                     key_pass="y"
                 fi
-            else
-                # key is empty, exit
-                key_pass="y"
-            fi
-        done
+            done
+        fi
 
         echo "Backup configuration..."
         if [ "$login_account" = "" ] || [ "$login_password" = "" ]; then
@@ -525,7 +529,6 @@ backup_configuration()
             ask_continue="y"
         else
             annotation="${previous_tag}-`date +%Y%m%d%H%M%S`"
-            full_v="${source_tag_first_digit}${source_tag_middle_digit}${source_tag_last_digit}"
             if [ "0${full_v}" -ge "510" ]; then
                 if [ "$encryption_key" != "" ]; then
                     bash $script_path --backup --url $dashboard_entrypoint --path $backup_path --annotation "$annotation" --user $login_account --password $login_password --encryption-key $encryption_key
