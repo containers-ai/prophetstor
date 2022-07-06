@@ -16,6 +16,8 @@ show_usage()
             [Optional]:
             --cluster-identifier "<Identify>"
             [e.g., --cluster-identifier "identifier inside double quotes"]
+            --encryption-key "<key>"
+            [e.g., --encryption-key "mySecurePhrase"]
 
         ii. Restore
             [Requirement]:
@@ -24,7 +26,12 @@ show_usage()
             --path <Restore file absolute path>
             [e.g., --path /opt/backup/f8ai-172.31.2.49-2022-03-30-08-55-33-766596203-5.1.0.bak]
 
+            [Optional]:
+            --encryption-key "<key>"
+            [e.g., --encryption-key "mySecurePhrase"]
+
         [Optional]:
+        --verbose
         # If user/password info isn't provided, program will run into interactive mode
         --user <account to login into REST API>              [e.g., --user admin]
         --password <pw>                                      [e.g., --password password]
@@ -41,15 +48,19 @@ wait_until_job_done()
 
     for ((i=0; i<$period; i+=$interval)); do
         if [ "$job" = "backup" ]; then
-            exec_cmd="curl -sS -k -X GET \"$api_url/apis/v1/configurations/backups/$job_id/progress\" -H \"accept: application/json\" -H \"Authorization: Bearer $access_token\""
+            exec_cmd="curl -sS -k -w \"\n%{http_code}\" -X GET \"$api_url/apis/v1/configurations/backups/$job_id/progress\" -H \"accept: application/json\" -H \"Authorization: Bearer $access_token\""
         else
-            exec_cmd="curl -sS -k -X GET \"$api_url/apis/v1/configurations/restores/$job_id/progress\" -H \"accept: application/json\" -H \"Authorization: Bearer $access_token\""
+            exec_cmd="curl -sS -k -w \"\n%{http_code}\" -X GET \"$api_url/apis/v1/configurations/restores/$job_id/progress\" -H \"accept: application/json\" -H \"Authorization: Bearer $access_token\""
         fi
-        rest_output=$(eval $exec_cmd)
+        output=$(eval $exec_cmd)
 
         if [ "$?" != "0" ]; then
             echo -e "\n$(tput setaf 1)Failed to get $job (id: $job_id) progress from REST API.$(tput sgr 0)"
             exit 3
+        fi
+        parse_output "$output"
+        if [ "$rest_code" != "200" ]; then
+            display_error_and_leave "Failed to get $job (id: $job_id) progress from REST API"
         fi
         progress=$(echo "$rest_output" | grep -o "\"progress\":[0-9]*"|cut -d ':' -f2)
         if [ "$progress" = "" ]; then
@@ -58,8 +69,14 @@ wait_until_job_done()
         fi
 
         if [ "$progress" = "100" ]; then
-            echo -e "$job (id: $job_id) is done."
             if [ "$job" = "backup" ]; then
+                encryption_done=$(echo "$rest_output" | grep -o "\"encryption_done\":[a-z]*"|cut -d ':' -f2)
+                if [ "$encryption_done" != "true" ]; then
+                    echo "Encryption not done yet. Waiting for $job to be ready..."
+                    sleep "$interval"
+                    continue
+                fi
+                echo -e "$job (id: $job_id) is done."
                 # Get file path
                 backup_file_name=$(echo "$rest_output"|grep -o "\"file_path\":\"[^\"]*\""|cut -d ':' -f2|sed 's/"//g'|awk -F'/' '{print $NF}')
                 if [ "$backup_file_name" = "" ]; then
@@ -88,6 +105,21 @@ prepare_folder(){
     fi
 }
 
+parse_output(){
+    out="$1"
+    rest_code=$(echo "$out"|tail -1)
+    rest_output=$(echo "$out"|sed '$d')
+}
+
+display_error_and_leave(){
+    msg="$1"
+    echo -e "\n$(tput setaf 1)${msg}. Return code = $rest_code$(tput sgr 0)"
+    if [ "$verbose" = "y" ]; then
+        echo -e "$rest_output"
+    fi
+    exit 3
+}
+
 get_login_token(){
     auth_string="${login_account}:${login_password}"
     auth_cipher=$(echo -n "$auth_string"|base64)
@@ -96,10 +128,14 @@ get_login_token(){
         exit 3
     fi
 
-    rest_output=$(curl -sS -k -X POST "$api_url/apis/v1/users/login" -H "accept: application/json" -H "authorization: Basic ${auth_cipher}")
+    output=$(curl -sS -k -w "\n%{http_code}" -X POST "$api_url/apis/v1/users/login" -H "accept: application/json" -H "authorization: Basic ${auth_cipher}")
     if [ "$?" != "0" ]; then
         echo -e "\n$(tput setaf 1)Failed to login to REST API.$(tput sgr 0)"
         exit 3
+    fi
+    parse_output "$output"
+    if [ "$rest_code" != "200" ]; then
+        display_error_and_leave "Failed to login to REST API"
     fi
     access_token="$(echo $rest_output|tr -d '\n'|grep -o "\"accessToken\":[^\"]*\"[^\"]*\""|sed -E 's/".*".*"(.*)"/\1/')"
     if [ "$access_token" = "null" ] || [ "$access_token" = "" ]; then
@@ -116,11 +152,15 @@ backup(){
     # Trigger backup job
     #
     echo "Starting backup job..."
-    exec_cmd="curl -sS -k -X PUT \"$api_url/apis/v1/configurations/backups\" -H \"accept: application/json\" -H \"Authorization: Bearer $access_token\" -H \"Content-Type: application/json\" -d \"{\\\"annotation\\\": \\\"$annotation\\\", \\\"cluster_identifier\\\": \\\"$cluster_identifier\\\", \\\"username\\\": \\\"$login_account\\\"}\""
-    rest_output=$(eval $exec_cmd)
+    exec_cmd="curl -sS -k -w \"\n%{http_code}\" -X PUT \"$api_url/apis/v1/configurations/backups\" -H \"accept: application/json\" -H \"Authorization: Bearer $access_token\" -H \"Content-Type: application/json\" -d \"{\\\"annotation\\\": \\\"$annotation\\\", \\\"cluster_identifier\\\": \\\"$cluster_identifier\\\", \\\"username\\\": \\\"$login_account\\\", \\\"enable_encryption\\\": $enable_encryption, \\\"encryption_key\\\": \\\"$encryption_key\\\"}\""
+    output=$(eval $exec_cmd)
     if [ "$?" != "0" ]; then
         echo -e "\n$(tput setaf 1)Failed to trigger backup job(Command: $exec_cmd)$(tput sgr 0)"
         exit 3
+    fi
+    parse_output "$output"
+    if [ "$rest_code" != "200" ]; then
+        display_error_and_leave "Failed to trigger backup job(Command: $exec_cmd)"
     fi
 
     backup_series_id=$(echo "$rest_output"|grep -o "backup-series-id\":\"[^\"]*\""|cut -d ':' -f2|sed 's/"//g')
@@ -135,23 +175,26 @@ backup(){
     # Download backup file
     #
     cd $specific_path
-    exec_cmd="curl -sS -k -X GET \"$api_url/apis/v1/configurations/backups/$backup_series_id/file\" -H \"accept: application/json\" -H \"Authorization: Bearer $access_token\" -o $backup_file_name"
-    rest_output=$(eval $exec_cmd)
+    exec_cmd="curl -sS -k -w \"\n%{http_code}\" -X GET \"$api_url/apis/v1/configurations/backups/$backup_series_id/file\" -H \"accept: application/json\" -H \"Authorization: Bearer $access_token\" -o $backup_file_name"
+    output=$(eval $exec_cmd)
     if [ "$?" != "0" ]; then
         echo -e "\n$(tput setaf 1)Error, Failed to download backup (id: $backup_series_id) file.$(tput sgr 0)"
         cd - > /dev/null
         exit 3
     fi
     cd - > /dev/null
-    #
-    # Verify backup file
-    #
-    sh $specific_path/$backup_file_name --check >/dev/null 2>&1
-    if [ "$?" != "0" ]; then
-        echo -e "\n$(tput setaf 1)Error, MD5 checksum verification is failed (file: $specific_path/$backup_file_name).$(tput sgr 0)"
-        exit 3
+    parse_output "$output"
+    if [ "$rest_code" != "200" ]; then
+        display_error_and_leave "Failed to download backup (id: $backup_series_id) file"
     fi
-
+    if [ "$enable_encryption" = "false" ]; then
+        # No encryption, backup file will have check feature.
+        sh $specific_path/$backup_file_name --check >/dev/null 2>&1
+        if [ "$?" != "0" ]; then
+            echo -e "\n$(tput setaf 1)Error, MD5 checksum verification is failed (file: $specific_path/$backup_file_name).$(tput sgr 0)"
+            exit 3
+        fi
+    fi
     echo -e "\n$(tput setaf 6)Backup Federator.ai successfully. (File: $specific_path/$backup_file_name)$(tput sgr 0)"
 }
 
@@ -159,23 +202,40 @@ restore(){
     get_login_token
     echo "Starting restore job..."
     file_name=$(echo $specific_path|awk -F'/' '{print $NF}')
+
+    # No encryption, backup file will have check feature.
+    if [ "$enable_encryption" = "false" ]; then
+        sh $specific_path --check >/dev/null 2>&1
+        if [ "$?" != "0" ]; then
+            echo -e "\n$(tput setaf 1)Error, MD5 checksum verification is failed (file: $specific_path).$(tput sgr 0)"
+            exit 3
+        fi
+    fi
     #
     # Upload backup file
     #
-    exec_cmd="curl -sS -k -X POST \"$api_url/apis/v1/configurations/restores\" -H \"accept: application/json\" -H \"Authorization: Bearer $access_token\" -H \"Content-Type: multipart/form-data\" -F \"file=@$specific_path\""
-    rest_output=$(eval $exec_cmd)
+    exec_cmd="curl -sS -k -w \"\n%{http_code}\" -X POST \"$api_url/apis/v1/configurations/restores\" -H \"accept: application/json\" -H \"Authorization: Bearer $access_token\" -H \"Content-Type: multipart/form-data\" -F \"file=@$specific_path\" -F \"enable_encryption=$enable_encryption\" -F \"encryption_key=$encryption_key\""
+    output=$(eval $exec_cmd)
     if [ "$?" != "0" ]; then
         echo -e "\n$(tput setaf 1)Error, Failed to upload backup file ($specific_path).$(tput sgr 0)"
         exit 3
     fi
+    parse_output "$output"
+    if [ "$rest_code" != "200" ]; then
+        display_error_and_leave "Failed to upload backup file ($specific_path)"
+    fi
     #
     # Trigger restore
     #
-    exec_cmd="curl -sS -k -X PUT \"$api_url/apis/v1/configurations/restores\" -H \"accept: application/json\" -H \"Authorization: Bearer $access_token\" -H \"Content-Type: application/json\" -d \"{\\\"file_name\\\": \\\"$file_name\\\"}\""
-    rest_output=$(eval $exec_cmd)
+    exec_cmd="curl -sS -k -w \"\n%{http_code}\" -X PUT \"$api_url/apis/v1/configurations/restores\" -H \"accept: application/json\" -H \"Authorization: Bearer $access_token\" -H \"Content-Type: application/json\" -d \"{\\\"file_name\\\": \\\"$file_name\\\"}\""
+    output=$(eval $exec_cmd)
     if [ "$?" != "0" ]; then
         echo -e "\n$(tput setaf 1)Error, Failed to trigger restore job.$(tput sgr 0)"
         exit 3
+    fi
+    parse_output "$output"
+    if [ "$rest_code" != "200" ]; then
+        display_error_and_leave "Failed to trigger restore job"
     fi
     restore_series_id=$(echo "$rest_output"|grep -o "\"restore-series-id\":\"[^\"]*\""|cut -d ':' -f2|sed 's/"//g')
     if [ "$restore_series_id" = "" ]; then
@@ -183,7 +243,7 @@ restore(){
         exit 3
     fi
 
-    echo "Waiting for REST API respond..."
+    echo "Waiting for REST API response..."
     sleep 30
     response="n"
     for i in `seq 1 29`
@@ -225,6 +285,12 @@ if [ "$?" != "0" ];then
     exit 3
 fi
 
+type sed > /dev/null 2>&1
+if [ "$?" != "0" ];then
+    echo -e "\n$(tput setaf 1)sed command is needed for this tool.$(tput sgr 0)"
+    exit 3
+fi
+
 while getopts "h-:" o; do
     case "${o}" in
         -)
@@ -253,6 +319,14 @@ while getopts "h-:" o; do
                         exit 3
                     fi
                     ;;
+                encryption-key)
+                    encryption_key="${!OPTIND}"; OPTIND=$(( $OPTIND + 1 ))
+                    if [ "$encryption_key" = "" ]; then
+                        echo -e "\n$(tput setaf 1)Missing --${OPTARG} value.$(tput sgr 0)"
+                        show_usage
+                        exit 3
+                    fi
+                    ;;
                 annotation)
                     annotation="${!OPTIND}"; OPTIND=$(( $OPTIND + 1 ))
                     if [ "$annotation" = "" ]; then
@@ -276,6 +350,9 @@ while getopts "h-:" o; do
                         show_usage
                         exit 3
                     fi
+                    ;;
+                verbose)
+                    verbose="y"
                     ;;
                 backup)
                     do_backup="y"
@@ -337,11 +414,6 @@ if [ "$do_restore" = "y" ]; then
       echo -e "\n$(tput setaf 1)Error! Restore file doesn't exist.$(tput sgr 0)"
       exit 1
     fi
-    sh $specific_path --check >/dev/null 2>&1
-    if [ "$?" != "0" ]; then
-        echo -e "\n$(tput setaf 1)Error, MD5 checksum verification is failed (file: $specific_path).$(tput sgr 0)"
-        exit 3
-    fi
 fi
 
 if [ "$api_url" = "" ]; then
@@ -371,6 +443,12 @@ fi
 if [ "$login_password" = "" ]; then
     read -s -p "$(tput setaf 2)Please enter the REST API login password: $(tput sgr 0) " login_password </dev/tty
     echo
+fi
+
+if [ "$encryption_key" = "" ]; then
+    enable_encryption="false"
+else
+    enable_encryption="true"
 fi
 
 if [ "$do_backup" = "y" ]; then
