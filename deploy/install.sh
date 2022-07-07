@@ -510,7 +510,7 @@ backup_configuration()
                     read -s -p "$(tput setaf 2)Please repeat the encryption key: $(tput sgr 0) " repeat_key </dev/tty
                     echo
                     if [ "$encryption_key" != "$repeat_key" ]; then
-                        echo -e "\n$(tput setaf 3)Warning! Enryption keys are not consistent.$(tput sgr 0)"
+                        echo -e "\n$(tput setaf 3)Warning! Encryption keys are not consistent.$(tput sgr 0)"
                         key_pass="n"
                     else
                         key_pass="y"
