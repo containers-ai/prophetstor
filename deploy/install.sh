@@ -35,22 +35,69 @@
 
 pods_ready()
 {
-  [[ "$#" == 0 ]] && return 0
+    [[ "$#" == 0 ]] && return 1
 
-  namespace="$1"
-  kubectl get pod -n $namespace \
-    '-o=go-template={{range .items}}{{.metadata.name}}{{"\t"}}{{range .status.conditions}}{{if eq .type "Ready"}}{{.status}}{{"\t"}}{{end}}{{end}}{{.status.phase}}{{"\t"}}{{if .status.reason}}{{.status.reason}}{{end}}{{"\n"}}{{end}}' \
-      | while read name status phase reason _junk; do
-          if [ "$status" != "True" ]; then
-            msg="Waiting for pod $name in namespace $namespace to be ready."
-            [ "$phase" != "" ] && msg="$msg phase: [$phase]"
-            [ "$reason" != "" ] && msg="$msg reason: [$reason]"
-            echo "$msg"
-            return 1
-          fi
-        done || return 1
+    namespace="$1"
+    pod_list=$(kubectl -n $namespace get pods -o name|cut -d '/' -f2)
+    for pod_name in `echo "$pod_list"`
+    do
+        ele_found="n"
+        for inside_name in "${pod_check_list[@]}"
+        do
+            if [ "$inside_name" = "$pod_name" ]; then
+                ele_found="y"
+                break
+            fi
+        done
+        if [ "$ele_found" = "y" ];then
+            # Already in check list. Ignore owner checking
+            continue
+        fi
+        res_kind=$(kubectl -n $namespace get pod $pod_name -o jsonpath='{.metadata.ownerReferences[0].kind}' 2>/dev/null)
+        res_name=$(kubectl -n $namespace get pod $pod_name -o jsonpath='{.metadata.ownerReferences[0].name}' 2>/dev/null)
+        if [ "$res_kind" = "ReplicaSet" ]; then
+            deploy_kind=$(kubectl -n $namespace get rs $res_name -o jsonpath='{.metadata.ownerReferences[0].kind}' 2>/dev/null)
+            deploy_name=$(kubectl -n $namespace get rs $res_name -o jsonpath='{.metadata.ownerReferences[0].name}' 2>/dev/null)
+            if [ "$deploy_kind" = "Deployment" ]; then
+                owner_reference_kind=$(kubectl -n $namespace get deploy $deploy_name -o jsonpath='{.metadata.ownerReferences[0].kind}' 2>/dev/null)
+                owner_reference_name=$(kubectl -n $namespace get deploy $deploy_name -o jsonpath='{.metadata.ownerReferences[0].name}' 2>/dev/null)
+                if [ "$owner_reference_kind" = "AlamedaService" ] && [ "$owner_reference_name" = "my-alamedaservice" ]; then
+                    pod_check_list+=( "$pod_name" )
+                fi
+            fi
+        elif [ "$res_kind" = "StatefulSet" ]; then
+            owner_reference_kind=$(kubectl -n $namespace get sts $res_name -o jsonpath='{.metadata.ownerReferences[0].kind}' 2>/dev/null)
+            owner_reference_name=$(kubectl -n $namespace get sts $res_name -o jsonpath='{.metadata.ownerReferences[0].name}' 2>/dev/null)
+            if [ "$owner_reference_kind" = "AlamedaService" ] && [ "$owner_reference_name" = "my-alamedaservice" ]; then
+                pod_check_list+=( "$pod_name" )
+            fi
+        fi
+    done
 
-  return 0
+    kubectl get pod -n $namespace \
+        '-o=go-template={{range .items}}{{.metadata.name}}{{"\t"}}{{range .status.conditions}}{{if eq .type "Ready"}}{{.status}}{{"\t"}}{{end}}{{end}}{{.status.phase}}{{"\t"}}{{if .status.reason}}{{.status.reason}}{{end}}{{"\n"}}{{end}}' \
+        | while read name_ status phase reason _junk; do
+            if [ "$status" != "True" ]; then
+                ele_found="n"
+                for inside_name in "${pod_check_list[@]}"
+                do
+                    if [ "$inside_name" = "$name_" ]; then
+                        ele_found="y"
+                        break
+                    fi
+                done
+                if [ "$ele_found" = "y" ];then
+                    # Pod exist in check list, print wait msg
+                    msg="Waiting for pod $name_ in namespace $namespace to be ready."
+                    [ "$phase" != "" ] && msg="$msg phase: [$phase]"
+                    [ "$reason" != "" ] && msg="$msg reason: [$reason]"
+                    echo "$msg"
+                    return 1
+                fi
+            fi
+            done || return 1
+
+    return 0
 }
 
 leave_prog()
@@ -171,7 +218,7 @@ check_if_pod_match_expected_version()
     namespace="$4"
 
     for ((i=0; i<$period; i+=$interval)); do
-        current_tag="$(kubectl get pod -n $namespace -o custom-columns=NAME:.metadata.name,IMAGE:.spec.containers[*].image | grep "$pod_name" | awk '{print $2}'|tr "," "\n"|grep "$pod_name" |awk -F'/' '{print $NF}'|cut -d ':' -f2)"
+        current_tag="$(kubectl get pod -n $namespace -o custom-columns=NAME:.metadata.name,IMAGE:.spec.containers[*].image | grep "^${pod_name}" | awk '{print $2}'|tr "," "\n"|grep -v "federatorai-telemetry:"|egrep "alameda-|fedemeter-|federatorai-|federator-ai"|awk -F'/' '{print $NF}'|cut -d ':' -f2)"
         if [ "$current_tag" = "$tag_number" ]; then
             echo -e "\n$pod_name pod is present.\n"
             return 0
@@ -269,7 +316,7 @@ wait_until_pods_ready()
   interval="$2"
   namespace="$3"
   target_pod_number="$4"
-
+  pod_check_list=()
   wait_pod_creating=1
   for ((i=0; i<$period; i+=$interval)); do
 
@@ -277,7 +324,7 @@ wait_until_pods_ready()
         # check if pods created
         if [[ "`kubectl get po -n $namespace 2>/dev/null|wc -l`" -ge "$target_pod_number" ]]; then
             wait_pod_creating=0
-            echo -e "\nChecking pods..."
+            echo -e "Checking pods..."
         else
             echo "Waiting for pods in namespace $namespace to be created..."
         fi
@@ -332,9 +379,9 @@ get_grafana_route()
         link=`oc get route -n $1 2>/dev/null|grep "federatorai-dashboard-frontend"|awk '{print $2}'`
         if [ "$link" != "" ] ; then
         echo -e "\n========================================"
-        echo "You can now access GUI through $(tput setaf 6)https://${link} $(tput sgr 0)"
+        echo "You can now access GUI or REST through $(tput setaf 6)https://${link} $(tput sgr 0)"
         echo "The default login credential is $(tput setaf 6)admin/${default_password}$(tput sgr 0)"
-        echo -e "\n$(tput setaf 6)Review the administration guide for further details.$(tput sgr 0)"
+        echo -e "\n$(tput setaf 6)Review the administration guide for further details and the REST API online document can be found in https://${link}/apis/v1/swagger/index.html $(tput sgr 0)"
         echo "========================================"
         else
             echo "Warning! Failed to obtain grafana route address."
@@ -342,51 +389,12 @@ get_grafana_route()
     else
         if [ "$expose_service" = "y" ]; then
             echo -e "\n========================================"
-            echo "You can now access GUI through $(tput setaf 6)https://<YOUR IP>:$dashboard_frontend_node_port $(tput sgr 0)"
+            echo "You can now access GUI or REST through $(tput setaf 6)https://<YOUR IP>:$dashboard_frontend_node_port $(tput sgr 0)"
             echo "The default login credential is $(tput setaf 6)admin/${default_password}$(tput sgr 0)"
-            echo -e "\n$(tput setaf 6)Review the administration guide for further details.$(tput sgr 0)"
+            echo -e "\n$(tput setaf 6)Review the administration guide for further details and the REST API online document can be found in https://<YOUR IP>:$dashboard_frontend_node_port/apis/v1/swagger/index.html $(tput sgr 0)"
             echo "========================================"
         fi
     fi
-}
-
-get_restapi_route()
-{
-    if [ "$openshift_minor_version" != "" ] ; then
-        link=`oc get route -n $1 2>/dev/null|grep "federatorai-rest" |awk '{print $2}'`
-        if [ "$link" != "" ] ; then
-        echo -e "\n========================================"
-        echo "You can now access Federatorai REST API through $(tput setaf 6)https://${link} $(tput sgr 0)"
-        echo "The default login credential is $(tput setaf 6)admin/${default_password}$(tput sgr 0)"
-        echo "The REST API online document can be found in $(tput setaf 6)https://${link}/apis/v1/swagger/index.html $(tput sgr 0)"
-        echo "========================================"
-        else
-            echo "Warning! Failed to obtain Federatorai REST API route address."
-        fi
-    else
-        if [ "$expose_service" = "y" ]; then
-            echo -e "\n========================================"
-            echo "You can now access Federatorai REST API through $(tput setaf 6)https://<YOUR IP>:$rest_api_node_port $(tput sgr 0)"
-            echo "The default login credential is $(tput setaf 6)admin/${default_password}$(tput sgr 0)"
-            echo "The REST API online document can be found in $(tput setaf 6)https://<YOUR IP>:$rest_api_node_port/apis/v1/swagger/index.html $(tput sgr 0)"
-            echo "========================================"
-        fi
-    fi
-}
-
-restart_data_adapter_pod()
-{
-    adapter_pod_name=`kubectl get pods -n $install_namespace -o name |grep "federatorai-data-adapter-"|cut -d '/' -f2`
-    if [ "$adapter_pod_name" = "" ]; then
-        echo -e "\n$(tput setaf 1)Error! Failed to get Federator.ai data adapter pod name!$(tput sgr 0)"
-        exit 2
-    fi
-    kubectl delete pod $adapter_pod_name -n $install_namespace
-    if [ "$?" != "0" ]; then
-        echo -e "\n$(tput setaf 1)Error! Failed to delete Federator.ai data adapter pod $adapter_pod_name$(tput sgr 0)"
-        exit 8
-    fi
-    wait_until_pods_ready $max_wait_pods_ready_time 30 $install_namespace 5
 }
 
 check_previous_alamedascaler()
@@ -488,21 +496,53 @@ backup_configuration()
         if [ "$ask_entrypoint" = "y" ]; then
             read -r -p "$(tput setaf 2)Please enter the entrypoint of Federator.ai dashboard? [e.g. https://172.31.3.41:31012] $(tput sgr 0)" dashboard_entrypoint </dev/tty
         fi
-        read -r -p "$(tput setaf 2)Please enter the dashboard login account: $(tput sgr 0) " login_account </dev/tty
-        read -s -p "$(tput setaf 2)Please enter the dashboard login password: $(tput sgr 0) " login_password </dev/tty
+        read -r -p "$(tput setaf 2)Please enter the REST API login account: $(tput sgr 0) " login_account </dev/tty
+        read -s -p "$(tput setaf 2)Please enter the REST API login password: $(tput sgr 0) " login_password </dev/tty
         echo
-        echo "Backup configuration..."
-        annotation="${previous_tag}-`date +%Y%m%d%H%M%S`"
         full_v="${source_tag_first_digit}${source_tag_middle_digit}${source_tag_last_digit}"
-        if [ "0${full_v}" -ge "510" ]; then
-            bash $script_path --backup --url $dashboard_entrypoint --path $backup_path --annotation "$annotation" --user $login_account --password $login_password
-        else
-            bash $script_path -b -d $backup_path
+        if [ "0${full_v}" -ge "511" ]; then
+            # Support encryption key function from version v5.1.1
+            while [ "$key_pass" != "y" ]
+            do
+                read -s -p "$(tput setaf 2)Please enter a key for encrypting backup file (Press Enter to skip): $(tput sgr 0) " encryption_key </dev/tty
+                echo
+                if [ "$encryption_key" != "" ]; then
+                    read -s -p "$(tput setaf 2)Please repeat the encryption key: $(tput sgr 0) " repeat_key </dev/tty
+                    echo
+                    if [ "$encryption_key" != "$repeat_key" ]; then
+                        echo -e "\n$(tput setaf 3)Warning! Encryption keys are not consistent.$(tput sgr 0)"
+                        key_pass="n"
+                    else
+                        key_pass="y"
+                    fi
+                else
+                    # key is empty, exit
+                    key_pass="y"
+                fi
+            done
         fi
 
-        if [ "$?" != "0" ]; then
+        echo "Backup configuration..."
+        if [ "$login_account" = "" ] || [ "$login_password" = "" ]; then
+            # Skip calling backup script, display warning directly.
             echo -e "\n$(tput setaf 1)Warning! Configuration backup failed.$(tput sgr 0)"
             ask_continue="y"
+        else
+            annotation="${previous_tag}-`date +%Y%m%d%H%M%S`"
+            if [ "0${full_v}" -ge "510" ]; then
+                if [ "$encryption_key" != "" ]; then
+                    bash $script_path --backup --url $dashboard_entrypoint --path $backup_path --annotation "$annotation" --user $login_account --password $login_password --encryption-key $encryption_key
+                else
+                    bash $script_path --backup --url $dashboard_entrypoint --path $backup_path --annotation "$annotation" --user $login_account --password $login_password
+                fi
+            else
+                bash $script_path -b -d $backup_path
+            fi
+
+            if [ "$?" != "0" ]; then
+                echo -e "\n$(tput setaf 1)Warning! Configuration backup failed.$(tput sgr 0)"
+                ask_continue="y"
+            fi
         fi
     fi
 
@@ -1241,13 +1281,12 @@ if [ "$?" != "0" ]; then
     exit 8
 fi
 
+check_if_pod_match_expected_version "federatorai-operator" $max_wait_pods_ready_time 30 $install_namespace
+wait_until_single_pod_become_ready "federatorai-operator" $max_wait_pods_ready_time 30 $install_namespace
+
 if [ "$need_upgrade" != "y" ];then
-    wait_until_pods_ready $max_wait_pods_ready_time 30 $install_namespace 1
     echo -e "\n$(tput setaf 6)Install Federator.ai operator $tag_number successfully$(tput sgr 0)"
-else
-    # Upgrade
-    check_if_pod_match_expected_version "federatorai-operator" $max_wait_pods_ready_time 30 $install_namespace
-    wait_until_single_pod_become_ready "federatorai-operator" $max_wait_pods_ready_time 30 $install_namespace
+
 fi
 
 if [ "$ALAMEDASERVICE_FILE_PATH" = "" ]; then
@@ -1260,7 +1299,7 @@ if [ "$ALAMEDASERVICE_FILE_PATH" = "" ]; then
         # Offline Mode
         # Copy CR yamls
         echo "Copying Federator.ai CR yamls ..."
-        if [[ "`ls ${script_located_path}/../yamls/alameda*.yaml 2>/dev/null|wc -l`" -lt "4" ]]; then
+        if [[ "`ls ${script_located_path}/../yamls/alameda*.yaml 2>/dev/null|wc -l`" -lt "1" ]]; then
             echo -e "\n$(tput setaf 1)Error! Failed to locate Federator.ai CR yaml files$(tput sgr 0)"
             echo "Please make sure you extract the offline install package and execute install.sh under scripts folder  "
             exit 1
@@ -1701,8 +1740,8 @@ else
 fi
 
 echo "Processing..."
-check_if_pod_match_expected_version "datahub" $max_wait_pods_ready_time 60 $install_namespace
-wait_until_pods_ready $max_wait_pods_ready_time 60 $install_namespace 5
+check_if_pod_match_expected_version "alameda-datahub" $max_wait_pods_ready_time 60 $install_namespace
+wait_until_pods_ready $max_wait_pods_ready_time 60 $install_namespace 10
 wait_until_cr_ready $max_wait_pods_ready_time 60 $install_namespace
 
 if [ "$need_upgrade" = "y" ];then
@@ -1753,7 +1792,6 @@ fi
 default_password=${default_password:-admin}
 
 get_grafana_route $install_namespace
-get_restapi_route $install_namespace
 echo -e "$(tput setaf 6)\nInstall Federator.ai $tag_number successfully$(tput sgr 0)"
 check_previous_alamedascaler
 ###Configure data source from GUI

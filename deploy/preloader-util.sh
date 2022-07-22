@@ -671,7 +671,7 @@ alamedaservice_set_component_env()
 patch_agent_for_preloader()
 {
     local _mode="$1"
-    local _period="@every 10m"
+    local _period="*/10 * * * *"  # every 10 mins
 
     start=`date +%s`
     [ "${_mode}" = "true" ] && echo -e "\n$(tput setaf 6)Updating Agent to compute monthly/weekly cost recommendation every `echo ${_period} | sed -e 's/@every //g'` for preloader...$(tput sgr 0)"
@@ -680,7 +680,11 @@ patch_agent_for_preloader()
     wait_until_pods_ready 600 30 $install_namespace
 
     flag_updated="n"
-    for key in FEDERATORAI_AGENT_INPUT_JOBS_COST_ANALYSIS_HIGH_MONTHLY_SCHEDULE_SPEC FEDERATORAI_AGENT_INPUT_JOBS_COST_ANALYSIS_HIGH_WEEKLY_SCHEDULE_SPEC; do
+    for key in FEDERATORAI_AGENT_INPUT_JOBS_COST_ANALYSIS_NORMAL_DAILY_SCHEDULE_SPEC \
+               FEDERATORAI_AGENT_INPUT_JOBS_COST_ANALYSIS_NORMAL_WEEKLY_SCHEDULE_SPEC \
+               FEDERATORAI_AGENT_INPUT_JOBS_COST_ANALYSIS_NORMAL_MONTHLY_SCHEDULE_SPEC \
+               FEDERATORAI_AGENT_INPUT_JOBS_COST_ANALYSIS_NORMAL_YEARLY_SCHEDULE_SPEC \
+               FEDERATORAI_AGENT_INPUT_JOBS_COST_ANALYSIS_HIGH_RECOMMENDATION_SCHEDULE_SPEC; do
         if [ "${_mode}" = "true" ]; then
             alamedaservice_set_component_env federatoraiAgent ${key} "${_period}"
         else
@@ -708,7 +712,10 @@ patch_ai_dispatcher_for_preloader()
 
     flag_updated="n"
     # To shorten CI running time, need to compute prediction in shorter time for different intervals
-    for key in ALAMEDA_AI_DISPATCHER_JOB_INTERVAL_DAILY ALAMEDA_AI_DISPATCHER_JOB_INTERVAL_WEEKLY ALAMEDA_AI_DISPATCHER_JOB_INTERVAL_MONTHLY; do
+    for key in ALAMEDA_AI_DISPATCHER_JOB_INTERVAL_DAILY \
+               ALAMEDA_AI_DISPATCHER_JOB_INTERVAL_WEEKLY \
+               ALAMEDA_AI_DISPATCHER_JOB_INTERVAL_MONTHLY \
+               ALAMEDA_AI_DISPATCHER_JOB_INTERVAL_YEARLY; do
         if [ "${_mode}" = "true" ]; then
             alamedaservice_set_component_env alameda-dispatcher ${key} "${_period}"
         else
