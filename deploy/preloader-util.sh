@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+#
+# Need use bash to run this script
+if [ "${BASH_VERSION}" = '' ]; then
+    /bin/echo -e "\n[Error] Please use bash to run this script.\n"
+    exit 1
+fi
 
 show_usage()
 {

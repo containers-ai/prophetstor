@@ -19,7 +19,6 @@
     - "{{ cr_files }}"
     - "{{ alamedascaler_sample_file }}"
     - "{{ scaler_pool }}"
-    - "{{ rest_api_node_port }}"
     - "{{ dashboard_frontend_node_port }}"
     - "{{ data_adapter_deploy_name }}"
     - "{{ default_cluster_alamedascaler_name }}"

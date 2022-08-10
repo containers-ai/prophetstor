@@ -11,7 +11,6 @@ scaler_pool:
  - "nginx"
  - "redis"
 
-rest_api_node_port: "31011"
 dashboard_frontend_node_port: "31012"
 
 data_adapter_deploy_name: "federatorai-data-adapter"

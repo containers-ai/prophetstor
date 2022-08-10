@@ -2,7 +2,7 @@
 
 #=========================== target config info start =========================
 target_config_info='{
-  "rest_api_url": "https://172.31.2.41:31011",
+  "rest_api_url": "https://172.31.2.41:31012",
   "login_account": "",
   "login_password": "",
   "resource_type": "controller", # controller or namespace or application
