@@ -32,6 +32,11 @@
 #   --cluster <space> AWS EKS cluster name
 #   --region <space> AWS region
 #################################################################################################################
+# Need use bash to run this script
+if [ "${BASH_VERSION}" = '' ]; then
+    /bin/echo -e "\n[Error] Please use bash to run this script.\n"
+    exit 1
+fi
 
 pods_ready()
 {
@@ -1420,7 +1425,7 @@ if [ "$ALAMEDASERVICE_FILE_PATH" = "" ]; then
     fi
 
     #grafana_node_port="31010"
-    rest_api_node_port="31011"
+
     dashboard_frontend_node_port="31012"
 
     if [ "$need_upgrade" != "y" ]; then
@@ -1483,12 +1488,6 @@ __EOF__
         ports:
           - nodePort: ${dashboard_frontend_node_port}
             port: 9001
-      type: NodePort
-    - name: federatorai-rest
-      nodePort:
-        ports:
-          - nodePort: ${rest_api_node_port}
-            port: 5056
       type: NodePort
 __EOF__
             fi
