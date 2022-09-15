@@ -860,7 +860,6 @@ check_federatorai_cluster_type()
     resp=$(fedai_rest_get /apis/v1/resources/clusters)
     # Retry until cluster become active, REST will response also the inactive-clusters
     for i in `seq 1 12`; do
-        resp='{"data":[]}'
         [ "`echo \"${resp}\" | jq '.data'`" != "[]" ] && break
         sleep 10
         resp=$(fedai_rest_get /apis/v1/resources/clusters)
