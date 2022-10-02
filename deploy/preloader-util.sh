@@ -581,6 +581,7 @@ scale_up_pods()
     if [ "`kubectl get deploy fedemeter-api -n $install_namespace -o jsonpath='{.spec.replicas}'`" -eq "0" ]; then
         kubectl patch deployment fedemeter-api -n $install_namespace -p '{"spec":{"replicas": 1}}'
         do_something="y"
+    fi
 
     if [ "$do_something" = "y" ]; then
         wait_until_pods_ready 600 30 $install_namespace
