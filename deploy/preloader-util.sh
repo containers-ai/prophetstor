@@ -1,10 +1,4 @@
 #!/usr/bin/env bash
-#
-# Need use bash to run this script
-if [ "${BASH_VERSION}" = '' ]; then
-    /bin/echo -e "\n[Error] Please use bash to run this script.\n"
-    exit 1
-fi
 
 show_usage()
 {
@@ -531,8 +525,6 @@ scale_down_pods()
     kubectl patch deployment $restart_recommender_deploy -n $install_namespace -p '{"spec":{"replicas": 0}}'
     kubectl patch deployment federatorai-dashboard-backend -n $install_namespace -p '{"spec":{"replicas": 0}}'
     kubectl patch deployment federatorai-dashboard-frontend -n $install_namespace -p '{"spec":{"replicas": 0}}'
-    kubectl patch deployment federatorai-agent -n $install_namespace -p '{"spec":{"replicas": 0}}'
-    kubectl patch deployment fedemeter-api -n $install_namespace -p '{"spec":{"replicas": 0}}'
     echo "Done"
 }
 
@@ -570,16 +562,6 @@ scale_up_pods()
 
     if [ "`kubectl get deploy federatorai-dashboard-frontend -n $install_namespace -o jsonpath='{.spec.replicas}'`" -eq "0" ]; then
         kubectl patch deployment federatorai-dashboard-frontend -n $install_namespace -p '{"spec":{"replicas": 1}}'
-        do_something="y"
-    fi
-
-    if [ "`kubectl get deploy federatorai-agent -n $install_namespace -o jsonpath='{.spec.replicas}'`" -eq "0" ]; then
-        kubectl patch deployment federatorai-agent -n $install_namespace -p '{"spec":{"replicas": 1}}'
-        do_something="y"
-    fi
-
-    if [ "`kubectl get deploy fedemeter-api -n $install_namespace -o jsonpath='{.spec.replicas}'`" -eq "0" ]; then
-        kubectl patch deployment fedemeter-api -n $install_namespace -p '{"spec":{"replicas": 1}}'
         do_something="y"
     fi
 
@@ -872,6 +854,7 @@ check_federatorai_cluster_type()
     resp=$(fedai_rest_get /apis/v1/resources/clusters)
     # Retry until cluster become active, REST will response also the inactive-clusters
     for i in `seq 1 12`; do
+        resp='{"data":[]}'
         [ "`echo \"${resp}\" | jq '.data'`" != "[]" ] && break
         sleep 10
         resp=$(fedai_rest_get /apis/v1/resources/clusters)

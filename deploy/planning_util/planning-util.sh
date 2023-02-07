@@ -2,7 +2,7 @@
 
 #=========================== target config info start =========================
 target_config_info='{
-  "rest_api_url": "https://172.31.2.41:31012",
+  "rest_api_url": "https://172.31.2.41:31011",
   "login_account": "",
   "login_password": "",
   "resource_type": "controller", # controller or namespace or application
@@ -286,8 +286,14 @@ rest_api_login()
             show_error "Failed to get login password from target_config_info." $err_code
             exit $err_code
         fi
-        data="{\"username\":\"${login_account}\", \"password\":\"${login_password}\"}"
-        rest_output=$(curl -sS -k -X POST "$api_url/apis/v1/users/login" -H "accept: application/json" -d "${data}")
+        auth_string="${login_account}:${login_password}"
+        auth_cipher=$(echo -n "$auth_string"|base64)
+        if [ "$auth_cipher" = "" ]; then
+            err_code="2"
+            show_error "Failed to encode login string using base64 command." $err_code
+            exit $err_code
+        fi
+        rest_output=$(curl -sS -k -X POST "$api_url/apis/v1/users/login" -H "accept: application/json" -H "authorization: Basic ${auth_cipher}")
         if [ "$?" != "0" ]; then
             err_code="3"
             show_error "Failed to connect to REST API service ($api_url/apis/v1/users/login)" $err_code
