@@ -341,50 +341,32 @@ wait_for_cluster_status_data_ready()
 
 refine_preloader_variables_with_alamedaservice()
 {
-    ## Assign preloader environment variables
-    local _env_list=""
+    start=`date +%s`
+
+    # Need federatorai-operator ready for webhook service to validate alamedaservice
+    wait_until_pods_ready 600 30 $install_namespace
+
     if [ "${PRELOADER_GRANULARITY}" != "" ]; then
-        echo -e "\nSetting variable PRELOADER_GRANULARITY='${PRELOADER_GRANULARITY}'"
-        _env_list="${_env_list}
-    - name: PRELOADER_PRELOADER_GRANULARITY
-      value: \"${PRELOADER_GRANULARITY}\"  # unit is sec, history preloaded data granularity
-"
+        alamedaservice_set_component_env federatoraiAgentPreloader PRELOADER_PRELOADER_GRANULARITY "${PRELOADER_GRANULARITY}"
     fi
     if [ "${PRELOADER_PRELOAD_COUNT}" != "" ]; then
-        echo -e "Setting variable PRELOADER_PRELOAD_COUNT='${PRELOADER_PRELOAD_COUNT}'"
-        _env_list="${_env_list}
-    - name: PRELOADER_PRELOADER_PRELOAD_COUNT
-      value: \"${PRELOADER_PRELOAD_COUNT}\"
-"
+        alamedaservice_set_component_env federatoraiAgentPreloader PRELOADER_PRELOADER_PRELOAD_COUNT "${PRELOADER_PRELOAD_COUNT}"
     fi
     if [ "${PRELOADER_PRELOAD_UNIT}" != "" ]; then
-            if [ "${PRELOADER_PRELOAD_UNIT}" != "day" ]; then
-                echo -e "\n$(tput setaf 1)Error! _do_metrics_verify() Only PRELOADER_PRELOAD_UNIT='day' is supported.$(tput sgr 0)"
-                leave_prog
-                exit 1
-            fi
-        echo -e "Setting variable PRELOADER_PRELOAD_UNIT='${PRELOADER_PRELOAD_UNIT}'"
-        _env_list="${_env_list}
-    - name: PRELOADER_PRELOADER_PRELOAD_UNIT
-      value: \"${PRELOADER_PRELOAD_UNIT}\"    # "day"
-"
-    fi
-    if [ "${_env_list}" != "" ]; then
-        patch_data="
-spec:
-  federatoraiAgentPreloader:
-    env:${_env_list}
-"
-        echo -e "\nPatching alamedaservice for enabling environment variables of preloader ..."
-        kubectl patch alamedaservice ${alamedaservice_name} -n ${install_namespace} --type merge --patch "${patch_data}"
-        if [ "$?" != "0" ]; then
-            echo -e "\n$(tput setaf 1)Error! Failed in patching AlamedaService.$(tput sgr 0)"
+        if [ "${PRELOADER_PRELOAD_UNIT}" != "day" ]; then
+            echo -e "\n$(tput setaf 1)Error! refine_preloader_variables_with_alamedaservice() Only PRELOADER_PRELOAD_UNIT='day' is supported.$(tput sgr 0)"
+            leave_prog
             exit 1
         fi
-        # restart preloader pod
-        get_current_preloader_name
-        [ "${current_preloader_pod_name}" != "" ] && kubectl -n $install_namespace delete pod $current_preloader_pod_name --wait=true
+        alamedaservice_set_component_env federatoraiAgentPreloader PRELOADER_PRELOADER_PRELOAD_UNIT "${PRELOADER_PRELOAD_UNIT}"
     fi
+
+    wait_until_pods_ready 600 30 $install_namespace
+
+    echo "Done."
+    end=`date +%s`
+    duration=$((end-start))
+    echo "Duration refine_preloader_variables_with_alamedaservice = $duration" >> $debug_log
 }
 
 run_ab_test()
@@ -571,30 +553,92 @@ scale_up_pods()
     echo "Done"
 }
 
-OBSOLETED_reschedule_dispatcher()
+set_deployment_env()
 {
-    start=`date +%s`
-    echo -e "\n$(tput setaf 6)Rescheduling alameda-ai dispatcher...$(tput sgr 0)"
-    current_dispatcher_pod_name="`kubectl get pods -n $install_namespace |grep "alameda-ai-dispatcher-"|awk '{print $1}'|head -1`"
-    if [ "$current_dispatcher_pod_name" = "" ]; then
-        echo -e "\n$(tput setaf 1)ERROR! Can't find alameda-ai dispatcher pod.$(tput sgr 0)"
-        leave_prog
-        exit 8
+    local component="$1"
+    local key="$2"
+    local value="$3"    # delete env if value is empty
+
+    case "${component}" in
+        "alameda-dispatcher") deployment_name="alameda-ai-dispatcher";;
+        "alamedaDatahub") deployment_name="alameda-datahub";;
+        "federatoraiAgent") deployment_name="federatorai-agent";;
+        "federatoraiAgentPreloader") deployment_name="federatorai-agent-preloader";;
+        "federatoraiDataAdapter") deployment_name="federatorai-data-adapter";;
+        *)
+            echo -e "\n$(tput setaf 1)Error! Invalid component type '${component}'.$(tput sgr 0)"
+            leave_prog
+            exit 8
+            ;;
+    esac
+
+    # delete env if value is empty
+    if [ "${value}" = "" ]; then
+        patch_index=$(kubectl -n ${install_namespace} get deployment ${deployment_name} \
+                              -o jsonpath="{.spec.template.spec.containers[0].env[*]}" \
+                        | sed 's/ /\n/g' | sed 's/"//g' \
+                        | grep "name:" | awk '{print NR-1 "," $0}' | grep "${key}" | cut -d ',' -f1)
+        if [ "${patch_index}" != "" ]; then
+            # Remove existing value
+            kubectl -n ${install_namespace} patch deployment ${deployment_name} \
+                    --type=json --patch "[{\"op\":\"remove\",\"path\":\"/spec/template/spec/containers/0/env/${patch_index}\"}]"
+            if [ "$?" != "0" ]; then
+                echo -e "\n$(tput setaf 1)Error in removing deployment ${deployment_name} env ${key} (op replace).$(tput sgr 0)"
+                leave_prog
+                exit 8
+            fi
+        fi
+        echo -e "\n$(tput setaf 6)Remove deployment ${deployment_name} env ${key}.$(tput sgr 0)"
+        return 0
     fi
 
-    kubectl delete pod -n $install_namespace $current_dispatcher_pod_name
-    if [ "$?" != "0" ]; then
-        echo -e "\n$(tput setaf 1)Error in deleting dispatcher pod.$(tput sgr 0)"
-        leave_prog
-        exit 8
+    current_value=$(kubectl get deployment ${deployment_name} -n ${install_namespace} -o jsonpath="{.spec.template.spec.containers[0].env[?(@.name==\"${key}\")].value}")
+    if [ "${current_value}" != "" ]; then
+        # Modify only if values are differents
+        if [ "${current_value}" != "${value}" ]; then
+            # Get ${key} index in env array
+            patch_index=$(kubectl get deployment ${deployment_name} -n ${install_namespace} -o jsonpath="{.spec.template.spec.containers[0].env[*]}" | sed 's/ /\n/g' |sed 's/"//g' | grep "name:" | awk '{print NR-1 "," $0}' | grep "${key}" | cut -d ',' -f1)
+            if [ "${patch_index}" != "" ]; then
+                # replace value at $patch_index
+                kubectl patch deployment ${deployment_name} -n ${install_namespace} --type json --patch "[{\"op\":\"replace\",\"path\":\"/spec/template/spec/containers/0/env/${patch_index}\",\"value\":{\"name\":\"${key}\",\"value\":\"${value}\"}}]"
+                if [ "$?" != "0" ]; then
+                    echo -e "\n$(tput setaf 1)Error in setting deployment ${deployment_name} env ${key} (op replace).$(tput sgr 0)"
+                    leave_prog
+                    exit 8
+                fi
+            else
+                echo -e "\n$(tput setaf 1)Error in setting deployment ${deployment_name} env ${key} (Can't get ${key} index).$(tput sgr 0)"
+                leave_prog
+                exit 8
+            fi
+            echo -e "\n$(tput setaf 6)Modify deployment ${deployment_name} env ${key}=${value}.$(tput sgr 0)"
+        else
+            echo -e "\n$(tput setaf 6)Use existing deployment ${deployment_name} env ${key}=${value}.$(tput sgr 0)"
+        fi
+    else
+        # ${key} not found
+        # Check if env[] exist
+        current_env_exist="$(kubectl -n ${install_namespace} get deployment ${deployment_name} -o "jsonpath={.spec.template.spec.containers[0].env}" | wc -c | sed 's/[ \t]*//g')"
+        if [ "${current_env_exist}" == 0 ]; then
+            # env section empty
+            kubectl patch deployment ${deployment_name} -n ${install_namespace} --type merge --patch "{\"spec\":{\"template\":{\"spec\":{\"containers\":[{\"env\":[{\"name\":\"${key}\",\"value\":\"${value}\"}]}]}}}}"
+            if [ "$?" != "0" ]; then
+                echo -e "\n$(tput setaf 1)Error in setting deployment ${deployment_name} env ${key} (merge patch).$(tput sgr 0)"
+                leave_prog
+                exit 8
+            fi
+        else
+            # env section exist, add entry
+            kubectl patch deployment ${deployment_name} -n ${install_namespace} --type json --patch "[{\"op\":\"add\",\"path\":\"/spec/template/spec/containers/0/env/-\",\"value\":{\"name\":\"${key}\",\"value\":\"${value}\"}}]"
+            if [ "$?" != "0" ]; then
+                echo -e "\n$(tput setaf 1)Error in setting deployment ${deployment_name} env ${key} (op add).$(tput sgr 0)"
+                leave_prog
+                exit 8
+            fi
+        fi
+        echo -e "\n$(tput setaf 6)Set deployment ${deployment_name} env ${key}=${value}.$(tput sgr 0)"
     fi
-    echo ""
-    wait_until_pods_ready 600 30 $install_namespace
-    echo "Done."
-    end=`date +%s`
-    duration=$((end-start))
-    echo "Duration reschedule_dispatcher = $duration" >> $debug_log
-
+    return 0
 }
 
 alamedaservice_set_component_env()
@@ -602,6 +646,12 @@ alamedaservice_set_component_env()
     local component="$1"
     local key="$2"
     local value="$3"    # delete env if value is empty
+
+    # Modify deployment directly if federatorai-operator reconcile is disabled
+    if [ "${reconcile_enabled}" = "0" ]; then
+        set_deployment_env "${component}" "${key}" "${value}"
+        return $?
+    fi
 
     # delete env if value is empty
     if [ "${value}" = "" ]; then
@@ -650,7 +700,7 @@ alamedaservice_set_component_env()
             # env section empty
             kubectl patch alamedaservice ${alamedaservice_name} -n ${install_namespace} --type merge --patch "{\"spec\":{\"${component}\":{\"env\":[{\"name\": \"${key}\",\"value\": \"${value}\"}]}}}"
             if [ "$?" != "0" ]; then
-                echo -e "\n$(tput setaf 1)Error in setting agent env ${key} (merge patch).$(tput sgr 0)"
+                echo -e "\n$(tput setaf 1)Error in setting ${component} env ${key} (merge patch).$(tput sgr 0)"
                 leave_prog
                 exit 8
             fi
@@ -658,7 +708,7 @@ alamedaservice_set_component_env()
             # env section exist, add entry
             kubectl patch alamedaservice ${alamedaservice_name} -n ${install_namespace} --type json --patch "[ { \"op\" : \"add\" , \"path\" : \"/spec/${component}/env/-\" , \"value\" : { \"name\" : \"${key}\", \"value\" : \"${value}\" } } ]"
             if [ "$?" != "0" ]; then
-                echo -e "\n$(tput setaf 1)Error in setting agent env ${key} (op add).$(tput sgr 0)"
+                echo -e "\n$(tput setaf 1)Error in setting ${component} env ${key} (op add).$(tput sgr 0)"
                 leave_prog
                 exit 8
             fi
@@ -679,7 +729,6 @@ patch_agent_for_preloader()
     # Need federatorai-operator ready for webhook service to validate alamedaservice
     wait_until_pods_ready 600 30 $install_namespace
 
-    flag_updated="n"
     for key in FEDERATORAI_AGENT_INPUT_JOBS_COST_ANALYSIS_NORMAL_DAILY_SCHEDULE_SPEC \
                FEDERATORAI_AGENT_INPUT_JOBS_COST_ANALYSIS_NORMAL_WEEKLY_SCHEDULE_SPEC \
                FEDERATORAI_AGENT_INPUT_JOBS_COST_ANALYSIS_NORMAL_MONTHLY_SCHEDULE_SPEC \
@@ -745,103 +794,54 @@ patch_data_adapter_for_preloader()
         alamedaservice_set_component_env federatoraiDataAdapter COLLECTION_INTERVAL_6H "10m"
         alamedaservice_set_component_env federatoraiDataAdapter COLLECTION_INTERVAL_24H "10m"
     fi
+    alamedaservice_set_component_env federatoraiDataAdapter  COLLECT_METADATA_ONLY ${only_mode}
 
-    flag_updated="n"
-    current_flag_value=$(kubectl get alamedaservice $alamedaservice_name -n $install_namespace -o 'jsonpath={.spec.federatoraiDataAdapter.env[?(@.name=="COLLECT_METADATA_ONLY")].value}')
-    if [ "$current_flag_value" != "" ]; then
-        if [ "$current_flag_value" != "$only_mode" ]; then
-            # Get COLLECT_METADATA_ONLY index in env array
-            patch_index=$(kubectl get alamedaservice $alamedaservice_name -n $install_namespace -o jsonpath='{.spec.federatoraiDataAdapter.env[*]}'|sed 's/ /\n/g'|sed 's/"//g'|grep "name:"|awk '{print NR-1 "," $0}'|grep "COLLECT_METADATA_ONLY"|cut -d ',' -f1)
-            if [ "$patch_index" != "" ]; then
-                # replace value at $patch_index
-                kubectl patch alamedaservice $alamedaservice_name -n $install_namespace --type json --patch "[ { \"op\" : \"replace\" , \"path\" : \"/spec/federatoraiDataAdapter/env/${patch_index}\" , \"value\" : { \"name\" : \"COLLECT_METADATA_ONLY\", \"value\" : \"$only_mode\" } } ]"
-                if [ "$?" != "0" ]; then
-                    echo -e "\n$(tput setaf 1)Error in updating data adapter to collect_metadata_only = \"$only_mode\" mode (op replace).$(tput sgr 0)"
-                    leave_prog
-                    exit 8
-                fi
-                flag_updated="y"
-            else
-                echo -e "\n$(tput setaf 1)Error in updating data adapter to collect_metadata_only = \"$only_mode\" mode (Can't get COLLECT_METADATA_ONLY index).$(tput sgr 0)"
-                leave_prog
-                exit 8
-            fi
-        fi
-    else
-        # COLLECT_METADATA_ONLY not found
-        # Check if env[] exist
-        current_env_exist="$(kubectl -n $install_namespace get alamedaservice $alamedaservice_name -o 'jsonpath={.spec.federatoraiDataAdapter.env}'|wc -c|sed 's/[ \t]*//g')"
-        if [ "$current_env_exist" == 0 ]; then
-            # env section empty
-            kubectl patch alamedaservice $alamedaservice_name -n $install_namespace --type merge --patch "{\"spec\":{\"federatoraiDataAdapter\":{\"env\":[{\"name\": \"COLLECT_METADATA_ONLY\",\"value\": \"$only_mode\"}]}}}"
-            if [ "$?" != "0" ]; then
-                echo -e "\n$(tput setaf 1)Error in updating data adapter to collect_metadata_only = \"$only_mode\" mode (merge patch).$(tput sgr 0)"
-                leave_prog
-                exit 8
-            fi
-            flag_updated="y"
-        else
-            # env section exist, add entry
-            kubectl patch alamedaservice $alamedaservice_name -n $install_namespace --type json --patch "[ { \"op\" : \"add\" , \"path\" : \"/spec/federatoraiDataAdapter/env/-\" , \"value\" : { \"name\" : \"COLLECT_METADATA_ONLY\", \"value\" : \"$only_mode\" } } ]"
-            if [ "$?" != "0" ]; then
-                echo -e "\n$(tput setaf 1)Error in updating data adapter to collect_metadata_only = \"$only_mode\" mode (op add).$(tput sgr 0)"
-                leave_prog
-                exit 8
-            fi
-            flag_updated="y"
-        fi
-    fi
-
-    if [ "$flag_updated" = "y" ]; then
-        wait_until_pods_ready 600 30 $install_namespace
-    fi
+    wait_until_pods_ready 600 30 $install_namespace
 
     echo "Done."
     end=`date +%s`
     duration=$((end-start))
     echo "Duration patch_data_adapter_for_preloader = $duration" >> $debug_log
+
+    return
 }
 
 patch_datahub_for_preloader()
 {
     start=`date +%s`
-    echo -e "\n$(tput setaf 6)Updating datahub for preloader...$(tput sgr 0)"
-    kubectl get alamedaservice $alamedaservice_name -n $install_namespace -o yaml|grep "\- name: ALAMEDA_DATAHUB_APIS_METRICS_SOURCE" -A1|grep -q influxdb
-    if [ "$?" != "0" ]; then
-        kubectl patch alamedaservice $alamedaservice_name -n $install_namespace --type merge --patch '{"spec":{"alamedaDatahub":{"env":[{"name": "ALAMEDA_DATAHUB_APIS_METRICS_SOURCE","value": "influxdb"}]}}}'
-        if [ "$?" != "0" ]; then
-            echo -e "\n$(tput setaf 1)Error in updating datahub pod.$(tput sgr 0)"
-            leave_prog
-            exit 8
-        fi
-        echo ""
-        wait_until_pods_ready 600 30 $install_namespace
-    fi
-    echo "Done"
+
+    # Need federatorai-operator ready for webhook service to validate alamedaservice
+    wait_until_pods_ready 600 30 $install_namespace
+
+    alamedaservice_set_component_env alamedaDatahub ALAMEDA_DATAHUB_APIS_METRICS_SOURCE "influxdb"
+
+    wait_until_pods_ready 600 30 $install_namespace
+
+    echo "Done."
     end=`date +%s`
     duration=$((end-start))
     echo "Duration patch_datahub_for_preloader = $duration" >> $debug_log
+
+    return
 }
 
 patch_datahub_back_to_normal()
 {
     start=`date +%s`
-    echo -e "\n$(tput setaf 6)Rolling back datahub...$(tput sgr 0)"
-    kubectl get alamedaservice $alamedaservice_name -n $install_namespace -o yaml|grep "\- name: ALAMEDA_DATAHUB_APIS_METRICS_SOURCE" -A1|grep -q prometheus
-    if [ "$?" != "0" ]; then
-        kubectl patch alamedaservice $alamedaservice_name -n $install_namespace --type merge --patch '{"spec":{"alamedaDatahub":{"env":[{"name": "ALAMEDA_DATAHUB_APIS_METRICS_SOURCE","value": "prometheus"}]}}}'
-        if [ "$?" != "0" ]; then
-            echo -e "\n$(tput setaf 1)Error in rolling back datahub pod.$(tput sgr 0)"
-            leave_prog
-            exit 8
-        fi
-        echo ""
-        wait_until_pods_ready 600 30 $install_namespace
-    fi
-    echo "Done"
+
+    # Need federatorai-operator ready for webhook service to validate alamedaservice
+    wait_until_pods_ready 600 30 $install_namespace
+
+    alamedaservice_set_component_env alamedaDatahub ALAMEDA_DATAHUB_APIS_METRICS_SOURCE "prometheus"
+
+    wait_until_pods_ready 600 30 $install_namespace
+
+    echo "Done."
     end=`date +%s`
     duration=$((end-start))
-    echo "Duration patch_datahub_back_to_normal = $duration" >> $debug_log
+    echo "Duration patch_datahub_for_preloader = $duration" >> $debug_log
+
+    return
 }
 
 check_federatorai_cluster_type()
@@ -2147,6 +2147,20 @@ fi
 
 check_recommendation_pod_type
 
+# Determine if the federatorai-operator will auto reconcile the assets
+#   Modify alamedaservice if federatorai-operator will reconcile the assets
+#   Modify deployment/statefulset if federatorai-operator will not reconcile the assets
+reconcile_enabled="1"  # default
+if [ "`kubectl -n ${install_namespace} get deployment federatorai-operator 2>&1 | grep NotFound`" != "" ]; then
+    # No federatorai-operator deployment
+    reconcile_enabled="0"
+else
+    val_DO_NOT_DEPLOY_ASSETS=$(kubectl -n ${install_namespace} get deployment federatorai-operator -o 'jsonpath={.spec.template.spec.containers[0].env[?(@.name=="DO_NOT_DEPLOY_ASSETS")].value}')
+    if [ "${val_DO_NOT_DEPLOY_ASSETS}" = "true" ]; then
+        reconcile_enabled="0"
+    fi
+    # assume we do not need to handle "federatorai-operator" pod is running abornally
+fi
 
 nginx_ns="nginx-preloader-sample"
 if [ "$openshift_minor_version" = "" ]; then
