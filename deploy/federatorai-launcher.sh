@@ -74,8 +74,8 @@ get_build_tag()
             if [ "$(verify_tag)" = "y" ]; then
                 pass="y"
             fi
-            # Enable SKIP_TAG_NUMBER_CHECK=1 if tag_number prefix is 'dev-' for development build
-            if [[ $tag_number =~ ^dev- ]]; then SKIP_TAG_NUMBER_CHECK=1; fi
+            # Enable SKIP_TAG_NUMBER_CHECK=1 if tag_number prefix is 'dev' for development build
+            if [[ $tag_number =~ ^dev ]]; then SKIP_TAG_NUMBER_CHECK=1; fi
             # Purposely ignore error of unofficial tag_number for development build
             if [ "${SKIP_TAG_NUMBER_CHECK}" = "1" ]; then pass="y"; fi
         fi
@@ -156,7 +156,7 @@ check_previous_build_tag_and_do_download_for_upgrade(){
         return 0
     fi
     previous_fed_tag="`kubectl get alamedaservices -n $previous_fed_ns -o custom-columns=VERSION:.spec.version 2>/dev/null|grep -v VERSION|head -1`"
-    if [[ $previous_fed_tag =~ ^dev- ]]; then
+    if [[ $previous_fed_tag =~ ^dev ]]; then
         # Skip due to dev build found
         return 0
     fi
