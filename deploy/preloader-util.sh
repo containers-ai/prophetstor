@@ -154,7 +154,7 @@ wait_until_pods_ready()
     local interval="$2"
     local namespace="$3"
 
-    sleep "$interval"
+    sleep 5
     for ((i=0; i<${period}; i+=${interval})); do
         result=$(set +x; (kubectl -n ${namespace} get deployment; \
                   kubectl -n ${namespace} get statefulset; \
@@ -501,7 +501,9 @@ scale_down_pods()
     echo -e "\n$(tput setaf 6)Scaling down alameda-ai and alameda-ai-dispatcher ...$(tput sgr 0)"
     original_alameda_ai_replicas="`kubectl get deploy alameda-ai -n $install_namespace -o jsonpath='{.spec.replicas}'`"
     # Bring down federatorai-operator to prevent it start scale down pods automatically
-    kubectl patch deployment federatorai-operator -n $install_namespace -p '{"spec":{"replicas": 0}}'
+    if [ "${reconcile_enabled}" = "1" ]; then
+        kubectl patch deployment federatorai-operator -n $install_namespace -p '{"spec":{"replicas": 0}}'
+    fi
     kubectl patch deployment alameda-ai -n $install_namespace -p '{"spec":{"replicas": 0}}'
     kubectl patch deployment alameda-ai-dispatcher -n $install_namespace -p '{"spec":{"replicas": 0}}'
     kubectl patch deployment $restart_recommender_deploy -n $install_namespace -p '{"spec":{"replicas": 0}}'
@@ -532,9 +534,11 @@ scale_up_pods()
         do_something="y"
     fi
 
-    if [ "`kubectl get deploy federatorai-operator -n $install_namespace -o jsonpath='{.spec.replicas}'`" -eq "0" ]; then
-        kubectl patch deployment federatorai-operator -n $install_namespace -p '{"spec":{"replicas": 1}}'
-        do_something="y"
+    if [ "${reconcile_enabled}" = "1" ]; then
+        if [ "`kubectl get deploy federatorai-operator -n $install_namespace -o jsonpath='{.spec.replicas}'`" -eq "0" ]; then
+            kubectl patch deployment federatorai-operator -n $install_namespace -p '{"spec":{"replicas": 1}}'
+            do_something="y"
+        fi
     fi
 
     if [ "`kubectl get deploy federatorai-dashboard-backend -n $install_namespace -o jsonpath='{.spec.replicas}'`" -eq "0" ]; then
@@ -1780,6 +1784,11 @@ enable_preloader_in_alamedaservice()
             exit 8
         fi
     else
+        if [ "${reconcile_enabled}" = "0" ]; then
+            echo -e "\n$(tput setaf 1)Error! The federatorai-agent-preloader must be installed if federatorai-operator is not enabled.$(tput sgr 0)"
+            leave_prog
+            exit ${LINENO}
+        fi
         echo -e "\n$(tput setaf 6)Enabling preloader in alamedaservice...$(tput sgr 0)"
         kubectl patch alamedaservice $alamedaservice_name -n $install_namespace --type merge --patch '{"spec":{"enablePreloader": true}}'
         if [ "$?" != "0" ]; then
@@ -2138,15 +2147,6 @@ echo "Checking environment version..."
 check_version
 echo "...Passed"
 
-alamedaservice_name="`kubectl get alamedaservice -n $install_namespace -o jsonpath='{range .items[*]}{.metadata.name}'`"
-if [ "$alamedaservice_name" = "" ]; then
-    echo -e "\n$(tput setaf 1)Error! Failed to get alamedaservice name.$(tput sgr 0)"
-    leave_prog
-    exit 8
-fi
-
-check_recommendation_pod_type
-
 # Determine if the federatorai-operator will auto reconcile the assets
 #   Modify alamedaservice if federatorai-operator will reconcile the assets
 #   Modify deployment/statefulset if federatorai-operator will not reconcile the assets
@@ -2161,6 +2161,15 @@ else
     fi
     # assume we do not need to handle "federatorai-operator" pod is running abornally
 fi
+
+alamedaservice_name="`kubectl get alamedaservice -n $install_namespace -o jsonpath='{range .items[*]}{.metadata.name}'`"
+if [ "${reconcile_enabled}" = "1" -a "$alamedaservice_name" = "" ]; then
+    echo -e "\n$(tput setaf 1)Error! Failed to get alamedaservice name.$(tput sgr 0)"
+    leave_prog
+    exit 8
+fi
+
+check_recommendation_pod_type
 
 nginx_ns="nginx-preloader-sample"
 if [ "$openshift_minor_version" = "" ]; then
