@@ -32,11 +32,6 @@
 #   --cluster <space> AWS EKS cluster name
 #   --region <space> AWS region
 #################################################################################################################
-# Need use bash to run this script
-if [ "${BASH_VERSION}" = '' ]; then
-    /bin/echo -e "\n[Error] Please use bash to run this script.\n"
-    exit 1
-fi
 
 pods_ready()
 {
@@ -343,7 +338,7 @@ wait_until_pods_ready()
     fi
 
     sleep "$interval"
-
+    
   done
 
   echo -e "\n$(tput setaf 1)Warning!! Waited for $period seconds, but all pods are not ready yet. Please check $namespace namespace$(tput sgr 0)"
@@ -1425,7 +1420,7 @@ if [ "$ALAMEDASERVICE_FILE_PATH" = "" ]; then
     fi
 
     #grafana_node_port="31010"
-
+    rest_api_node_port="31011"
     dashboard_frontend_node_port="31012"
 
     if [ "$need_upgrade" != "y" ]; then
@@ -1489,6 +1484,12 @@ __EOF__
           - nodePort: ${dashboard_frontend_node_port}
             port: 9001
       type: NodePort
+    - name: federatorai-rest
+      nodePort:
+        ports:
+          - nodePort: ${rest_api_node_port}
+            port: 5056
+      type: NodePort
 __EOF__
             fi
         fi
@@ -1523,6 +1524,11 @@ __EOF__
       requests:
         cpu: 100m
         memory: 250Mi
+  federatoraiRest:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 100Mi
 __EOF__
         fi
         if [ "${ENABLE_RESOURCE_REQUIREMENT}" = "y" ] && [ "$storage_type" = "persistent" ]; then
@@ -1569,18 +1575,6 @@ __EOF__
       class: ${storage_class}
       accessModes:
         - ReadWriteOnce
-  federatoraiRest:
-    resources:
-      requests:
-        cpu: 50m
-        memory: 100Mi
-    storages:
-    - usage: data
-      type: pvc
-      size: 10Gi
-      class: ${storage_class}
-      accessModes:
-        - ReadWriteOnce
   federatoraiPostgreSQL:
     resources:
       requests:
@@ -1617,11 +1611,6 @@ __EOF__
       requests:
         cpu: 500m
         memory: 500Mi
-  federatoraiRest:
-    resources:
-      requests:
-        cpu: 50m
-        memory: 100Mi
   federatoraiPostgreSQL:
     resources:
       requests:
@@ -1647,14 +1636,6 @@ __EOF__
       accessModes:
         - ReadWriteOnce
   fedemeterInfluxdb:
-    storages:
-    - usage: data
-      type: pvc
-      size: 10Gi
-      class: ${storage_class}
-      accessModes:
-        - ReadWriteOnce
-  federatoraiRest:
     storages:
     - usage: data
       type: pvc
@@ -1742,18 +1723,6 @@ __EOF__
             else
                 # env section exist
                 kubectl patch alamedaservice $previous_alamedaservice -n $install_namespace --type json --patch "[ { \"op\" : \"add\" , \"path\" : \"/spec/env/-\" , \"value\" : { \"name\" : \"FEDERATORAI_MAXIMUM_LOG_SIZE\", \"value\" : \"$log_allowance\" } } ]"
-            fi
-        fi
-
-        current_storage_info="$(kubectl -n $install_namespace get alamedaservice $previous_alamedaservice -o 'jsonpath={.spec.storages[?(@.type=="pvc")]}')"
-        if [ "$current_storage_info" != "" ]; then
-            # current storage setting = persistent
-            # ignore ephemeral
-            current_rest_storage_info="$(kubectl -n $install_namespace get alamedaservice $previous_alamedaservice -o 'jsonpath={.spec.federatoraiRest.storages[?(@.type=="pvc")]}')"
-            if [ "$current_rest_storage_info" == "" ]; then
-                # Need to create data pvc for the rest pod
-                current_class="$(kubectl -n $install_namespace get alamedaservice $previous_alamedaservice -o 'jsonpath={.spec.storages[0].class}')"
-                kubectl -n $install_namespace patch alamedaservice $previous_alamedaservice --type merge --patch "{\"spec\":{\"federatoraiRest\":{\"storages\":[{\"accessModes\":[\"ReadWriteOnce\"],\"class\":\"$current_class\",\"size\":\"10Gi\",\"type\":\"pvc\",\"usage\":\"data\"}]}}}"
             fi
         fi
         # Restart operator after patching alamedaservice
