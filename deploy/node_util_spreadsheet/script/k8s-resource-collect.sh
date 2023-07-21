@@ -2,11 +2,12 @@
 # The script collects nodes/controllers data and saves to .csv files for node utilization spreadsheet
 # Versions:
 #   1.0.1 - The first build.
+#   1.0.2 - Add managed deployment maximum usage to csv
 #
-VER=1.0.1
+VER=1.0.2
 
 # defines
-KUBECTL="kubectl"
+KUBECTL=${KUBECTL:-'kubectl'}
 CURL=( curl -sS -k -X )
 CONTROLLERS=( deployment statefulset )
 
@@ -35,7 +36,7 @@ FIFTEEN_MINS_AGO=$((NOW-FIFTEEN_MINS))
 
 DEPLOY_CSV="deployment-raw.csv"
 NODE_CSV="node-raw.csv"
-DEF_LOG_FILE="/var/log/k8s-resource-collect.log"
+DEF_LOG_FILE="./k8s-resource-collect.log"
 
 # configurable variables
 declare -A vars
@@ -49,6 +50,7 @@ vars[csv_dir]="."
 vars[resource_type]="both"
 vars[log_path]="${DEF_LOG_FILE}"
 vars[use_federatorai]="yes"
+vars[past_period]=28
 
 RANDOM=$(date "+%N")
 SID=$((($RANDOM % 900 ) + 100))
@@ -258,6 +260,34 @@ function cpu_sum()
         done
     fi
     echo ${total_mcores}
+}
+
+function max_of_array()
+{
+    arr=("$@")
+    max=0
+    for num in ${arr[@]}
+    do
+        if ((num > max))
+        then
+            max=$num
+        fi
+    done
+    echo ${max}
+}
+
+function min_of_array()
+{
+    arr=("$@")
+    min=0
+    for num in ${arr[@]}
+    do
+        if ((num < min))
+        then
+            min=$num
+        fi
+    done
+    echo ${min}
 }
 
 ###############################################################################
@@ -492,6 +522,59 @@ function controller_planning()
     return ${retcode}
 }
 
+OBS_CPU_KEY='data.raw_data.cpu.*.numValue'
+OBS_MEM_KEY='data.raw_data.memory.*.numValue'
+
+function controller_observation()
+{
+    c_name=$1
+    kind=$2
+    namespace=$3
+    agg_func=$4
+    end_time=${NOW}
+    past_days=${vars[past_period]}
+    start_time=$((${end_time} - (${vars[past_period]} * 86400)))
+    limit=$((${vars[past_period]} * 24))
+    granularity=3600
+    local retcode=0
+
+    obs_cpus=()
+    obs_mems=()
+
+    if [ "${vars[use_federatorai]}" = "yes" ]
+    then
+        url="https://${vars[f8ai_host]}/apis/v1/observations/clusters/${vars[target_cluster]}/namespaces/${namespace}/${kind}s/${c_name}?&startTime=${start_time}&endTime=${end_time}&granularity=${granularity}&limit=${limit}"
+
+        INPUT=$( ${CURL[@]} GET "${url}" -H "${HEADER1}" -H "${HEADER2}" 2>/dev/null )
+        INPUT_LENGTH="${#INPUT}"
+        while IFS='=' read -d $'\n' -r k v
+        do
+            case "${k}" in
+                ${API_ERROR_KEY})
+                    logging "${ERR}" "Federator.ai Observation API: ${v}"
+                    retcode=1
+                    break ;;
+                ${OBS_CPU_KEY})
+                    obs_cpus=( ${obs_cpus[@]} ${v} ) ;;
+                ${OBS_MEM_KEY})
+                    obs_mems=( ${obs_mems[@]} ${v} ) ;;
+            esac
+        done < <( parse "" "" <<< "${INPUT}" 2>/dev/null )
+
+        case "${agg_func}" in
+            min)
+                obs_cpu_agg=$(min_of_array ${obs_cpus[@]})
+                obs_mem_agg=$(min_of_array ${obs_mems[@]}) ;;
+            *)
+                obs_cpu_agg=$(max_of_array ${obs_cpus[@]})
+                obs_mem_agg=$(max_of_array ${obs_mems[@]}) ;;
+        esac
+    fi
+
+    echo -n "${obs_cpu_agg:=0},${obs_mem_agg:=0}"
+    return ${retcode}
+}
+
 F8AI_CPU_USAGE_KEY[observations]="data.raw_data.cpu.0.numValue"
 F8AI_MEM_USAGE_KEY[observations]="data.raw_data.memory.0.numValue"
 F8AI_CPU_USAGE_KEY[predictions]="data.predictedRawData.cpu.0.numValue"                                                                                                                                 
@@ -545,13 +628,13 @@ function node_comp_usage()
     then
         # Observation API
         f8ai_comp_usage "observations" ${n_name} obs_cpu obs_mem
-        logging "observations --> ${n_name}: ${obs_cpu} ${obs_mem}"
+        logging "${n_name}: Observation: ${obs_cpu} ${obs_mem}"
 
         if [ "${obs_cpu}" = "0" -a "${obs_mem}" = "0" ]
         then
             # if no result, use prediction API
             f8ai_comp_usage "predictions" ${n_name} obs_cpu obs_mem
-            logging "predictions --> ${n_name}: ${obs_cpu} ${obs_mem}"
+            logging "${n_name}: Predictions: ${obs_cpu} ${obs_mem}"
         fi
     fi
     if [ "${obs_cpu}" = "0" -a "${obs_mem}" = "0" ]
@@ -561,7 +644,7 @@ function node_comp_usage()
         then
             obs_cpu=$( cpu_sum ${cv} )
             obs_mem=$( mem_sum ${mv} )
-            logging "kubectl top --> ${n_name}: ${obs_cpu} ${obs_mem}"
+            logging "${n_name}: kubectl top: ${obs_cpu} ${obs_mem}"
         fi
     fi
 
@@ -653,9 +736,11 @@ function create_deployment_csv()
                 ctlr_recomms=${ctlr_reqlims}
             fi
 
+            ctlr_maxs=$( controller_observation ${line[${CCC_IDX[F_NAME]}]} ${ctlr} ${line[${CCC_IDX[F_NS]}]} "max" )
+
             node_affinity=$( nodepool_name "${line[${CCC_IDX[F_NAKEY]}]}" "${line[${CCC_IDX[F_NAVALUE]}]}" )
 
-            echo "${line[${CCC_IDX[F_NAME]}]},${ctlr},${line[${CCC_IDX[F_NS]}]},${node_affinity},${line[${CCC_IDX[F_REPLICAS]}]},${ctlr_reqlims},${ctlr_recomms}" >> ${csv_filename}
+            echo "${line[${CCC_IDX[F_NAME]}]},${ctlr},${line[${CCC_IDX[F_NS]}]},${node_affinity},${line[${CCC_IDX[F_REPLICAS]}]},${ctlr_reqlims},${ctlr_recomms},${ctlr_maxs},${vars[past_period]}" >> ${csv_filename}
             #echo "${line[@]}"
         done < <(${kubectl_get[@]} 2>/dev/null)
     done
@@ -837,7 +922,7 @@ function create_node_csv()
     then
         bt=$(date "+%s")
         get_metrics_config
-        take_a_while ${bt}
+        # take_a_while ${bt}
         all_checks
     fi
 
@@ -874,7 +959,6 @@ function banner()
 {
     banner_string="Federator.ai Kubernetes Node/Controller Resource Collector v${VER}"
     echo ${banner_string}
-    logging "${banner_string}"
     echo
 }
 
@@ -906,7 +990,7 @@ __EOF__
 # arguments
 function parse_options()
 {
-    optspec="x:h:u:p:c:g:d:r:l:a:-:"
+    optspec="x:h:u:p:c:g:d:r:l:a:t:-:"
     while getopts "$optspec" o; do
         case "${o}" in
             -)
@@ -941,6 +1025,8 @@ function parse_options()
                         vars[log_path]="${OPT_VAL}" ;;
                     federatorai)
                         vars[use_federatorai]="${OPT_VAL}" ;;
+                    pastperiod)
+                        vars[past_period]="${OPT_VAL}" ;;
                     *)
                         if [ "$OPTERR" = 1 ] && [ "${optspec:0:1}" != ":" ]; then
                             echo "ERROR: Invalid argument '--${OPT_ARG}'."
@@ -968,6 +1054,8 @@ function parse_options()
                 vars[log_path]="${OPTARG}" ;;
             a)
                 vars[use_federatorai]="${OPTARG}" ;;
+            t)
+                vars[past_period]="${OPTARG}" ;;
             *)
                 echo "ERROR: Invalid argument '-${o}'."
                 show_usage
@@ -1011,6 +1099,7 @@ then
 fi
 HEADER2="authorization: Basic $(echo -n "${vars[f8ai_user]}:${vars[f8ai_pswd]}" |base64)"
 
+logging "Federator.ai Kubernetes Node/Controller Resource Collector v${VER}"
 logging "Arguments: $@"
 for i in "${!vars[@]}"
 do
@@ -1030,6 +1119,8 @@ fi
 # generate controller csv
 if [ "${vars[resource_type]}" = "both" -o "${vars[resource_type]}" = "controller" ]
 then
+    echo "(It may take a few minutes to complete...)"
+    echo
     if ! create_deployment_csv
     then
         logging "${STDOUT}" "${ERR}" "${output_msg}"
