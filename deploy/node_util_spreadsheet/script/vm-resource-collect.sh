@@ -2,12 +2,14 @@
 # The script collects VM data and saves to .csv files for VM recommendation spreadsheet
 # Versions:
 #   1.0.1 - The first build.
+#   1.0.2 - Use user specified http or https protocol
 #
-VER=1.0.1
+VER=1.0.2
 
 # defines
 NOW=$(date +"%s")
 CURL=( curl -sS -k -X )
+HTTPS="https"
 
 VM_IDV_CSV="vm-idv-raw.csv"
 VM_ASG_CSV="vm-asg-raw.csv"
@@ -111,11 +113,11 @@ API_ERROR_KEY="message"
 
 function precheck_federatorai()
 {
-    retcode=1
+    retcode=2
     first_node="NOT_FOUND"
     output_msg="Failed to get Federator.ai information"
 
-    url="https://${vars[f8ai_host]}/apis/v1/resources/clusters/${vars[target_cluster]}/nodes"
+    url="${HTTPS}://${vars[f8ai_host]}/apis/v1/resources/clusters/${vars[target_cluster]}/nodes"
 
     INPUT=$( ${CURL[@]} GET "${url}" -H "${HEADER1}" -H "${HEADER2}" 2>/dev/null )
     INPUT_LENGTH="${#INPUT}"
@@ -136,6 +138,13 @@ function precheck_federatorai()
         esac
     done < <( parse "" "" <<< "${INPUT}" 2>/dev/null )
 
+    if [ "${retcode}" = "2" ]
+    then
+        output_msg="Failed to connect to ${HTTPS}://${vars[f8ai_host]}"
+        echo
+        ${CURL[@]} GET ${HTTPS}://${vars[f8ai_host]}
+        echo
+    fi
     return ${retcode}
 }
 
@@ -348,7 +357,7 @@ function aws_clusters()
     status_active=""
     cluster_type=""
 
-    url="https://${vars[f8ai_host]}/apis/v1/resources/clusters"
+    url="${HTTPS}://${vars[f8ai_host]}/apis/v1/resources/clusters"
 
     INPUT=$( ${CURL[@]} GET "${url}" -H "${HEADER1}" -H "${HEADER2}" 2>/dev/null )
     INPUT_LENGTH="${#INPUT}"
@@ -408,7 +417,7 @@ function cluster_vms()
     v_list=()
     retcode=0
 
-    url="https://${vars[f8ai_host]}/apis/v1/resources/clusters/${cluster}/nodes?type=vm"
+    url="${HTTPS}://${vars[f8ai_host]}/apis/v1/resources/clusters/${cluster}/nodes?type=vm"
 
     INPUT=$( ${CURL[@]} GET "${url}" -H "${HEADER1}" -H "${HEADER2}" 2>/dev/null )
     INPUT_LENGTH="${#INPUT}"
@@ -457,7 +466,7 @@ function vm_info()
     region=""
     display_name=""
 
-    url="https://${vars[f8ai_host]}/apis/v1/resources/aws/vms?names=${vmname}"
+    url="${HTTPS}://${vars[f8ai_host]}/apis/v1/resources/aws/vms?names=${vmname}"
 
     INPUT=$( ${CURL[@]} GET "${url}" -H "${HEADER1}" -H "${HEADER2}" 2>/dev/null )
     INPUT_LENGTH="${#INPUT}"
@@ -544,9 +553,9 @@ function vm_predictions()
 
         if [ "${vmname}" = "" ]
         then
-            url="https://${vars[f8ai_host]}/apis/v1/predictions/clusters/${vmcluster}?order=desc&startTime=${start_time}&endTime=${end_time}&granularity=${granularity}"
+            url="${HTTPS}://${vars[f8ai_host]}/apis/v1/predictions/clusters/${vmcluster}?order=desc&startTime=${start_time}&endTime=${end_time}&granularity=${granularity}"
         else
-            url="https://${vars[f8ai_host]}/apis/v1/predictions/clusters/${vmcluster}/vms/${vmname}?order=desc&startTime=${start_time}&endTime=${end_time}&granularity=${granularity}"
+            url="${HTTPS}://${vars[f8ai_host]}/apis/v1/predictions/clusters/${vmcluster}/vms/${vmname}?order=desc&startTime=${start_time}&endTime=${end_time}&granularity=${granularity}"
         fi
 
         INPUT=$( ${CURL[@]} GET "${url}" -H "${HEADER1}" -H "${HEADER2}" 2>/dev/null )
@@ -615,7 +624,7 @@ function vm_recommendations()
     local rcpu=0
     local rmem=0
 
-    url="https://${vars[f8ai_host]}/apis/v1/costmanagement/clusters/${vmcluster}/recommendations/operations/scaling?granularity=${granularity}&start_time=${start_time}&end_time=${end_time}"
+    url="${HTTPS}://${vars[f8ai_host]}/apis/v1/costmanagement/clusters/${vmcluster}/recommendations/operations/scaling?granularity=${granularity}&start_time=${start_time}&end_time=${end_time}"
     body="{\"acceptance\":[{}]}"
 
     INPUT=$( ${CURL[@]} POST "${url}" -H "${HEADER1}" -H "${HEADER2}" -d "${body}" 2>/dev/null )
@@ -723,6 +732,7 @@ function create_vm_csv()
         # get the list of VMs' recommendations in the cluster
         if ! vm_recommendations ${cluster_name} cluster_region vm_recomm_list recomm_cpu recomm_mem
         then
+            logging "${WARN}" "No recommendations!"
             continue
         fi
 
@@ -910,9 +920,16 @@ fi
 # parse options
 parse_options "$@"
 
-# trim "https://" from host
-vars[f8ai_host]=${vars[f8ai_host]#https://}
-vars[f8ai_host]=${vars[f8ai_host]#http://}
+fhost=${vars[f8ai_host]}
+if [ "${fhost}" != "${fhost#https://}" ]
+then
+    HTTPS="https"
+    vars[f8ai_host]=${fhost#https://}
+elif [ "${fhost}" != "${fhost#http://}" ]
+then
+    HTTPS="http"
+    vars[f8ai_host]=${fhost#http://}
+fi
 
 # validate options
 if [[ ! -z "${F8AI_API_PASSWORD}" ]]
