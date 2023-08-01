@@ -852,22 +852,21 @@ check_federatorai_cluster_type()
 {
     vm_enabled="false"
     k8s_enabled="false"
+    local resp='{"data":[]}'
 
     echo -e "\n$(tput setaf 6)Checking Federator.ai cluster type...$(tput sgr 0)"
 
-    resp=$(fedai_rest_get /apis/v1/resources/clusters)
     # Retry until cluster become active, REST will response also the inactive-clusters
     for i in `seq 1 12`; do
-        resp='{"data":[]}'
+        resp=$(fedai_rest_get /apis/v1/resources/clusters)
         [ "`echo \"${resp}\" | jq '.data'`" != "[]" ] && break
         sleep 10
-        resp=$(fedai_rest_get /apis/v1/resources/clusters)
     done
     [ "`echo \"${resp}\" | jq '.data[].type' 2> /dev/null | grep 'k8s' 2> /dev/null`" != "" ] && k8s_enabled="true"
     [ "`echo \"${resp}\" | jq '.data[].type' 2> /dev/null | grep 'vm' 2> /dev/null`" != "" ] && vm_enabled="true"
     if [ "$vm_enabled" = "false" ] && [ "$k8s_enabled" = "false" ]; then
         echo -e "\n$(tput setaf 1)Error! Failed to get cluster type.$(tput sgr 0)"
-        exit 8
+        exit 1${LINENO}
     fi
     echo "k8s_enabled = $k8s_enabled"
     echo "vm_enabled = $vm_enabled"
