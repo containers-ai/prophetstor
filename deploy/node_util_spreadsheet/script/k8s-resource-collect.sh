@@ -3,11 +3,12 @@
 # Versions:
 #   1.0.1 - The first build.
 #   1.0.2 - Add managed deployment maximum usage to csv
+#   1.0.3 - Use user specified http or https protocol
 #
-VER=1.0.2
+VER=1.0.3
 
 # defines
-KUBECTL=${KUBECTL:-'kubectl'}
+KUBECTL="kubectl"
 CURL=( curl -sS -k -X )
 CONTROLLERS=( deployment statefulset )
 
@@ -30,13 +31,14 @@ MEM:.status.allocatable.memory,\
 Label:.metadata.labels"
 declare -A NCC_IDX=( [F_NAME]=0 [F_CPU]=1 [F_MEM]=2 [F_LABEL]=3 )
 
+HTTPS="https"
 FIFTEEN_MINS=900
 NOW=$(date +"%s")
 FIFTEEN_MINS_AGO=$((NOW-FIFTEEN_MINS))
 
 DEPLOY_CSV="deployment-raw.csv"
 NODE_CSV="node-raw.csv"
-DEF_LOG_FILE="./k8s-resource-collect.log"
+DEF_LOG_FILE="/var/log/k8s-resource-collect.log"
 
 # configurable variables
 declare -A vars
@@ -179,11 +181,11 @@ function precheck_federatorai()
         return 0
     fi
 
-    retcode=1
+    retcode=2
     first_node="NOT_FOUND"
     output_msg="Target cluster: ${vars[target_cluster]} is not configured in Federator.ai"
 
-    url="https://${vars[f8ai_host]}/apis/v1/resources/clusters/${vars[target_cluster]}/nodes"
+    url="${HTTPS}://${vars[f8ai_host]}/apis/v1/resources/clusters/${vars[target_cluster]}/nodes"
 
     INPUT=$( ${CURL[@]} GET "${url}" -H "${HEADER1}" -H "${HEADER2}" 2>/dev/null )
     INPUT_LENGTH="${#INPUT}"
@@ -192,6 +194,7 @@ function precheck_federatorai()
         case "${k}" in
             ${API_ERROR_KEY})
                 logging "${ERR}" "Federator.ai Resource API: ${v}"
+                output_msg="Target cluster: ${vars[target_cluster]}: ${v}"
                 retcode=1
                 break ;;
             data\.0\.name)
@@ -212,6 +215,12 @@ function precheck_federatorai()
             logging "${STDOUT}" "${WARN}" "Cluster '${vars[target_cluster]}' and '${k8s_cluster}' do not appear to be the same cluster!"
             echo
         fi
+    elif [ "${retcode}" = "2" ]
+    then
+        output_msg="Failed to connect to ${HTTPS}://${vars[f8ai_host]}"
+        echo
+        ${CURL[@]} GET ${HTTPS}://${vars[f8ai_host]}
+        echo
     fi
 
     return ${retcode}
@@ -495,7 +504,7 @@ function controller_planning()
 
     if [ "${vars[use_federatorai]}" = "yes" ]
     then
-        url="https://${vars[f8ai_host]}/apis/v1/plannings/clusters/${vars[target_cluster]}/namespaces/${namespace}/${kind}s/${c_name}?granularity=${granularity}&type=planning&limit=1&order=asc&startTime=${start_time}&endTime=${end_time}"
+        url="${HTTPS}://${vars[f8ai_host]}/apis/v1/plannings/clusters/${vars[target_cluster]}/namespaces/${namespace}/${kind}s/${c_name}?granularity=${granularity}&type=planning&limit=1&order=asc&startTime=${start_time}&endTime=${end_time}"
 
         INPUT=$( ${CURL[@]} GET "${url}" -H "${HEADER1}" -H "${HEADER2}" 2>/dev/null )
         INPUT_LENGTH="${#INPUT}"
@@ -543,7 +552,7 @@ function controller_observation()
 
     if [ "${vars[use_federatorai]}" = "yes" ]
     then
-        url="https://${vars[f8ai_host]}/apis/v1/observations/clusters/${vars[target_cluster]}/namespaces/${namespace}/${kind}s/${c_name}?&startTime=${start_time}&endTime=${end_time}&granularity=${granularity}&limit=${limit}"
+        url="${HTTPS}://${vars[f8ai_host]}/apis/v1/observations/clusters/${vars[target_cluster]}/namespaces/${namespace}/${kind}s/${c_name}?&startTime=${start_time}&endTime=${end_time}&granularity=${granularity}&limit=${limit}"
 
         INPUT=$( ${CURL[@]} GET "${url}" -H "${HEADER1}" -H "${HEADER2}" 2>/dev/null )
         INPUT_LENGTH="${#INPUT}"
@@ -592,7 +601,7 @@ function f8ai_comp_usage()
     end_time=$(date "+%s")
     start_time=$((${end_time} - 3600))
 
-    url="https://${vars[f8ai_host]}/apis/v1/${api}/clusters/${vars[target_cluster]}/nodes/${n_name}?granularity=3600&order=asc&startTime=${start_time}&endTime=${end_time}"
+    url="${HTTPS}://${vars[f8ai_host]}/apis/v1/${api}/clusters/${vars[target_cluster]}/nodes/${n_name}?granularity=3600&order=asc&startTime=${start_time}&endTime=${end_time}"
 
     INPUT=$( ${CURL[@]} GET "${url}" -H "${HEADER1}" -H "${HEADER2}" 2>/dev/null )
     INPUT_LENGTH="${#INPUT}"
@@ -742,14 +751,16 @@ function create_deployment_csv()
 
             echo "${line[${CCC_IDX[F_NAME]}]},${ctlr},${line[${CCC_IDX[F_NS]}]},${node_affinity},${line[${CCC_IDX[F_REPLICAS]}]},${ctlr_reqlims},${ctlr_recomms},${ctlr_maxs},${vars[past_period]}" >> ${csv_filename}
             #echo "${line[@]}"
+            echo -n "."
         done < <(${kubectl_get[@]} 2>/dev/null)
     done
+    echo
 }
 
 function get_metrics_config() {
     logging "Fetching metric config id."
 
-    url="https://${vars[f8ai_host]}/series_postgres/getMetricsConfig"
+    url="${HTTPS}://${vars[f8ai_host]}/series_postgres/getMetricsConfig"
     metricRes=$( ${CURL[@]} POST "${url}" \
     -H "$HEADER3" \
     --data '{
@@ -787,7 +798,7 @@ function get_metrics_config() {
 
 function get_response_by_id() {
     # $1 means metric config id.
-    url="https://${vars[f8ai_host]}/series_datahub/getSeries"
+    url="${HTTPS}://${vars[f8ai_host]}/series_datahub/getSeries"
     results=$( ${CURL[@]} POST "${url}" \
     -H "$HEADER3" \
     --data '{
@@ -921,8 +932,10 @@ function create_node_csv()
     if [ "${vars[use_federatorai]}" = "yes" ]
     then
         bt=$(date "+%s")
+        echo -n "."
         get_metrics_config
         # take_a_while ${bt}
+        echo -n "."
         all_checks
     fi
 
@@ -952,7 +965,9 @@ function create_node_csv()
         echo "${node_name},${node_label},${node_capacity},${node_usage},\
 ${node_disk_capacity:-0},${node_disk_io_util:-0},${node_network_rx:-0},${node_network_tx:-0}" >> ${csv_filename}
         #echo "${line[@]}"
+        echo -n "."
     done < <(${kubectl_get[@]} 2>/dev/null)
+    echo
 }
 
 function banner()
@@ -968,20 +983,22 @@ function show_usage()
 
 ${PROG} [options]
 
-Options:
-  -x, --context=''        Kubeconfig context name (DEFAULT: '')
+Mandatory options:
   -h, --host=''           Federator.ai API host(ip:port) (DEFAULT: '127.0.0.1:31012')
   -u, --username=''       Federator.ai API user name (DEFAULT: 'admin')
   -p, --password=''       Federator.ai API password (or read from 'F8AI_API_PASSWORD')
   -c, --cluster=''        Target Kubernetes cluster name
+Optional options: 
+  -x, --context=''        Kubeconfig context name (DEFAULT: '')
   -g, --granularity=''    Resource recommendation granularity (DEFAULT: '21600')
   -d, --directory=''      Local path where .csv files will be saved (DEFAULT: '.')
   -r, --resource='both'   Generate Node('node') and/or Controller('controller') .csv (DEFAULT: 'both')
-  -l, --logfile=''        Log file full path (DEFAULT: '/var/log/k8s-resource-collect.log')
-  -a, --federatorai='yes' Use Federator.ai recommendations (DEFAULT: 'yes')
+  -l, --logfile=''        Full path of the log file (DEFAULT: './k8s-resource-collect.log')
+  -a, --federatorai='yes' Whether to use Federator.ai recommendations (DEFAULT: 'yes')
+  -t, --pastperiod=''     Past period in days for getting the maximum usage (DEFAULT: '28') 
 
 Examples:
-  ${PROG} --host=127.0.0.1:31012 --username=admin --cluster=h3-61 --granularity=21600 --path=/tmp
+  ${PROG} --host=127.0.0.1:31012 --username=admin --password=xxxx --cluster=h3-61
 
 __EOF__
     exit 1
@@ -1097,6 +1114,17 @@ then
         exit 1
     fi
 fi
+fhost=${vars[f8ai_host]}
+if [ "${fhost}" != "${fhost#https://}" ]
+then
+    HTTPS="https"
+    vars[f8ai_host]=${fhost#https://}
+elif [ "${fhost}" != "${fhost#http://}" ]
+then
+    HTTPS="http"
+    vars[f8ai_host]=${fhost#http://}
+fi
+
 HEADER2="authorization: Basic $(echo -n "${vars[f8ai_user]}:${vars[f8ai_pswd]}" |base64)"
 
 logging "Federator.ai Kubernetes Node/Controller Resource Collector v${VER}"
