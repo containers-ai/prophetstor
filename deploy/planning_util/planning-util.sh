@@ -2387,9 +2387,9 @@ if [ "$DEMO_MODE" != "y" ]; then
             exit $err_code
         fi
         # Still use kubectl version to verify server connection
-        $verify_cmd version|grep -q "^Server"
+        $verify_cmd version -o yaml | grep -q "^serverVersion:"
     else
-        $kube_cmd version|grep -q "^Server"
+        $kube_cmd version -o yaml | grep -q "^serverVersion:"
     fi
 
     if [ "$?" != "0" ];then
