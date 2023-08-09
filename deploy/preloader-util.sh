@@ -2020,7 +2020,7 @@ case "${unameOut}" in
         ;;
 esac
 
-kubectl version|grep -q "^Server"
+kubectl version -o yaml | grep -q "^serverVersion:"
 if [ "$?" != "0" ];then
     echo -e "\nPlease login to Kubernetes first."
     exit 1
