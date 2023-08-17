@@ -4,8 +4,9 @@
 #   1.0.1 - The first build.
 #   1.0.2 - Add managed deployment maximum usage to csv
 #   1.0.3 - Use user specified http or https protocol
+#   1.0.4 - Add managed deployment avg/min usage; metainfo at the first line of csv
 #
-VER=1.0.3
+VER=1.0.4
 
 # defines
 KUBECTL="kubectl"
@@ -49,10 +50,10 @@ vars[f8ai_pswd]=""
 vars[f8ai_granularity]=21600
 vars[target_cluster]=""
 vars[csv_dir]="."
-vars[resource_type]="both"
+vars[resource_type]="controller"
 vars[log_path]="${DEF_LOG_FILE}"
 vars[use_federatorai]="yes"
-vars[past_period]=28
+vars[past_period]=0
 
 RANDOM=$(date "+%N")
 SID=$((($RANDOM % 900 ) + 100))
@@ -271,21 +272,33 @@ function cpu_sum()
     echo ${total_mcores}
 }
 
-function max_of_array()
+function stats_of_array()
 {
     arr=("$@")
+    cnt=${#arr[@]}
     max=0
+    min=0
+    avg=0
+    sum=0
+    [[ ${cnt} -gt 0 ]] && min=${arr[0]}
     for num in ${arr[@]}
     do
         if ((num > max))
         then
-            max=$num
+            max=${num}
         fi
+        if ((num < min))
+        then
+            min=${num}
+        fi
+        sum=$((${sum} + ${num}))
     done
-    echo ${max}
+    [[ ${cnt} -gt 0 ]] && avg=$((${sum} / ${cnt}))
+
+    echo "${max},${min},${avg}"
 }
 
-function min_of_array()
+function n_of_array()
 {
     arr=("$@")
     min=0
@@ -539,13 +552,27 @@ function controller_observation()
     c_name=$1
     kind=$2
     namespace=$3
-    agg_func=$4
-    end_time=${NOW}
     past_days=${vars[past_period]}
-    start_time=$((${end_time} - (${vars[past_period]} * 86400)))
-    limit=$((${vars[past_period]} * 24))
-    granularity=3600
+    granularity=${vars[f8ai_granularity]}
     local retcode=0
+
+    if [ ${vars[past_period]} -gt 0 ]
+    then
+        past_days=${vars[past_period]}
+    elif [ ${vars[f8ai_granularity]} -eq 86400 ]
+    then
+        past_days=$(( ($(date +%s) - $(date -d "-3 months" +%s) + 3) / 86400 ))  # past 3 months
+    elif [ ${vars[f8ai_granularity]} -eq 21600 ]
+    then
+        past_days=28  # past 4 weeks
+    else
+        granularity=3600
+        past_days=7  # past 7 days
+    fi
+
+    end_time=${NOW}
+    start_time=$((${end_time} - (${past_days} * 86400)))
+    limit=$((${past_days} * (86400 / ${granularity})))
 
     obs_cpus=()
     obs_mems=()
@@ -570,17 +597,12 @@ function controller_observation()
             esac
         done < <( parse "" "" <<< "${INPUT}" 2>/dev/null )
 
-        case "${agg_func}" in
-            min)
-                obs_cpu_agg=$(min_of_array ${obs_cpus[@]})
-                obs_mem_agg=$(min_of_array ${obs_mems[@]}) ;;
-            *)
-                obs_cpu_agg=$(max_of_array ${obs_cpus[@]})
-                obs_mem_agg=$(max_of_array ${obs_mems[@]}) ;;
-        esac
+        IFS=, read -a cpu_stats <<< $(stats_of_array ${obs_cpus[@]})
+        IFS=, read -a mem_stats <<< $(stats_of_array ${obs_mems[@]})
     fi
+    logging "${INFO}" "Deployment ${c_name} stats: granularity=${granularity} days=${past_days} max=${cpu_stats[0]},${mem_stats[0]} min=${cpu_stats[1]},${mem_stats[1]} avg=${cpu_stats[2]},${mem_stats[2]}"
 
-    echo -n "${obs_cpu_agg:=0},${obs_mem_agg:=0}"
+    echo -n "${cpu_stats[0]:=0},${mem_stats[0]:=0},${past_days:=0},${cpu_stats[1]:=0},${mem_stats[1]:=0},${cpu_stats[2]:=0},${mem_stats[2]:=0}"
     return ${retcode}
 }
 
@@ -721,6 +743,8 @@ function create_deployment_csv()
     csv_filename="${vars[csv_dir]}/${DEPLOY_CSV}"
     rm -rf ${csv_filename} >/dev/null 2>&1
 
+    echo "${VER},${NOW},${vars[target_cluster]},${vars[f8ai_granularity]}" >> ${csv_filename}
+
     for ctlr in ${CONTROLLERS[@]}
     do
         kubectl_get=( ${KUBECTL} get ${ctlr} -A -o custom-columns="${CTLR_CUSTOM_COLUMNS}" )
@@ -745,11 +769,11 @@ function create_deployment_csv()
                 ctlr_recomms=${ctlr_reqlims}
             fi
 
-            ctlr_maxs=$( controller_observation ${line[${CCC_IDX[F_NAME]}]} ${ctlr} ${line[${CCC_IDX[F_NS]}]} "max" )
+            ctlr_stats=$( controller_observation ${line[${CCC_IDX[F_NAME]}]} ${ctlr} ${line[${CCC_IDX[F_NS]}]} )
 
             node_affinity=$( nodepool_name "${line[${CCC_IDX[F_NAKEY]}]}" "${line[${CCC_IDX[F_NAVALUE]}]}" )
 
-            echo "${line[${CCC_IDX[F_NAME]}]},${ctlr},${line[${CCC_IDX[F_NS]}]},${node_affinity},${line[${CCC_IDX[F_REPLICAS]}]},${ctlr_reqlims},${ctlr_recomms},${ctlr_maxs},${vars[past_period]}" >> ${csv_filename}
+            echo "${line[${CCC_IDX[F_NAME]}]},${ctlr},${line[${CCC_IDX[F_NS]}]},${node_affinity},${line[${CCC_IDX[F_REPLICAS]}]},${ctlr_reqlims},${ctlr_recomms},${ctlr_stats}" >> ${csv_filename}
             #echo "${line[@]}"
             echo -n "."
         done < <(${kubectl_get[@]} 2>/dev/null)
