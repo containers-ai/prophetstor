@@ -92,6 +92,12 @@
                 - nodePort: {{ dashboard_frontend_node_port }}
                   port: 9001
             type: NodePort
+          - name: federatorai-rest
+            nodePort:
+              ports:
+                - nodePort: {{ rest_api_node_port }}
+                  port: 5056
+            type: NodePort
   when: (openshift_env == "n") and (expose_dashboard_and_rest_api_services == "y")
 
 # Add limits/requests of pods
