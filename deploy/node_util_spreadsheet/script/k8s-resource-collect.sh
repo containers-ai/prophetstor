@@ -5,11 +5,15 @@
 #   1.0.2 - Add managed deployment maximum usage to csv
 #   1.0.3 - Use user specified http or https protocol
 #   1.0.4 - Add managed deployment avg/min usage; metainfo at the first line of csv
+#   1.0.5 - Include sidecar containers' request/limit to the deployment's
+#   1.0.6 - Precheck bash version and minor fixes
+#   1.0.7 - Support new GCP node group affinity key name
+#   1.0.8 - Use node group affinity key to match node labels
 #
-VER=1.0.4
+VER=1.0.8
 
 # defines
-KUBECTL="kubectl"
+KUBECTL="${KUBECTL:-kubectl}"
 CURL=( curl -sS -k -X )
 CONTROLLERS=( deployment statefulset )
 
@@ -22,8 +26,17 @@ MemReq:.spec.template.spec.containers[*].resources.requests.memory,\
 CpuLim:.spec.template.spec.containers[*].resources.limits.cpu,\
 MemLim:.spec.template.spec.containers[*].resources.limits.memory,\
 NodeAffinityKey:.spec.template.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0].matchExpressions[0].key,\
-NodeAffinityValue:.spec.template.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0].matchExpressions[0].values[0]"
+NodeAffinityValue:.spec.template.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0].matchExpressions[0].values[0],\
+Labels:.spec.template.metadata.labels"
 declare -A CCC_IDX=( [F_NAME]=0 [F_NS]=1 [F_REPLICAS]=2 [F_CPUREQ]=3 [F_MEMREQ]=4 [F_CPULIM]=5 [F_MEMLIM]=6 [F_NAKEY]=7 [F_NAVALUE]=8 )
+
+POD_CUSTOM_COLUMNS="\
+Name:.metadata.name,\
+CpuReq:.spec.containers[*].resources.requests.cpu,\
+MemReq:.spec.containers[*].resources.requests.memory,\
+CpuLim:.spec.containers[*].resources.limits.cpu,\
+MemLim:.spec.containers[*].resources.limits.memory"
+declare -A PCC_IDX=( [F_NAME]=0 [F_CREQ]=1 [F_MREQ]=2 [F_CLIM]=3 [F_MLIM]=4 )
 
 NODE_CUSTOM_COLUMNS="\
 Name:.metadata.name,\
@@ -39,7 +52,7 @@ FIFTEEN_MINS_AGO=$((NOW-FIFTEEN_MINS))
 
 DEPLOY_CSV="deployment-raw.csv"
 NODE_CSV="node-raw.csv"
-DEF_LOG_FILE="/var/log/k8s-resource-collect.log"
+DEF_LOG_FILE="./k8s-resource-collect.log"
 
 # configurable variables
 declare -A vars
@@ -50,12 +63,14 @@ vars[f8ai_pswd]=""
 vars[f8ai_granularity]=21600
 vars[target_cluster]=""
 vars[csv_dir]="."
-vars[resource_type]="controller"
+vars[resource_type]="both"
 vars[log_path]="${DEF_LOG_FILE}"
 vars[use_federatorai]="yes"
 vars[past_period]=0
 
-RANDOM=$(date "+%N")
+R=$(date "+%N")
+RAND=$(expr ${R} + 0)
+RANDOM=$((${RAND} % 10000))
 SID=$((($RANDOM % 900 ) + 100))
 SPF='['${SID}']'
 output_msg="OK"
@@ -127,6 +142,33 @@ function write_logs()
     done
 }
 
+function map_to_string()
+{
+    map="$1"
+    if [ "${map:0:3}" = "map" ]
+    then
+        str=$( echo -n "${map:4:-1}" |tr ':' '=' |tr ' ' ',' )
+    else
+        str="${map}"
+    fi
+    echo ${str}
+}
+
+function trim_trailing_spaces()
+{
+    str="$1"
+    while [ ${#str} -gt 0 ]
+    do
+        if [[ "${str:0-1}" == [[:space:]] ]]
+        then
+            str=${str:0:-1}
+        else
+            break
+        fi
+    done
+    echo "${str}"
+}
+
 function precheck_architecture()
 {
     machine_os=$( uname -mo )
@@ -137,6 +179,21 @@ function precheck_architecture()
     fi
 
     logging "Architecture: ${machine_os}"
+}
+
+function precheck_bash_version()
+{
+    major_ver=${BASH_VERSION:0:1}
+    if [ "${major_ver}" != "" ]
+    then
+        if [ ${major_ver} -lt 4 ]
+        then
+            output_msg="Bash version 4 and above is required."
+            return 1
+        fi
+    fi
+
+    logging "Bash Version: ${BASH_VERSION}"
 }
 
 kube_curr_context=""
@@ -154,7 +211,7 @@ function precheck_kubectl()
         kube_curr_context=${current_context}
         if [ "${vars[kube_context]}" != "" -a "${vars[kube_context]}" != "${kube_curr_context}" ]
         then
-            if ! ${KUBECTL} config use-context ${vars[kube_context]} 2>&1 | write_logs >>${vars[log_path]]}
+            if ! ${KUBECTL} config use-context ${vars[kube_context]} 2>&1 | write_logs >>${vars[log_path]}
             then
                 output_msg="Failed to set ${KUBECTL} context ${vars[kube_context]}."
                 return 1
@@ -189,39 +246,44 @@ function precheck_federatorai()
     url="${HTTPS}://${vars[f8ai_host]}/apis/v1/resources/clusters/${vars[target_cluster]}/nodes"
 
     INPUT=$( ${CURL[@]} GET "${url}" -H "${HEADER1}" -H "${HEADER2}" 2>/dev/null )
-    INPUT_LENGTH="${#INPUT}"
-    while IFS='=' read -d $'\n' -r k v
-    do
-        case "${k}" in
-            ${API_ERROR_KEY})
-                logging "${ERR}" "Federator.ai Resource API: ${v}"
-                output_msg="Target cluster: ${vars[target_cluster]}: ${v}"
-                retcode=1
-                break ;;
-            data\.0\.name)
-                first_node=${v} ;;
-            data\.0\.clusterName)
-                if [ "${v}" = "${vars[target_cluster]}" ]
-                then
-                    retcode=0
-                fi ;;
-        esac
-    done < <( parse "" "" <<< "${INPUT}" 2>/dev/null )
-
-    if [ "${retcode}" = "0" ]
+    if [ "${INPUT}" = '{"data":[]}' ]
     then
-        found=$( ${KUBECTL} get nodes | grep "${first_node}" 2>/dev/null )
-        if [ "${found}" = "" ]
+        retcode=1
+    else
+        INPUT_LENGTH="${#INPUT}"
+        while IFS='=' read -d $'\n' -r k v
+        do
+            case "${k}" in
+                ${API_ERROR_KEY})
+                    logging "${ERR}" "Federator.ai Resource API: ${v}"
+                    output_msg="Target cluster: ${vars[target_cluster]}: ${v}"
+                    retcode=1
+                    break ;;
+                data\.0\.name)
+                    first_node=${v} ;;
+                data\.0\.clusterName)
+                    if [ "${v}" = "${vars[target_cluster]}" ]
+                    then
+                        retcode=0
+                    fi ;;
+            esac
+        done < <( parse "" "" <<< "${INPUT}" 2>/dev/null )
+
+        if [ "${retcode}" = "0" ]
         then
-            logging "${STDOUT}" "${WARN}" "Cluster '${vars[target_cluster]}' and '${k8s_cluster}' do not appear to be the same cluster!"
+            found=$( ${KUBECTL} get nodes | grep "${first_node}" 2>/dev/null )
+            if [ "${found}" = "" ]
+            then
+                logging "${STDOUT}" "${WARN}" "Cluster '${vars[target_cluster]}' and '${k8s_cluster}' do not appear to be the same cluster!"
+                echo
+            fi
+        elif [ "${retcode}" = "2" ]
+        then
+            output_msg="Failed to connect to ${HTTPS}://${vars[f8ai_host]}"
+            echo
+            ${CURL[@]} GET "${HTTPS}://${vars[f8ai_host]}/apis/v1/resources/clusters" -H "${HEADER1}" -H "${HEADER2}"
             echo
         fi
-    elif [ "${retcode}" = "2" ]
-    then
-        output_msg="Failed to connect to ${HTTPS}://${vars[f8ai_host]}"
-        echo
-        ${CURL[@]} GET ${HTTPS}://${vars[f8ai_host]}
-        echo
     fi
 
     return ${retcode}
@@ -298,18 +360,20 @@ function stats_of_array()
     echo "${max},${min},${avg}"
 }
 
-function n_of_array()
+function exist_in_array()
 {
+    item=$1
+    shift
     arr=("$@")
-    min=0
-    for num in ${arr[@]}
+
+    for ent in ${arr[@]}
     do
-        if ((num < min))
+        if [ "${ent}" = "${item}" ]
         then
-            min=$num
+            return 0
         fi
     done
-    echo ${min}
+    return 1
 }
 
 ###############################################################################
@@ -606,9 +670,36 @@ function controller_observation()
     return ${retcode}
 }
 
+function controller_reqlim()
+{
+    c_name=$1
+    c_ns=$2
+    c_labels=$3
+
+    kubectl_cmd=( ${KUBECTL} get pod -n ${c_ns} -l ${c_labels} -o custom-columns="${POD_CUSTOM_COLUMNS}" )
+
+    while IFS= read -r one_line
+    do
+        IFS=' ' read -a line <<< "${one_line}"
+        # Skip lines starting with sharp
+        # or lines containing only space or empty lines
+        [[ "${line[0]}" =~ ^([[:space:]]*|[[:space:]]*#.*)$ ]] && continue
+        [[ "${line[0]}" = "Name" ]] && continue
+        # convert units
+        line[${PCC_IDX[F_CREQ]}]=$( cpu_sum ${line[${PCC_IDX[F_CREQ]}]} )
+        line[${PCC_IDX[F_MREQ]}]=$( mem_sum ${line[${PCC_IDX[F_MREQ]}]} )
+        line[${PCC_IDX[F_CLIM]}]=$( cpu_sum ${line[${PCC_IDX[F_CLIM]}]} )
+        line[${PCC_IDX[F_MLIM]}]=$( mem_sum ${line[${PCC_IDX[F_MLIM]}]} )
+        logging "Deployment ${c_name}/${line[${PCC_IDX[F_NAME]}]}: ${line[${PCC_IDX[F_CREQ]}]},${line[${PCC_IDX[F_MREQ]}]},${line[${PCC_IDX[F_CLIM]}]},${line[${PCC_IDX[F_MLIM]}]}"
+        break
+    done < <(${kubectl_cmd[@]} 2>/dev/null)
+
+    echo "${line[${PCC_IDX[F_CREQ]}]},${line[${PCC_IDX[F_MREQ]}]},${line[${PCC_IDX[F_CLIM]}]},${line[${PCC_IDX[F_MLIM]}]}"
+}
+
 F8AI_CPU_USAGE_KEY[observations]="data.raw_data.cpu.0.numValue"
 F8AI_MEM_USAGE_KEY[observations]="data.raw_data.memory.0.numValue"
-F8AI_CPU_USAGE_KEY[predictions]="data.predictedRawData.cpu.0.numValue"                                                                                                                                 
+F8AI_CPU_USAGE_KEY[predictions]="data.predictedRawData.cpu.0.numValue"
 F8AI_MEM_USAGE_KEY[predictions]="data.predictedRawData.memory.0.numValue"
 
 function f8ai_comp_usage()
@@ -695,6 +786,11 @@ declare -a SUPPORTED_LABELS=( \
     node-pool-name \
     kops.k8s.io/instancegroup )
 
+declare -a CUSTOM_AFFINITY_LABELS=( \
+    role )
+
+declare -a MATCHED_LABELS
+
 function nodepool_name()
 {
     local key=$1
@@ -702,14 +798,17 @@ function nodepool_name()
     local na="<none>"
     if [ "${key}" != "" -a "${key}" != "<none>" ]
     then
-        for label in ${SUPPORTED_LABELS[@]}
+        for label in ${MATCHED_LABELS[@]} ${SUPPORTED_LABELS[@]} ${CUSTOM_AFFINITY_LABELS[@]}
         do
             if [ "${key}" = "${label}" ]
             then
-                na=${value}
                 break
             fi
         done
+        if [ "${value}" != "" ]
+        then
+            na=${value}
+        fi
     fi
     echo -n "${na}"
 }
@@ -726,7 +825,25 @@ function nodepool_label()
         for l in ${label_array[@]}
         do
             IFS=':' read -r k v <<< "${l}"
-            np_name=$(nodepool_name ${k} ${v})
+            if exist_in_array "${k}" ${MATCHED_LABELS[@]}
+            then
+                np_name=${v}
+            fi
+            if [ "${np_name}" != "<none>" ]
+            then
+                logging "Matching node label: ${k} in ( ${MATCHED_LABELS[@]} )"
+                echo -n "${np_name}"
+                return
+            fi
+        done
+
+        for l in ${label_array[@]}
+        do
+            IFS=':' read -r k v <<< "${l}"
+            if exist_in_array "${k}" ${SUPPORTED_LABELS[@]} ${CUSTOM_AFFINITY_LABELS[@]}
+            then
+                np_name=${v}
+            fi
             if [ "${np_name}" != "<none>" ]
             then
                 break
@@ -738,6 +855,7 @@ function nodepool_label()
 
 function create_deployment_csv()
 {
+    echo
     logging "${STDOUT}" "Start collecting Controller resource data."
 
     csv_filename="${vars[csv_dir]}/${DEPLOY_CSV}"
@@ -751,17 +869,36 @@ function create_deployment_csv()
 
         while IFS= read -r one_line
         do
+            tmpl_labels_str=""
+
+            if [ ${#one_line} -gt 0 ]
+            then
+                # template.labels
+                one_line=$( trim_trailing_spaces "${one_line}" )
+                tmpl_labels_map=${one_line##*  }
+                tmpl_labels_len=${#tmpl_labels_map}
+                tmpl_labels_str=$( map_to_string "${tmpl_labels_map}" )
+                one_line=${one_line:0:-$tmpl_labels_len}
+                one_line=$( trim_trailing_spaces "${one_line}" )
+            else
+                continue
+            fi
+
             IFS=' ' read -a line <<< "${one_line}"
             # Skip lines starting with sharp
             # or lines containing only space or empty lines
             [[ "${line[0]}" =~ ^([[:space:]]*|[[:space:]]*#.*)$ ]] && continue
             [[ "${line[0]}" = "Name" ]] && continue
-            # convert units
-            line[${CCC_IDX[F_CPUREQ]}]=$( cpu_sum ${line[${CCC_IDX[F_CPUREQ]}]} )
-            line[${CCC_IDX[F_MEMREQ]}]=$( mem_sum ${line[${CCC_IDX[F_MEMREQ]}]} )
-            line[${CCC_IDX[F_CPULIM]}]=$( cpu_sum ${line[${CCC_IDX[F_CPULIM]}]} )
-            line[${CCC_IDX[F_MEMLIM]}]=$( mem_sum ${line[${CCC_IDX[F_MEMLIM]}]} )
-            ctlr_reqlims="${line[${CCC_IDX[F_CPUREQ]}]},${line[${CCC_IDX[F_MEMREQ]}]},${line[${CCC_IDX[F_CPULIM]}]},${line[${CCC_IDX[F_MEMLIM]}]}"
+
+            pod_reqlim_str=$( controller_reqlim ${ctlr} ${line[${CCC_IDX[F_NS]}]} "${tmpl_labels_str}" )
+            IFS=',' read -a reqlim <<< "${pod_reqlim_str}"
+
+            [[ reqlim[0] -eq 0 ]] && reqlim[0]=$( cpu_sum ${line[${CCC_IDX[F_CPUREQ]}]} )
+            [[ reqlim[1] -eq 0 ]] && reqlim[1]=$( mem_sum ${line[${CCC_IDX[F_MEMREQ]}]} )
+            [[ reqlim[2] -eq 0 ]] && reqlim[2]=$( cpu_sum ${line[${CCC_IDX[F_CPULIM]}]} )
+            [[ reqlim[3] -eq 0 ]] && reqlim[3]=$( mem_sum ${line[${CCC_IDX[F_MEMLIM]}]} )
+
+            ctlr_reqlims="${reqlim[0]},${reqlim[1]},${reqlim[2]},${reqlim[3]}"
 
             ctlr_recomms=$( controller_planning ${line[${CCC_IDX[F_NAME]}]} ${ctlr} ${line[${CCC_IDX[F_NS]}]} ${line[${CCC_IDX[F_REPLICAS]}]} ${vars[f8ai_granularity]} )
             if [ "${ctlr_recomms}" = "0,0,0,0" ]
@@ -772,6 +909,16 @@ function create_deployment_csv()
             ctlr_stats=$( controller_observation ${line[${CCC_IDX[F_NAME]}]} ${ctlr} ${line[${CCC_IDX[F_NS]}]} )
 
             node_affinity=$( nodepool_name "${line[${CCC_IDX[F_NAKEY]}]}" "${line[${CCC_IDX[F_NAVALUE]}]}" )
+
+            # Keep node affinity key in MATCHED_LABELS array which will be used for matching node labels
+            if [ "${node_affinity}" != "" -a "${node_affinity}" != "<none>" ]
+            then
+                if ! exist_in_array "${line[${CCC_IDX[F_NAKEY]}]}" ${MATCHED_LABELS[@]}
+                then
+                    MATCHED_LABELS=( ${MATCHED_LABELS[@]} "${line[${CCC_IDX[F_NAKEY]}]}" )
+                    logging "Node group affinity keys: ( ${MATCHED_LABELS[@]} )"
+                fi
+            fi
 
             echo "${line[${CCC_IDX[F_NAME]}]},${ctlr},${line[${CCC_IDX[F_NS]}]},${node_affinity},${line[${CCC_IDX[F_REPLICAS]}]},${ctlr_reqlims},${ctlr_recomms},${ctlr_stats}" >> ${csv_filename}
             #echo "${line[@]}"
@@ -948,6 +1095,7 @@ function take_a_while()
 
 function create_node_csv()
 {
+    echo
     logging "${STDOUT}" "Start collecting Node resource data."
 
     csv_filename="${vars[csv_dir]}/${NODE_CSV}"
@@ -1012,14 +1160,14 @@ Mandatory options:
   -u, --username=''       Federator.ai API user name (DEFAULT: 'admin')
   -p, --password=''       Federator.ai API password (or read from 'F8AI_API_PASSWORD')
   -c, --cluster=''        Target Kubernetes cluster name
-Optional options: 
+Optional options:
   -x, --context=''        Kubeconfig context name (DEFAULT: '')
   -g, --granularity=''    Resource recommendation granularity (DEFAULT: '21600')
   -d, --directory=''      Local path where .csv files will be saved (DEFAULT: '.')
   -r, --resource='both'   Generate Node('node') and/or Controller('controller') .csv (DEFAULT: 'both')
   -l, --logfile=''        Full path of the log file (DEFAULT: './k8s-resource-collect.log')
   -a, --federatorai='yes' Whether to use Federator.ai recommendations (DEFAULT: 'yes')
-  -t, --pastperiod=''     Past period in days for getting the maximum usage (DEFAULT: '28') 
+  -t, --pastperiod=''     Past period in days for getting the maximum usage (DEFAULT: '28')
 
 Examples:
   ${PROG} --host=127.0.0.1:31012 --username=admin --password=xxxx --cluster=h3-61
@@ -1162,7 +1310,7 @@ do
 done
 
 # pre-checks
-if ! precheck_architecture || ! precheck_kubectl || ! precheck_federatorai
+if ! precheck_bash_version || ! precheck_kubectl || ! precheck_federatorai
 then
     logging "${STDOUT}" "${ERR}" ${output_msg}
     exit 1
@@ -1172,7 +1320,6 @@ fi
 if [ "${vars[resource_type]}" = "both" -o "${vars[resource_type]}" = "controller" ]
 then
     echo "(It may take a few minutes to complete...)"
-    echo
     if ! create_deployment_csv
     then
         logging "${STDOUT}" "${ERR}" "${output_msg}"
