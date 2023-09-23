@@ -817,7 +817,10 @@ patch_datahub_for_preloader()
     # Need federatorai-operator ready for webhook service to validate alamedaservice
     wait_until_pods_ready 600 30 $install_namespace
 
-    alamedaservice_set_component_env alamedaDatahub ALAMEDA_DATAHUB_APIS_METRICS_SOURCE "influxdb"
+    # Change retention to 90d instead of 30d since reploader pump > 30 days data
+    if [ "${DO_CI}" = "1" ]; then
+        alamedaservice_set_component_env alamedaDatahub DO_CI "1"
+    fi
 
     wait_until_pods_ready 600 30 $install_namespace
 
@@ -2282,7 +2285,7 @@ if [ "$prepare_environment" = "y" ]; then
             add_svc_for_nginx
             add_alamedascaler_for_nginx
         fi
-        #patch_datahub_for_preloader
+        patch_datahub_for_preloader
         #patch_grafana_for_preloader
     fi
     patch_data_adapter_for_preloader "true"
