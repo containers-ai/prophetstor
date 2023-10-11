@@ -9,8 +9,9 @@
 #   1.0.6 - Precheck bash version and minor fixes
 #   1.0.7 - Support new GCP node group affinity key name
 #   1.0.8 - Use node group affinity key to match node labels
+#   1.0.9 - Support maximum replica usage metrics/recommendations
 #
-VER=1.0.8
+VER=1.0.9
 
 # defines
 KUBECTL="${KUBECTL:-kubectl}"
@@ -54,6 +55,9 @@ DEPLOY_CSV="deployment-raw.csv"
 NODE_CSV="node-raw.csv"
 DEF_LOG_FILE="./k8s-resource-collect.log"
 
+F8AI_VERSION="5.1.4"
+F8AI_BUILD=2262
+
 # configurable variables
 declare -A vars
 vars[kube_context]=""
@@ -68,7 +72,7 @@ vars[log_path]="${DEF_LOG_FILE}"
 vars[use_federatorai]="yes"
 vars[past_period]=0
 
-R=$(date "+%N")
+R=$(date "+%s")
 RAND=$(expr ${R} + 0)
 RANDOM=$((${RAND} % 10000))
 SID=$((($RANDOM % 900 ) + 100))
@@ -231,6 +235,49 @@ function precheck_kubectl()
 }
 
 API_ERROR_KEY="message"
+
+function precheck_federatorai_version()
+{
+    if [ "${vars[use_federatorai]}" = "no" ]
+    then
+        return 0
+    fi
+
+    retcode=2
+
+    url="${HTTPS}://${vars[f8ai_host]}/apis/v1/version"
+
+    INPUT=$( ${CURL[@]} GET "${url}" -H "${HEADER1}" -H "${HEADER2}" 2>/dev/null )
+    INPUT_LENGTH="${#INPUT}"
+    while IFS='=' read -d $'\n' -r k v
+    do
+        case "${k}" in
+            ${API_ERROR_KEY})
+                logging "${ERR}" "Federator.ai Version API: ${v}"
+                output_msg="Federator.ai Version: ${v}"
+                retcode=1
+                break ;;
+            version)
+                F8AI_VERSION=${v} ;;
+            build)
+                F8AI_BUILD=$(expr ${v} + 0)
+                retcode=0 ;;
+        esac
+    done < <( parse "" "" <<< "${INPUT}" 2>/dev/null )
+
+    if [ "${retcode}" = "0" ]
+    then
+        logging "${INFO}" "Federator.ai Version: ${F8AI_VERSION} Build: ${F8AI_BUILD}"
+    elif [ "${retcode}" = "2" ]
+    then
+        output_msg="Failed to connect to ${HTTPS}://${vars[f8ai_host]}"
+        echo
+        ${CURL[@]} GET "${HTTPS}://${vars[f8ai_host]}/apis/v1/version" -H "${HEADER1}" -H "${HEADER2}"
+        echo
+    fi
+
+    return 0
+}
 
 function precheck_federatorai()
 {
@@ -567,6 +614,8 @@ RECOMM_CPUREQ_KEY="plannings.0.plannings.0.requestPlannings.CPU_MILLICORES_USAGE
 RECOMM_MEMREQ_KEY="plannings.0.plannings.0.requestPlannings.MEMORY_BYTES_USAGE.0.numValue"
 RECOMM_CPULIM_KEY="plannings.0.plannings.0.limitPlannings.CPU_MILLICORES_USAGE.0.numValue"
 RECOMM_MEMLIM_KEY="plannings.0.plannings.0.limitPlannings.MEMORY_BYTES_USAGE.0.numValue"
+RECOMM_CPUMAX_KEY="plannings.0.plannings.0.maxReplicaPlannings.CPU_MILLICORES_USAGE.0.numValue"
+RECOMM_MEMMAX_KEY="plannings.0.plannings.0.maxReplicaPlannings.MEMORY_BYTES_USAGE.0.numValue"
 
 function controller_planning()
 {
@@ -578,6 +627,10 @@ function controller_planning()
     start_time=$(date "+%s")
     end_time=$((${start_time} + ${granularity}))
     retcode=0
+    recomm_cpulim=0
+    recomm_memlim=0
+    recomm_cpumax=0
+    recomm_memmax=0
 
     if [ "${vars[use_federatorai]}" = "yes" ]
     then
@@ -600,22 +653,47 @@ function controller_planning()
                     recomm_cpulim=$((${v} / ${replicas})) ;;
                 ${RECOMM_MEMLIM_KEY})
                     recomm_memlim=$((${v} / ${replicas})) ;;
+                ${RECOMM_CPUMAX_KEY})
+                    recomm_cpumax=${v} ;;
+                ${RECOMM_MEMMAX_KEY})
+                    recomm_memmax=${v} ;;
             esac
         done < <( parse "" "" <<< "${INPUT}" 2>/dev/null )
     fi
+
+    if [ ${recomm_cpumax} -eq 0 -o ${recomm_memmax} -eq 0 ]
+    then
+        if [ ${recomm_cpulim} -eq 0 -o ${recomm_memlim} -eq 0 ]
+        then
+            if [ ${F8AI_BUILD} -gt 2280 ]   # v5.1.5
+            then
+                logging "${WARN}" "Unable to get replica recommendations for ${kind}/${c_name}"
+            fi
+        fi
+    else
+        recomm_cpulim=${recomm_cpumax}
+        recomm_memlim=${recomm_memmax}
+    fi
+    [[ recomm_cpureq -gt recomm_cpulim ]] && recomm_cpureq=${recomm_cpulim}
+    [[ recomm_memreq -gt recomm_memlim ]] && recomm_memreq=${recomm_memlim}
 
     echo -n "${recomm_cpureq:=0},${recomm_memreq:=0},${recomm_cpulim:=0},${recomm_memlim:=0}"
     return ${retcode}
 }
 
+OBS_TIM_KEY='data.raw_data.cpu.*.time'
 OBS_CPU_KEY='data.raw_data.cpu.*.numValue'
 OBS_MEM_KEY='data.raw_data.memory.*.numValue'
+MAX_TIM_KEY='data.max_replica_data.cpu.*.time'
+MAX_CPU_KEY='data.max_replica_data.cpu.*.numValue'
+MAX_MEM_KEY='data.max_replica_data.memory.*.numValue'
 
 function controller_observation()
 {
     c_name=$1
     kind=$2
     namespace=$3
+    replicas=$4
     past_days=${vars[past_period]}
     granularity=${vars[f8ai_granularity]}
     local retcode=0
@@ -640,6 +718,10 @@ function controller_observation()
 
     obs_cpus=()
     obs_mems=()
+    max_cpus=()
+    max_mems=()
+    raw_earliest=${NOW}
+    max_earliest=${NOW}
 
     if [ "${vars[use_federatorai]}" = "yes" ]
     then
@@ -654,16 +736,39 @@ function controller_observation()
                     logging "${ERR}" "Federator.ai Observation API: ${v}"
                     retcode=1
                     break ;;
+                ${OBS_TIM_KEY})
+                    [[ v -lt raw_earliest ]] && raw_earliest=${v} ;;
                 ${OBS_CPU_KEY})
                     obs_cpus=( ${obs_cpus[@]} ${v} ) ;;
                 ${OBS_MEM_KEY})
                     obs_mems=( ${obs_mems[@]} ${v} ) ;;
+                ${MAX_TIM_KEY})
+                    [[ v -lt max_earliest ]] && max_earliest=${v} ;;
+                ${MAX_CPU_KEY})
+                    max_cpus=( ${max_cpus[@]} ${v} ) ;;
+                ${MAX_MEM_KEY})
+                    max_mems=( ${max_mems[@]} ${v} ) ;;
             esac
         done < <( parse "" "" <<< "${INPUT}" 2>/dev/null )
 
         IFS=, read -a cpu_stats <<< $(stats_of_array ${obs_cpus[@]})
         IFS=, read -a mem_stats <<< $(stats_of_array ${obs_mems[@]})
+        IFS=, read -a cpu_maxs <<< $(stats_of_array ${max_cpus[@]})
+        IFS=, read -a mem_maxs <<< $(stats_of_array ${max_mems[@]})
     fi
+
+    if [ ${F8AI_BUILD} -gt 2280 -a "${cpu_maxs[0]}" != "0" ]
+    then
+        for i in 0 1 2
+        do
+            cpu_stats[${i}]=$(( ${cpu_maxs[${i}]} * ${replicas} ))
+            mem_stats[${i}]=$(( ${mem_maxs[${i}]} * ${replicas} ))
+            raw_earliest=${max_earliest}
+        done
+    fi
+
+    past_days=$(( (${NOW} - ${raw_earliest} + ${granularity}) / 86400 ))
+
     logging "${INFO}" "Deployment ${c_name} stats: granularity=${granularity} days=${past_days} max=${cpu_stats[0]},${mem_stats[0]} min=${cpu_stats[1]},${mem_stats[1]} avg=${cpu_stats[2]},${mem_stats[2]}"
 
     echo -n "${cpu_stats[0]:=0},${mem_stats[0]:=0},${past_days:=0},${cpu_stats[1]:=0},${mem_stats[1]:=0},${cpu_stats[2]:=0},${mem_stats[2]:=0}"
@@ -780,11 +885,7 @@ declare -a SUPPORTED_LABELS=( \
     node-pool-name \
     kops.k8s.io/instancegroup \
     cloud.google.com/gke-nodepool \
-    node-pool-name \
-    kops.k8s.io/instancegroup \
-    Agentpool \
-    node-pool-name \
-    kops.k8s.io/instancegroup )
+    Agentpool )
 
 declare -a CUSTOM_AFFINITY_LABELS=( \
     role )
@@ -906,7 +1007,7 @@ function create_deployment_csv()
                 ctlr_recomms=${ctlr_reqlims}
             fi
 
-            ctlr_stats=$( controller_observation ${line[${CCC_IDX[F_NAME]}]} ${ctlr} ${line[${CCC_IDX[F_NS]}]} )
+            ctlr_stats=$( controller_observation ${line[${CCC_IDX[F_NAME]}]} ${ctlr} ${line[${CCC_IDX[F_NS]}]} ${line[${CCC_IDX[F_REPLICAS]}]} )
 
             node_affinity=$( nodepool_name "${line[${CCC_IDX[F_NAKEY]}]}" "${line[${CCC_IDX[F_NAVALUE]}]}" )
 
@@ -1310,7 +1411,7 @@ do
 done
 
 # pre-checks
-if ! precheck_bash_version || ! precheck_kubectl || ! precheck_federatorai
+if ! precheck_bash_version || ! precheck_kubectl || ! precheck_federatorai_version || ! precheck_federatorai
 then
     logging "${STDOUT}" "${ERR}" ${output_msg}
     exit 1
