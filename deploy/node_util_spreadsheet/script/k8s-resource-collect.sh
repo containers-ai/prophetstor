@@ -9,7 +9,7 @@
 #   1.0.6 - Precheck bash version and minor fixes
 #   1.0.7 - Support new GCP node group affinity key name
 #   1.0.8 - Use node group affinity key to match node labels
-#   1.0.9 - Support maximum replica usage metrics/recommendations
+#   1.0.9 - Support maximum replica usage metrics/recommendations; fix build number processing errors
 #
 VER=1.0.9
 
@@ -260,7 +260,7 @@ function precheck_federatorai_version()
             version)
                 F8AI_VERSION=${v} ;;
             build)
-                F8AI_BUILD=$(expr ${v} + 0)
+                F8AI_BUILD=$(expr ${v//[!0-9]/} + 0)
                 retcode=0 ;;
         esac
     done < <( parse "" "" <<< "${INPUT}" 2>/dev/null )
