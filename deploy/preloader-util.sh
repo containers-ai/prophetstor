@@ -893,58 +893,6 @@ check_influxdb_retention()
     echo "Duration check_influxdb_retention = $duration" >> $debug_log
 }
 
-patch_grafana_for_preloader()
-{
-    start=`date +%s`
-    echo -e "\n$(tput setaf 6)Adding flag for grafana ...$(tput sgr 0)"
-    influxdb_pod_name="`kubectl get pods -n $install_namespace |grep "alameda-influxdb-"|awk '{print $1}'|head -1`"
-    kubectl exec $influxdb_pod_name -n $install_namespace -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database alameda_metric -execute "select * from grafana_config order by time desc limit 1" 2>/dev/null|grep -q true
-    if [ "$?" != "0" ]; then
-        kubectl exec $influxdb_pod_name -n $install_namespace -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -execute "show databases" |grep -q "alameda_metric"
-        if [ "$?" != "0" ]; then
-            echo -e "\n$(tput setaf 1)Error! Can't find alameda_metric in influxdb.$(tput sgr 0)"
-            leave_prog
-            exit 8
-        fi
-        kubectl exec $influxdb_pod_name -n $install_namespace -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database alameda_metric -execute "insert grafana_config preloader=true"
-        if [ "$?" != "0" ]; then
-            echo -e "\n$(tput setaf 1)Error! Adding flag for grafana failed.$(tput sgr 0)"
-            leave_prog
-            exit 8
-        fi
-    fi
-    echo "Done"
-    end=`date +%s`
-    duration=$((end-start))
-    echo "Duration patch_grafana_for_preloader = $duration" >> $debug_log
-}
-
-patch_grafana_back_to_normal()
-{
-    start=`date +%s`
-    echo -e "\n$(tput setaf 6)Adding flag to roll back grafana ...$(tput sgr 0)"
-    influxdb_pod_name="`kubectl get pods -n $install_namespace |grep "alameda-influxdb-"|awk '{print $1}'|head -1`"
-    kubectl exec $influxdb_pod_name -n $install_namespace -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database alameda_metric -execute "select * from grafana_config order by time desc limit 1" 2>/dev/null|grep -q false
-    if [ "$?" != "0" ]; then
-        kubectl exec $influxdb_pod_name -n $install_namespace -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -execute "show databases" |grep -q "alameda_metric"
-        if [ "$?" != "0" ]; then
-            echo -e "\n$(tput setaf 1)Error! Can't find alameda_metric in influxdb.$(tput sgr 0)"
-            leave_prog
-            exit 8
-        fi
-        kubectl exec $influxdb_pod_name -n $install_namespace -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database alameda_metric -execute "insert grafana_config preloader=false"
-        if [ "$?" != "0" ]; then
-            echo -e "\n$(tput setaf 1)Error! Adding flag to roll back grafana failed.$(tput sgr 0)"
-            leave_prog
-            exit 8
-        fi
-    fi
-    echo "Done"
-    end=`date +%s`
-    duration=$((end-start))
-    echo "Duration patch_grafana_back_to_normal = $duration" >> $debug_log
-}
-
 _do_metrics_verify()
 {
     mode="$1"
@@ -973,7 +921,6 @@ _do_metrics_verify()
     else
         # K8S
         containerMeasurementsArray=("container_0" "container_1" "container_2")
-        namespaceMeasurementsArray=("namespace_0" "namespace_1" "namespace_2")
         nodeMeasurementsArray=("node_0" "node_1" "node_2")
         if [ "${PRELOADER_PRELOAD_COUNT}" = "" ]; then
             verify_before_time_range="110d"    # default pump 120d, so we verify data before 110d
@@ -1006,25 +953,12 @@ _do_metrics_verify()
             echo -e "Container ID exist in the system:\n$all_id_list"
         fi
 
-        total_num="0"
-        all_id_list=""
-        for measurement in "${namespaceMeasurementsArray[@]}"
-        do
-            unique_id_list=$(kubectl -n $install_namespace exec $influxdb_pod_name -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database metric_instance_workload_le3599 -execute "select * from $measurement where time < now() - ${verify_before_time_range} order by time asc limit 100"|tail -n+4|grep -o " builtin-[^ ]*"|sed 's/^ *//g'|sort|uniq)
-            if [ "$unique_id_list" != "" ]; then
-                unique_id_num=$(echo "$unique_id_list"|wc -l|sed 's/[ \t]*//g')
-                total_num=$((total_num+unique_id_num))
-                if [ "$all_id_list" = "" ]; then
-                    all_id_list="$unique_id_list"
-                else
-                    all_id_list="$all_id_list"$'\n'"$unique_id_list"
-                fi
-            fi
-        done
-        if [ "$total_num" -lt "2" ]; then
+        # Verify if there is new MIC exists since previously clean up
+        unique_id_list=$(kubectl -n $install_namespace exec $influxdb_pod_name -- influx -ssl -unsafeSsl -precision rfc3339 -username admin -password adminpass -database metric_instance_workload_le3599 -execute "SELECT DISTINCT metric_config_id FROM namespace_0,namespace_1,namespace_2" | tail -n +4 | awk '{print $NF}')
+        total_num=$(echo "${unique_id_list}" | wc -l)
+        if [ "$total_num" -lt "1" ]; then
             verification_result="false"
             echo -e "$(tput setaf 1)Error! Missing namespace built-in metric ID.$(tput sgr 0)"
-            echo -e "Namespace ID exist in the system:\n$all_id_list"
         fi
 
         total_num="0"
@@ -2286,7 +2220,6 @@ if [ "$prepare_environment" = "y" ]; then
             add_alamedascaler_for_nginx
         fi
         patch_datahub_for_preloader
-        #patch_grafana_for_preloader
     fi
     patch_data_adapter_for_preloader "true"
     check_influxdb_retention
@@ -2348,7 +2281,6 @@ if [ "$revert_environment" = "y" ]; then
         # K8S
         delete_nginx_example
         #patch_datahub_back_to_normal
-        #patch_grafana_back_to_normal
     fi
     patch_data_adapter_for_preloader "false"
     clean_environment_operations
