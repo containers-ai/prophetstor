@@ -3,8 +3,9 @@
 # Versions:
 #   1.0.1 - The first build.
 #   1.0.2 - Fix restore failed to read the backup file if not encrypted
+#   1.0.3 - Refine working directory and log file settings
 #
-VER=1.0.2
+VER=1.0.3
 
 KUBECTL="kubectl"
 INFLUXD_PROG="influxd"
@@ -32,7 +33,7 @@ vars[backup]=""
 vars[password]=""
 vars[always_up]="no"
 vars[retries]=3
-vars[logfile]="/var/log/influxdb-backup.log"
+vars[logfile]="./influxdb-backup.log"
 
 output_msg="OK"
 start_timestamp=$( date -u "+%s" )
@@ -995,11 +996,11 @@ Options:
   -x, --context=''       Kubeconfig context name (DEFAULT: '')
   -d, --dryrun=no        Dry run backup or restore (DEFAULT: 'no')
   -e, --encrypt=yes      Encrypt/Decrypt backup (DEFAULT: 'yes')
-  -c, --directory=''     Working directory for storing backup files (DEFAULT: 'backup')
+  -c, --directory=''     Working directory for backup files (DEFAULT: '.')
   -f, --force=no         Restore the backup to a different Federator.ai cluster
   -p, --password=''      Encryption/Decryption password (or read from 'INFLUX_BACKUP_PASSWORD')
   -u, --alwaysup=no      Always scale up Federator.ai deployments (DEFAULT: 'no')
-  -l, --logfile=''       Log path/file (DEFAULT: '/var/log/influxdb-backup.log')
+  -l, --logfile=''       Log path/file (DEFAULT: './influxdb-backup.log')
   -n, --cleanup=yes      (For debugging) clean up/revert operations have been done (DEFAULT: 'yes')
 
 Examples:
@@ -1007,7 +1008,7 @@ Examples:
   ${PROG} backup --directory=/root/backup --encrypt=yes --logfile=/var/log/influxdb-backup.log
 
   # Restore InfluxDB databases from a backup
-  ${PROG} restore backup/InfluxDB-backup-h2-63-20230104-145839-UTC.backup.enc --directory=/root/backup --encrypt=yes --force=yes
+  ${PROG} restore InfluxDB-backup-h2-63-20230104-145839-UTC.backup.enc --directory=/root/backup --encrypt=yes --force=yes
 
 __EOF__
     exit 1
@@ -1038,6 +1039,7 @@ case "$1" in
         ;;
     restore|extract)
         vars[operation]="$1"
+        vars[directory]="."
         shift
         source_backup_file="$1"
         shift
@@ -1097,6 +1099,13 @@ case "${vars[operation]}" in
         then
             exit 1
         fi
+        source_backup_file="${vars[directory]}/${source_backup_file}"
+        if [ ! -f ${source_backup_file} ]
+        then
+            output_msg="Cannot find the backup file: ${source_backup_file}!"
+            logging "${STDOUT}" "${ERR}" "${output_msg}"
+            exit 1
+        fi
         read -p "Do you want to create a backup before restoring databases?[Y|n] " do_backup
         echo
         do_backup=$(lower_case ${do_backup})
@@ -1124,6 +1133,13 @@ case "${vars[operation]}" in
         fi
         ;;
     extract)
+        source_backup_file="${vars[directory]}/${source_backup_file}"
+        if [ ! -f ${source_backup_file} ]
+        then
+            output_msg="Cannot find the backup file: ${source_backup_file}!"
+            logging "${STDOUT}" "${ERR}" "${output_msg}"
+            exit 1
+        fi
         logging "${STDOUT}" "Start extracting backup '${source_backup_file}'."
         if ! run_restore ${source_backup_file} "extract_only"
         then

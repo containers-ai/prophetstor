@@ -14,8 +14,9 @@
 #   1.1.1 - Use namespace quota recommendations for user-specified(autoscaling) namespaces to estimate node group size
 #   1.1.2 - Add 'context', 'kubeconfig' parameters; Support 'nodeSelector'
 #   1.1.3 - Fix parsing node affinity labels encountering array index out of bounds error
+#   1.1.4 - Fix CPU/mem request/limit are not returned correctly for deployments with replicas=0
 #
-VER=1.1.3
+VER=1.1.4
 
 # defines
 kctl="${KUBECTL:-kubectl}"
@@ -808,10 +809,13 @@ function controller_planning()
     start_time=$(date "+%s")
     end_time=$((${start_time} + ${granularity}))
     retcode=0
+    recomm_cpureq=0
+    recomm_memreq=0
     recomm_cpulim=0
     recomm_memlim=0
     recomm_cpumax=0
     recomm_memmax=0
+    [[ replicas -eq 0 ]] && replicas=1
 
     if [ "${vars[use_federatorai]}" = "yes" ]
     then
@@ -944,6 +948,7 @@ function controller_observation()
     granularity=${vars[f8ai_granularity]}
     local retcode=0
 
+    [[ replicas -eq 0 ]] && replicas=1
     past_days=$(past_duration)
     end_time=${NOW}
     start_time=$((${end_time} - (${past_days} * 86400)))

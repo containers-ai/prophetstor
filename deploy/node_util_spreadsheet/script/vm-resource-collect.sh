@@ -4,8 +4,10 @@
 #   1.0.1 - The first build.
 #   1.0.2 - Use user specified http or https protocol
 #   1.0.3 - Support AWS/GCP/Azure VM clusters
+#   1.0.4 - Get GCP/Azure VM metadata by VM UID
+#   1.0.5 - Fix floating calculation errors
 #
-VER=1.0.3
+VER=1.0.5
 
 # defines
 NOW=$(date +"%s")
@@ -380,7 +382,8 @@ function vm_clusters()
                 cluster_type=${v} ;;
         esac
 
-        if [ "${cluster_name}" != "" -a "${cluster_type}" = "vm" -a "${data_source}" != "vmware" -a "${status_active}" = "true" ]
+        #if [ "${cluster_name}" != "" -a "${cluster_type}" = "vm" -a "${data_source}" != "vmware" -a "${status_active}" = "true" ]
+        if [ "${cluster_name}" != "" -a "${cluster_type}" = "vm" -a "${status_active}" = "true" ]
         then
             if ! [[ " ${c_list[*]} " =~ " ${cluster_name} " ]]
             then
@@ -449,8 +452,10 @@ function cluster_vendor()
 function cluster_vms()
 {
     cluster=$1
-    vm_list=$2
+    vm_name_list=$2
+    vm_uid_list=$3
     v_list=()
+    v_uids=()
     retcode=0
 
     url="${HTTPS}://${vars[f8ai_host]}/apis/v1/resources/clusters/${cluster}/nodes?type=vm"
@@ -467,10 +472,14 @@ function cluster_vms()
             data\.*\.name)
                 vm_name=${v}
                 v_list=( "${v_list[@]}" "${vm_name}" ) ;;
+            data\.*\.uid)
+                vm_id=${v}
+                v_uids=( "${v_uids[@]}" "${vm_id}" ) ;;
         esac
     done < <( parse "" "" <<< "${INPUT}" 2>/dev/null )
 
-    eval ${vm_list}=\( "${v_list[@]}" \)
+    eval ${vm_name_list}=\( "${v_list[@]}" \)
+    eval ${vm_uid_list}=\( "${v_uids[@]}" \)
 
     if [ ${retcode} -eq 0 ]
     then
@@ -480,6 +489,7 @@ function cluster_vms()
             retcode=1
         else
             logging "Cluster ${cluster} VMs: ${v_list[*]}"
+            logging "        ${cluster} VM UIDs: ${v_uids[*]}"
         fi
     fi
     return ${retcode}
@@ -487,7 +497,7 @@ function cluster_vms()
 
 function vm_info()
 {
-    vmname=$1
+    vmuid=$1
     vmvendor=$2
     vmregion=$3
     vmsubtype=$4
@@ -496,8 +506,8 @@ function vm_info()
     vmmem=$7
 
     retcode=0
-    cpu_cores=""
-    mem_bytes=""
+    cpu_cores="0"
+    mem_bytes="0"
     subtype=""
     instance_type=""
     region=""
@@ -505,7 +515,7 @@ function vm_info()
 
     [[ "${vmvendor}" = "vmware" ]] && vstring="" || vstring=${vmvendor}
 
-    url="${HTTPS}://${vars[f8ai_host]}/apis/v1/resources/${vstring}/vms?names=${vmname}"
+    url="${HTTPS}://${vars[f8ai_host]}/apis/v1/resources/${vstring}/vms?names=${vmuid}"
 
     INPUT=$( "${CURL[@]}" GET "${url}" -H "${HEADER1}" -H "${HEADER2}" 2>/dev/null )
     INPUT_LENGTH="${#INPUT}"
@@ -513,7 +523,7 @@ function vm_info()
     do
         case "${k}" in
             ${API_ERROR_KEY})
-                logging "${ERR}" "Federator.ai resources/${vstring}/vm API (${vmname}): ${v}"
+                logging "${ERR}" "Federator.ai resources/${vstring}/vm API (${vmuid}): ${v}"
                 retcode=1
                 break ;;
             data\.*\.cpu_cores)
@@ -533,7 +543,7 @@ function vm_info()
 
     if [ "${cpu_cores}" = "" -o "${mem_bytes}" = "" ]
     then
-        logging "${WARN}" "RESOURCE: Failed to get VM info for VM ${vmname}"
+        logging "${WARN}" "RESOURCE: Failed to get VM info for VM ${vmuid}"
         return 1
     fi
 
@@ -543,7 +553,7 @@ function vm_info()
     eval ${vmmem}=${mem_bytes}
     if [ ${retcode} -eq 0 ]
     then
-        logging "RESOURCE: ${subtype} VM ${vmname}: ${display_name},${instance_type},${vmregion},${cpu_cores},${mem_bytes}"
+        logging "RESOURCE: ${subtype} VM ${vmuid}: ${display_name},${instance_type},${vmregion},${cpu_cores},${mem_bytes}"
     fi
     return ${retcode}
 }
@@ -709,8 +719,10 @@ function vm_recommendations()
                 vm_region=${v} ;;
         esac
 
+        #if [ "${vm_name}" != "" -a "${vm_cpu}" != "${EMPTYVAL}" -a "${vm_memory}" != "${EMPTYVAL}" -a \
+        #     "${vm_instance_type}" != "" -a "${vm_master_num}" != "${EMPTYVAL}" -a "${vm_worker_num}" != "${EMPTYVAL}" ]
         if [ "${vm_name}" != "" -a "${vm_cpu}" != "${EMPTYVAL}" -a "${vm_memory}" != "${EMPTYVAL}" -a \
-             "${vm_instance_type}" != "" -a "${vm_master_num}" != "${EMPTYVAL}" -a "${vm_worker_num}" != "${EMPTYVAL}" ]
+             "${vm_master_num}" != "${EMPTYVAL}" -a "${vm_worker_num}" != "${EMPTYVAL}" ]
         then
             if [ "${vm_name}" != "${prev_vm}" ]
             then
@@ -725,8 +737,8 @@ function vm_recommendations()
                 fi
                 recomm_list=( "${recomm_list[@]}" "${vm_name}:${role},${vm_instance_type},${vm_cpu},${vm_memory}" )
                 prev_vm=${vm_name}
-                rcpu=$((${rcpu} + ${vm_cpu}))
-                rmem=$((${rmem} + ${vm_memory}))
+                rcpu=$(echo "${rcpu} + ${vm_cpu}" |bc)
+                rmem=$(echo "${rmem} + ${vm_memory}" |bc)
             fi
         fi
     done < <( parse "" "" <<< "${INPUT}" 2>/dev/null )
@@ -779,7 +791,7 @@ function create_vm_csv()
         fi
 
         # get the list of VMs in the cluster
-        if ! cluster_vms "${cluster_name}" vm_list
+        if ! cluster_vms "${cluster_name}" vm_name_list vm_uid_list
         then
             continue
         fi
@@ -797,9 +809,10 @@ function create_vm_csv()
         do
             IFS=':' read -r -a strarr <<< "${vm_str}"
             vm_recomm_dic[${strarr[0]}]=${strarr[1]}
-            if ! [[ " ${vm_list[*]} " =~ " ${strarr[0]} " ]]
+            if ! [[ " ${vm_name_list[*]} " =~ " ${strarr[0]} " ]]
             then
-                vm_list=( "${vm_list[@]}" "${strarr[0]}" )
+                vm_name_list=( "${vm_name_list[@]}" "${strarr[0]}" )
+                vm_uid_list=( "${vm_uid_list[@]}" "-" )
             fi
         done
 
@@ -809,17 +822,23 @@ function create_vm_csv()
         vm_subtype=""
 
         # get VMs' information in the cluster
-        for vm_name in "${vm_list[@]}"
+        #for vm_name in "${vm_name_list[@]}"
+        idx=0
+        while [ ${idx} -lt ${#vm_name_list[@]} ]
         do
+            vm_name=${vm_name_list[${idx}]}
+            vm_uid=${vm_uid_list[${idx}]}
+            idx=$((idx + 1))
+
             # get VM basic info
-            if ! vm_info ${vm_name} "${vm_vendor}" "${cluster_region}" vm_subtype vm_data_string vm_cores vm_mem_bytes
+            if [[ "${vm_uid}" = "-" ]] || ! vm_info "${vm_uid}" "${vm_vendor}" "${cluster_region}" vm_subtype vm_data_string vm_cores vm_mem_bytes
             then
                 vm_data_string="${vm_name},-,${cluster_region},,"
                 vm_cores=0
                 vm_mem_bytes=0
             fi
-            cluster_cpu=$((${cluster_cpu} + ${vm_cores}))
-            cluster_mem=$((${cluster_mem} + ${vm_mem_bytes}))
+            cluster_cpu=$(echo "${cluster_cpu} + ${vm_cores}" |bc)
+            cluster_mem=$(echo "${cluster_mem} + ${vm_mem_bytes}" |bc)
 
             if [ "${vm_recomm_dic[${vm_name}]}" = "" ]
             then
@@ -838,7 +857,7 @@ function create_vm_csv()
         cluster_preds_retrieved="false"
 
         # get VMs' or cluster's predictions in the cluster
-        for vm_name in "${vm_list[@]}"
+        for vm_name in "${vm_name_list[@]}"
         do
             # if "individual", get predictions/recommendations per VM
             if [ "${cluster_subtype}" = "${SUBTYPE_IDV}" ]
@@ -867,10 +886,12 @@ function create_vm_csv()
             logging "${cluster_name} [${vm_subtype}]: ${vm_name} --- ${vm_dic[${vm_name}]}" 
 
             # write results to CSV
-            echo "${cluster_name},${vm_name},${vm_dic[${vm_name}]},${cluster_cpu},${cluster_mem},${recomm_cpu},${recomm_mem}" >> ${csv_file}
+            echo "${cluster_name},${vm_name},${vm_dic[${vm_name}]},${cluster_cpu},${cluster_mem},${recomm_cpu},${recomm_mem},${vm_vendor}" >> ${csv_file}
             echo -n "."
         done
     done
+    echo >> ${vars[csv_dir]}/${VM_IDV_CSV}
+    echo >> ${vars[csv_dir]}/${VM_ASG_CSV}
     echo
 }
 
@@ -897,8 +918,8 @@ Options:
   -d, --directory=''      Local directory where .csv files will be saved (DEFAULT: '.')
   -l, --logfile=''        Log file full path (DEFAULT: '${DEF_LOG_FILE}')
 
-Examples:
-  ${PROG} --host=127.0.0.1:31012 --username=admin --granularity=21600 --directory=/tmp
+Example:
+  ${PROG} --host=127.0.0.1:31012 --username=admin --password=xxxx --cluster=vm-cluster-1
 
 __EOF__
     exit 1
