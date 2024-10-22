@@ -160,7 +160,7 @@ wait_until_pods_ready()
                   kubectl -n ${namespace} get daemonset -o json \
                     | jq -r '.items[] | "\(.metadata.name) \(.status.numberReady)/\(.status.desiredNumberScheduled)"'; \
                   kubectl -n ${namespace} get statefulset) 2>&1 \
-                  | egrep -v "^No resources found|^NAME | 0/0 | 1/1 | 2/2" | awk '{print $1}' | xargs)
+                  | egrep -v "^No resources found|^NAME | 0/0 | 1/1 | 2/2 | 3/3 | 4/4 | 5/5 | 6/6 " | awk '{print $1}' | xargs)
         if [ "${result}" = "" ]; then
             echo -e "\nAll resources in ${namespace} are ready."
             return 0
