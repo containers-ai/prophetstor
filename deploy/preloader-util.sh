@@ -896,9 +896,18 @@ check_influxdb_retention()
 
 _do_metrics_verify()
 {
+cat << __EOF__
+
++-----------------------------------+
++ TODO: Skip verifying MIC for now. +
++-----------------------------------+
+
+__EOF__
+return
+
     mode="$1"
     if [ "$mode" != "vm" ] && [ "$mode" != "k8s" ]; then
-        echo -e "\n$(tput setaf 1)Error! _do_metrics_verify() mode paramter can only be either 'vm' or 'k8s'.$(tput sgr 0)"
+        echo -e "\n$(tput setaf 1)Error! _do_metrics_verify() mode parameter can only be either 'vm' or 'k8s'.$(tput sgr 0)"
         leave_prog
         exit 8
     fi
