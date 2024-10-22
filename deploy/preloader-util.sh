@@ -158,7 +158,7 @@ wait_until_pods_ready()
     for ((i=0; i<${period}; i+=${interval})); do
         result=$(set +x; (kubectl -n ${namespace} get deployment; \
                   kubectl -n ${namespace} get daemonset -o json \
-                    | jq -r '.items[] | "\(.metadata.name) \(.status.numberReady)/\(.status.desiredNumberScheduled)"'; \
+                    | jq -r '.items[] | "\(.metadata.name) \(.status.numberReady)/\(.status.desiredNumberScheduled) "'; \
                   kubectl -n ${namespace} get statefulset) 2>&1 \
                   | egrep -v "^No resources found|^NAME | 0/0 | 1/1 | 2/2 | 3/3 | 4/4 | 5/5 | 6/6 " | awk '{print $1}' | xargs)
         if [ "${result}" = "" ]; then
