@@ -29,14 +29,16 @@ influxdb-backup.sh backup [options]
   -d, --dryrun=no        Dry run backup or restore (DEFAULT: 'no')
   -e, --encrypt=yes      Encrypt/Decrypt backup (DEFAULT: 'yes')
   -c, --directory=''     Working directory for storing backup files (DEFAULT: '.')
+  -f, --force=no         Restore the backup to a different Federator.ai cluster
   -p, --password=''      Encryption/Decryption password (or read from 'INFLUX_BACKUP_PASSWORD')
-  -l, --logfile=''       Log path/file (DEFAULT: '/var/log/influxdb-backup.log')
+  -u, --alwaysup=no      Always scale up Federator.ai deployments (DEFAULT: 'no')
+  -l, --logfile=''       Log path/file (DEFAULT: './influxdb-backup.log')
   -n, --cleanup=yes      (For debugging) clean up/revert operations have been done (DEFAULT: 'yes')
 ```
 ### Example
 ```
 $ influxdb-backup.sh backup
-Federator.ai InfluxDB Backup/Restore Utility v1.0.1
+Federator.ai InfluxDB Backup/Restore Utility v1.0.3
 
 Start creating backup for 'h2-63.prophetservice.com'. It will take several minutes to complete.
 Enter InfluxDB backup password (at least 8 characters): 
@@ -67,8 +69,8 @@ influxdb-backup.sh restore <backup_file> [options]
 ```
 ### Example
 ```
-$ influxdb-backup.sh restore backup/InfluxDB-backup-h2-63.prophetservice.com-20230109-084309-UTC.backup.enc
-Federator.ai InfluxDB Backup/Restore Utility v1.0.1
+$ influxdb-backup.sh restore InfluxDB-backup-h2-63.prophetservice.com-20230109-084309-UTC.backup.enc
+Federator.ai InfluxDB Backup/Restore Utility v1.0.3
 
  WARN: Restore databases to 'h2-63.prophetservice.com' will stop Federator.ai services and destroy existing data!
 
@@ -80,7 +82,7 @@ Enter InfluxDB backup password (at least 8 characters):
 Successfully created backup 'backup/InfluxDB-backup-h2-63.prophetservice.com-20230109-084903-UTC.backup.enc'.
 Start restoring databases. It will take several minutes to complete.
 
-Successfully restore Federator.ai InfluxDB databases from backup 'backup/InfluxDB-backup-h2-63.prophetservice.com-20230109-084309-UTC.backup.enc'.
+Successfully restore Federator.ai InfluxDB databases from backup './InfluxDB-backup-h2-63.prophetservice.com-20230109-084309-UTC.backup.enc'.
 The restore time elapsed is 358 seconds.
 ```
 
@@ -101,18 +103,18 @@ influxdb-backup.sh restore <backup_file> [options]
 ```
 ### Example
 ```
-$ influxdb-backup.sh extract backup/InfluxDB-backup-h2-63.prophetservice.com-20230109-084309-UTC.backup.enc
-Federator.ai InfluxDB Backup/Restore Utility v1.0.1
+$ influxdb-backup.sh extract InfluxDB-backup-h2-63.prophetservice.com-20230109-084309-UTC.backup.enc
+Federator.ai InfluxDB Backup/Restore Utility v1.0.3
 
-Start extracting backup 'backup/InfluxDB-backup-h2-63.prophetservice.com-20230109-084309-UTC.backup.enc'.
+Start extracting backup './InfluxDB-backup-h2-63.prophetservice.com-20230109-084309-UTC.backup.enc'.
 Enter InfluxDB backup password (at least 8 characters): 
 
-Version=1.0.1
+Version=1.0.3
 Federatorai=5.1.1
 Cluster=h2-63.prophetservice.com
 Time=20230109-084309-UTC
 MD5=91ce34eb42dd6d5baa272f0b814b2bbd
 
-Successfully extract backup to 'backup/InfluxDB-backup-h2-63.prophetservice.com-20230109-084309-UTC'.
+Successfully extract backup to 'InfluxDB-backup-h2-63.prophetservice.com-20230109-084309-UTC'.
 The extract time elapsed is 17 seconds.
 ```

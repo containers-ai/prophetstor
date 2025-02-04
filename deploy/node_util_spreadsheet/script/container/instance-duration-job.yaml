@@ -1,0 +1,30 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  labels:
+    app: instance-duration-job
+  name: instance-duration-job
+spec:
+  parallelism: 1
+  ttlSecondsAfterFinished: 600
+  template:
+    spec:
+      serviceAccountName: instance-duration-sa
+      containers:
+      - name: instance-duration-job
+        image: quay.io/prophetstor/tools:instance-duration-1.0.3
+        command:
+        - bash
+        - -c
+        - |
+          bash /root/instance-duration-collect.sh -c h6-30 -d /instance-duration -l /instance-duration/instance-duration-collect.log
+        volumeMounts:
+          - mountPath: /instance-duration
+            name: id-volume
+      volumes:
+      - name: id-volume
+        hostPath:
+          path: /tmp/instance-duration
+          type: DirectoryOrCreate
+      restartPolicy: Never
+  backoffLimit: 3
