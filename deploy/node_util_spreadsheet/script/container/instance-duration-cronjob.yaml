@@ -1,0 +1,28 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: instance-duration-cronjob
+spec:
+  schedule: "0 * * * *"  # Runs every hour at minute 0
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: instance-duration-sa
+          containers:
+          - name: instance-duration
+            image: quay.io/prophetstor/tools:instance-duration-1.0.3
+            command:
+            - bash
+            - -c
+            - |
+              bash /root/instance-duration-collect.sh -c h6-30 -d /instance-duration -l /instance-duration/instance-duration-collect.log
+            volumeMounts:
+              - mountPath: /instance-duration
+                name: id-volume
+          volumes:
+            - name: id-volume
+              hostPath:
+                path: /root/instance-duration
+                type: DirectoryOrCreate
+          restartPolicy: OnFailure
