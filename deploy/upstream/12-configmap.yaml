@@ -1,0 +1,7 @@
+---
+# Source: federatorai/templates/alameda-datahub/configmaps.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cluster-info
+  namespace: federatorai
