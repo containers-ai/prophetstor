@@ -9,7 +9,7 @@ show_usage()
         i.  Backup
             [Requirement]:
             --backup
-            --url <Rest API URL>                             [e.g., --url https://172.31.2.49:31012]
+            --url <Rest API URL>                             [e.g., --url https://172.31.2.49:31011]
             --path <Backup folder path to store backup file> [e.g., --path /opt/backup]
             --annotation "<Backup annotation>"               [e.g., --annotation "annotation inside double quotes"]
 
@@ -22,7 +22,7 @@ show_usage()
         ii. Restore
             [Requirement]:
             --restore
-            --url <Rest API URL>                             [e.g., --url https://172.31.2.49:31012]
+            --url <Rest API URL>                             [e.g., --url https://172.31.2.49:31011]
             --path <Restore file absolute path>
             [e.g., --path /opt/backup/f8ai-172.31.2.49-2022-03-30-08-55-33-766596203-5.1.0.bak]
 
