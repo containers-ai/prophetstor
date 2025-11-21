@@ -129,7 +129,7 @@ if [ "$label_file_enabled" = "y" ]; then
     fi
 fi
 
-kubectl version|grep -q "^Server"
+kubectl version -o yaml | grep -q "^serverVersion:"
 if [ "$?" != "0" ];then
     echo -e "\nPlease login to Kubernetes first."
     exit
