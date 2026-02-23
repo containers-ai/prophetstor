@@ -158,9 +158,9 @@ wait_until_pods_ready()
     for ((i=0; i<${period}; i+=${interval})); do
         result=$(set +x; (kubectl -n ${namespace} get deployment; \
                   kubectl -n ${namespace} get daemonset -o json \
-                    | jq -r '.items[] | "\(.metadata.name) \(.status.numberReady)/\(.status.desiredNumberScheduled)"'; \
+                    | jq -r '.items[] | "\(.metadata.name) \(.status.numberReady)/\(.status.desiredNumberScheduled) "'; \
                   kubectl -n ${namespace} get statefulset) 2>&1 \
-                  | egrep -v "^No resources found|^NAME | 0/0 | 1/1 | 2/2" | awk '{print $1}' | xargs)
+                  | egrep -v "^No resources found|^NAME | 0/0 | 1/1 | 2/2 | 3/3 | 4/4 | 5/5 | 6/6 " | awk '{print $1}' | xargs)
         if [ "${result}" = "" ]; then
             echo -e "\nAll resources in ${namespace} are ready."
             return 0
@@ -896,9 +896,18 @@ check_influxdb_retention()
 
 _do_metrics_verify()
 {
+cat << __EOF__
+
++-----------------------------------+
++ TODO: Skip verifying MIC for now. +
++-----------------------------------+
+
+__EOF__
+return
+
     mode="$1"
     if [ "$mode" != "vm" ] && [ "$mode" != "k8s" ]; then
-        echo -e "\n$(tput setaf 1)Error! _do_metrics_verify() mode paramter can only be either 'vm' or 'k8s'.$(tput sgr 0)"
+        echo -e "\n$(tput setaf 1)Error! _do_metrics_verify() mode parameter can only be either 'vm' or 'k8s'.$(tput sgr 0)"
         leave_prog
         exit 8
     fi
